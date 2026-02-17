@@ -2,13 +2,18 @@ import { For, Show, createMemo } from "solid-js";
 import { appState, highlightedIndex, getFilteredMarkets } from "../state";
 import { formatVolume, formatChange, truncateString } from "../utils/format";
 import { useTheme } from "../context/theme";
+import { isWatched, watchlistState } from "../hooks/useWatchlist";
 
 export function MarketList() {
   const { theme } = useTheme();
   const filtered = createMemo(() => getFilteredMarkets());
+  const filterLabel = () => watchlistState.filterActive ? " [★WATCH]" : "";
 
   return (
     <scrollbox flexGrow={1} width="100%" paddingLeft={1}>
+      <Show when={watchlistState.filterActive}>
+        <text content={`★ Watchlist filter active (L to toggle)${filterLabel()}`} fg={theme.accent} />
+      </Show>
       <Show
         when={!appState.loading}
         fallback={
@@ -28,44 +33,48 @@ export function MarketList() {
           <For each={filtered().slice(0, 18)}>
             {(market, index) => {
               const isHighlighted = () => index() === highlightedIndex();
+              const watched = () => isWatched(market.id);
               const changeStr = formatChange(market.change24h);
-              const title = truncateString(market.title, 32);
+              const title = truncateString(market.title, 31);
               const volStr = formatVolume(market.volume24h);
-              
+
               return (
-                <box 
-                  width="100%" 
+                <box
+                  width="100%"
                   backgroundColor={isHighlighted() ? theme.highlight : undefined}
                 >
-                  <text 
-                    content={
-                      isHighlighted() ? "▶" : " "
-                    }
+                  <text
+                    content={isHighlighted() ? "▶" : " "}
                     fg={isHighlighted() ? theme.highlightText : theme.textMuted}
                     width={2}
                   />
-                  <text 
+                  <text
+                    content={watched() ? "★" : " "}
+                    fg={isHighlighted() ? theme.highlightText : theme.accent}
+                    width={2}
+                  />
+                  <text
                     content={(index() + 1).toString().padStart(2, " ")}
                     fg={isHighlighted() ? theme.highlightText : theme.textMuted}
                     width={3}
                   />
-                  <text 
+                  <text
                     content={title}
                     fg={isHighlighted() ? theme.highlightText : theme.text}
-                    width={34}
+                    width={33}
                   />
-                  <text 
+                  <text
                     content={volStr}
                     fg={isHighlighted() ? theme.highlightText : theme.textMuted}
                     width={10}
                   />
-                  <text 
+                  <text
                     content={changeStr}
                     fg={
-                      isHighlighted() 
-                        ? theme.highlightText 
-                        : market.change24h >= 0 
-                          ? theme.success 
+                      isHighlighted()
+                        ? theme.highlightText
+                        : market.change24h >= 0
+                          ? theme.success
                           : theme.error
                     }
                     width={8}

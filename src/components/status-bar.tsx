@@ -17,9 +17,8 @@ export function StatusBar() {
   });
 
   return (
-    <box flexDirection="row" width="100%" justifyContent="space-between" paddingLeft={1} paddingRight={1}>
+    <box flexDirection="row" width="100%" paddingLeft={1} paddingRight={1}>
       <text content={statusText()} fg={theme.textMuted} />
-      <text content="↑↓:Nav  |  R:Refresh  |  ⌘K:Menu  |  Q:Quit" fg={theme.textMuted} />
     </box>
   );
 }

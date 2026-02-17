@@ -16,6 +16,7 @@ import {
   getSelectedMarket,
 } from "../state";
 import { Market, PriceHistory } from "../types/market";
+import { evaluateAlerts } from "./useAlerts";
 
 /**
  * Hook to fetch all markets on startup
@@ -28,6 +29,7 @@ export function useMarketsFetch(): void {
     try {
       const markets = await getMarkets(50);
       setMarkets(markets);
+      evaluateAlerts(markets);
       setError(null);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Failed to fetch markets";
@@ -93,6 +95,7 @@ export function useRefreshInterval(intervalMs: number = 30000): void {
       try {
         const markets = await getMarkets(50);
         setMarkets(markets);
+        evaluateAlerts(markets);
       } catch (error) {
         console.error("Error refreshing markets:", error);
       }
@@ -110,6 +113,7 @@ export async function manualRefresh(): Promise<void> {
   try {
     const markets = await getMarkets(50);
     setMarkets(markets);
+    evaluateAlerts(markets);
     setError(null);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "Refresh failed";

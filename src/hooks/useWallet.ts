@@ -13,6 +13,7 @@ import {
   truncateAddress,
 } from "../auth/wallet";
 import { setWalletState, walletState } from "../state";
+import { fetchUserPositions } from "./usePositions";
 
 /**
  * Initialize wallet from persisted config on startup
@@ -43,6 +44,8 @@ export async function initializeWallet(): Promise<void> {
   } finally {
     setWalletState("loading", false);
   }
+
+  fetchUserPositions();
 }
 
 /**
@@ -68,6 +71,7 @@ export async function connectWallet(privateKey: string): Promise<void> {
       setWalletState("apiSecret", creds.apiSecret);
       setWalletState("apiPassphrase", creds.apiPassphrase);
     }
+    fetchUserPositions();
   } catch (err) {
     setWalletState("error", err instanceof Error ? err.message : "Invalid private key");
     setWalletState("connected", false);

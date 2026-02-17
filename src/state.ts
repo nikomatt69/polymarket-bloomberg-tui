@@ -43,6 +43,23 @@ export const [walletModalOpen, setWalletModalOpen] = createSignal(false);
 export const [walletModalMode, setWalletModalMode] = createSignal<"view" | "enter">("view");
 export const [walletModalInput, setWalletModalInput] = createSignal("");
 
+// Portfolio panel visibility signal
+export const [portfolioOpen, setPortfolioOpen] = createSignal(false);
+
+// Order history panel visibility signal
+export const [orderHistoryOpen, setOrderHistoryOpen] = createSignal(false);
+
+// Order form signals
+export const [orderFormOpen, setOrderFormOpen] = createSignal(false);
+export const [orderFormTokenId, setOrderFormTokenId] = createSignal("");
+export const [orderFormSide, setOrderFormSide] = createSignal<"BUY" | "SELL">("BUY");
+export const [orderFormMarketTitle, setOrderFormMarketTitle] = createSignal("");
+export const [orderFormOutcomeTitle, setOrderFormOutcomeTitle] = createSignal("");
+export const [orderFormCurrentPrice, setOrderFormCurrentPrice] = createSignal(0);
+export const [orderFormPriceInput, setOrderFormPriceInput] = createSignal("");
+export const [orderFormSharesInput, setOrderFormSharesInput] = createSignal("");
+export const [orderFormFocusField, setOrderFormFocusField] = createSignal<"price" | "shares">("price");
+
 /**
  * Get path to config directory
  */
@@ -104,7 +121,16 @@ export function initializeState(): void {
  * Get filtered and sorted markets based on current state
  */
 export function getFilteredMarkets(): Market[] {
+  // lazy import to avoid circular dependency
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { watchlistState } = require("./hooks/useWatchlist") as typeof import("./hooks/useWatchlist");
+
   let filtered = [...appState.markets];
+
+  // Apply watchlist filter when active
+  if (watchlistState.filterActive && watchlistState.marketIds.length > 0) {
+    filtered = filtered.filter((m) => watchlistState.marketIds.includes(m.id));
+  }
 
   // Apply search filter
   if (appState.searchQuery) {
