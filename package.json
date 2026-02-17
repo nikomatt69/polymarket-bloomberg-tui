@@ -1,0 +1,29 @@
+{
+  "name": "polymarket-bloomberg-tui",
+  "version": "1.0.0",
+  "description": "Bloomberg-style TUI for monitoring Polymarket prediction markets",
+  "type": "module",
+  "main": "src/index.tsx",
+  "scripts": {
+    "dev": "bun run src/index.tsx",
+    "start": "bun run src/index.tsx",
+    "build": "echo 'OpenTUI apps run directly via bun with preload - use: bun run dev'",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.1.80",
+    "@opentui/solid": "^0.1.80",
+    "graphql": "^16.9.0",
+    "graphql-request": "7.4.0",
+    "simple-ascii-chart": "^1.0.2",
+    "solid-js": "^1.9.3",
+    "viem": "^2.46.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "@types/bun": "latest"
+  },
+  "engine": {
+    "bun": ">=1.0.0"
+  }
+}
