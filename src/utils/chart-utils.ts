@@ -110,6 +110,88 @@ export function formatChartLabel(value: number, decimals: number = 2): string {
   return `${(value * 100).toFixed(decimals)}%`;
 }
 
+/**
+ * Compute Simple Moving Average over a price series.
+ * Returns an array of the same length with NaN for positions < period.
+ */
+export function computeSMA(prices: number[], period: number): number[] {
+  return prices.map((_, i) => {
+    if (i < period - 1) return NaN;
+    const slice = prices.slice(i - period + 1, i + 1);
+    return slice.reduce((a, b) => a + b, 0) / period;
+  });
+}
+
+/**
+ * Compute Relative Strength Index (RSI) over a price series.
+ * Returns an array of the same length; first `period` elements are NaN.
+ */
+export function computeRSI(prices: number[], period: number = 14): number[] {
+  const result: number[] = new Array(prices.length).fill(NaN);
+  if (prices.length < period + 1) return result;
+
+  let gains = 0;
+  let losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = prices[i] - prices[i - 1];
+    if (diff > 0) gains += diff;
+    else losses -= diff;
+  }
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+  result[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+
+  for (let i = period + 1; i < prices.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+    const g = diff > 0 ? diff : 0;
+    const l = diff < 0 ? -diff : 0;
+    avgGain = (avgGain * (period - 1) + g) / period;
+    avgLoss = (avgLoss * (period - 1) + l) / period;
+    result[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+  }
+  return result;
+}
+
+/**
+ * Overlay SMA lines onto a chart grid (mutates the grid rows).
+ * Returns the modified grid string lines.
+ */
+export function overlaySMAOnChart(
+  chartLines: string[],
+  prices: number[],
+  smaShort: number[],
+  smaLong: number[],
+  chartWidth: number,
+  height: number,
+  minPrice: number,
+  maxPrice: number
+): string[] {
+  const range = maxPrice - minPrice || 0.01;
+  const axisWidth = 7; // "XX.XX │ "
+  const lines = chartLines.map((l) => l.split(""));
+
+  const plotSMA = (sma: number[], char: string) => {
+    const step = Math.max(1, Math.floor(prices.length / chartWidth));
+    let col = 0;
+    for (let i = 0; i < prices.length; i += step) {
+      const v = sma[i];
+      if (!Number.isNaN(v) && col < chartWidth) {
+        const row = Math.round(((maxPrice - v) / range) * (height - 1));
+        const safeRow = Math.max(0, Math.min(height - 1, row));
+        const safeCol = axisWidth + col;
+        if (lines[safeRow] && safeCol < (lines[safeRow].length)) {
+          lines[safeRow][safeCol] = char;
+        }
+      }
+      col++;
+    }
+  };
+
+  plotSMA(smaShort, "·");
+  plotSMA(smaLong, "╌");
+  return lines.map((l) => l.join(""));
+}
+
 export function createTreeMap(
   items: Array<{ name: string; value: number }>,
   maxWidth: number

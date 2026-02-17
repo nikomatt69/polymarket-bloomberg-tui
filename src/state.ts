@@ -220,6 +220,16 @@ export function getSelectedMarket(): Market | undefined {
 }
 
 /**
+ * Navigate directly to a market by its index in the filtered list
+ */
+export function navigateToIndex(index: number): void {
+  const filtered = getFilteredMarkets();
+  if (filtered.length === 0 || index < 0 || index >= filtered.length) return;
+  setHighlightedIndex(index);
+  selectMarket(filtered[index].id);
+}
+
+/**
  * Navigate to next market in filtered list
  */
 export function navigateNext(): void {

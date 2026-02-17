@@ -1,5 +1,5 @@
 import { For, Show, createMemo } from "solid-js";
-import { appState, highlightedIndex, getFilteredMarkets } from "../state";
+import { appState, highlightedIndex, getFilteredMarkets, navigateToIndex } from "../state";
 import { formatVolume, formatChange, truncateString } from "../utils/format";
 import { useTheme } from "../context/theme";
 import { isWatched, watchlistState } from "../hooks/useWatchlist";
@@ -42,6 +42,7 @@ export function MarketList() {
                 <box
                   width="100%"
                   backgroundColor={isHighlighted() ? theme.highlight : undefined}
+                  onMouseDown={() => navigateToIndex(index())}
                 >
                   <text
                     content={isHighlighted() ? "▶" : " "}
