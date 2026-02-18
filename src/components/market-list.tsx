@@ -6,13 +6,14 @@ import { isWatched, watchlistState } from "../hooks/useWatchlist";
 import { getMarketsByCategory, getTrendingMarkets } from "../api/polymarket";
 
 const CATEGORIES = [
-  { id: "trending", label: "Trending", emoji: "🔥" },
-  { id: "politics", label: "Politics", emoji: "🏛️" },
-  { id: "sports", label: "Sports", emoji: "⚽" },
-  { id: "crypto", label: "Crypto", emoji: "₿" },
-  { id: "economics", label: "Economics", emoji: "📈" },
-  { id: "entertainment", label: "Entertainment", emoji: "🎬" },
-  { id: "science", label: "Science", emoji: "🔬" },
+  { id: "trending", label: "Trending", emoji: "🔥", apiValue: "trending" },
+  { id: "Sports", label: "Sports", emoji: "⚽", apiValue: "Sports" },
+  { id: "Politics", label: "Politics", emoji: "🏛️", apiValue: "Politics" },
+  { id: "Crypto", label: "Crypto", emoji: "₿", apiValue: "Crypto" },
+  { id: "Business", label: "Business", emoji: "📊", apiValue: "Business" },
+  { id: "Entertainment", label: "Entertainment", emoji: "🎬", apiValue: "Entertainment" },
+  { id: "Science", label: "Science", emoji: "🔬", apiValue: "Science" },
+  { id: "AI", label: "AI", emoji: "🤖", apiValue: "AI" },
 ];
 
 export function MarketList() {
@@ -29,10 +30,14 @@ export function MarketList() {
     void (async () => {
       try {
         let markets;
-        if (category === "all") {
+        // Find the API value for this category
+        const catConfig = CATEGORIES.find(c => c.id === category);
+        const apiValue = catConfig?.apiValue || category;
+
+        if (apiValue === "trending" || apiValue === "all") {
           markets = await getTrendingMarkets(50);
         } else {
-          markets = await getMarketsByCategory(category, 50);
+          markets = await getMarketsByCategory(apiValue, 50);
         }
         if (markets.length > 0) {
           setMarkets(markets);
@@ -58,7 +63,7 @@ export function MarketList() {
         <For each={CATEGORIES}>
           {(cat) => (
             <box
-              width={cat.id === "trending" ? 10 : 11}
+              width={Math.max(cat.label.length + 1, 8)}
               height={1}
               backgroundColor={activeCategory() === cat.id ? theme.accent : theme.backgroundPanel}
               onMouseDown={() => handleCategoryClick(cat.id)}
@@ -77,7 +82,7 @@ export function MarketList() {
         <For each={CATEGORIES}>
           {(cat) => (
             <box
-              width={cat.id === "trending" ? 10 : 11}
+              width={Math.max(cat.label.length + 1, 8)}
               height={1}
               backgroundColor={activeCategory() === cat.id ? theme.accent : undefined}
               onMouseDown={() => handleCategoryClick(cat.id)}
