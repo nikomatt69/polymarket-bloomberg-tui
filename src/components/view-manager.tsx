@@ -1,25 +1,38 @@
-import { createSignal } from "solid-js";
+import {
+  activeMainView,
+  setActiveMainView,
+  comparisonSelectedMarketId,
+  setComparisonSelectedMarketId,
+} from "../state";
 
 export type ViewMode = "standard" | "portfolio" | "analytics" | "comparison";
 
-const [currentView, setCurrentView] = createSignal<ViewMode>("standard");
-const [comparisonMarketId, setComparisonMarketId] = createSignal<string | null>(null);
+const currentView = (): ViewMode =>
+  comparisonSelectedMarketId() !== null
+    ? "comparison"
+    :
+  activeMainView() === "portfolio" ? "portfolio" : "standard";
+
+const comparisonMarketId = comparisonSelectedMarketId;
 
 export function switchView(mode: ViewMode) {
-  setCurrentView(mode);
+  if (mode === "portfolio") {
+    setActiveMainView("portfolio");
+    return;
+  }
+
+  setActiveMainView("market");
 }
 
 export function setComparisonMarket(marketId: string | null) {
-  setComparisonMarketId(marketId);
+  setComparisonSelectedMarketId(marketId);
 }
 
 export function toggleComparison() {
   const current = currentView();
   if (current === "comparison") {
-    setCurrentView("standard");
-    setComparisonMarketId(null);
-  } else {
-    setCurrentView("comparison");
+    setActiveMainView("market");
+    setComparisonSelectedMarketId(null);
   }
 }
 
@@ -35,7 +48,7 @@ export function getViewTitle(mode: ViewMode): string {
 
 export const viewShortcuts: Record<string, ViewMode> = {
   "1": "standard",
-  "2": "portfolio", 
+  "2": "portfolio",
   "3": "analytics",
   "c": "comparison",
 };

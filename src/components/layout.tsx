@@ -7,6 +7,8 @@ import { MarketDetails } from "./market-details";
 import { PortfolioPanel } from "./portfolio-panel";
 import { StatusBar } from "./status-bar";
 import { Footer } from "./footer";
+import { ChatInput } from "./chat-input";
+import { ChatPanel } from "./chat-panel";
 import { WalletConnect } from "./wallet-connect";
 import { OrderForm } from "./order-form";
 import { OrderHistory } from "./order-history";
@@ -62,22 +64,35 @@ export function Layout() {
       </box>
 
       {/* Main Content */}
-      <box flexGrow={1} width="100%" flexDirection="row">
-        {/* Left: Market List */}
-        <box width="52%" backgroundColor={theme.background}>
-          <MarketList />
+      <box flexGrow={1} width="100%" flexDirection="column">
+        {/* Upper market workspace */}
+        <box width="100%" height="70%" flexDirection="row">
+          {/* Left: Market List */}
+          <box width="52%" backgroundColor={theme.background}>
+            <MarketList />
+          </box>
+
+          {/* Vertical Separator */}
+          <box width={1} backgroundColor={theme.border}>
+            <text content="│" fg={theme.border} />
+          </box>
+
+          {/* Right: Details / Portfolio */}
+          <box flexGrow={1} backgroundColor={theme.backgroundPanel}>
+            <Show when={portfolioOpen()} fallback={<MarketDetails />}>
+              <PortfolioPanel />
+            </Show>
+          </box>
         </box>
 
-        {/* Vertical Separator */}
-        <box width={1} backgroundColor={theme.border}>
-          <text content="│" fg={theme.border} />
+        {/* Horizontal separator before chat */}
+        <box height={1} width="100%" backgroundColor={theme.borderSubtle}>
+          <text content="────────────────────────────────────────────────────────────────────────────────" fg={theme.border} />
         </box>
 
-        {/* Right: Details Panel or Portfolio Panel */}
-        <box flexGrow={1} backgroundColor={theme.backgroundPanel}>
-          <Show when={portfolioOpen()} fallback={<MarketDetails />}>
-            <PortfolioPanel />
-          </Show>
+        {/* Lower chat workspace */}
+        <box flexGrow={1} width="100%" backgroundColor={theme.backgroundPanel}>
+          <ChatPanel />
         </box>
       </box>
 
@@ -88,6 +103,9 @@ export function Layout() {
 
       {/* Footer */}
       <Footer />
+
+      {/* Chat Input */}
+      <ChatInput />
 
       {/* Backdrop — dims main content behind any open panel */}
       <Show when={

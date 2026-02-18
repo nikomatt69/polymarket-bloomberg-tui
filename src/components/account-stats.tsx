@@ -7,6 +7,8 @@ import {
   calculateTradeStats, 
   calculatePortfolioSummary, 
   calculateAssetAllocation,
+  calculateMonthlyStats,
+  calculateMarketConcentration,
 } from "../utils/analytics";
 
 function fmtUsd(val: number): string {
@@ -17,6 +19,13 @@ function fmtUsd(val: number): string {
 function fmtPct(val: number): string {
   const sign = val >= 0 ? "+" : "";
   return `${sign}${val.toFixed(1)}%`;
+}
+
+function fmtCompactUsd(val: number): string {
+  const abs = Math.abs(val);
+  if (abs >= 1_000_000) return `$${(val / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `$${(val / 1_000).toFixed(1)}K`;
+  return `$${val.toFixed(2)}`;
 }
 
 export function AccountStatsPanel() {
@@ -30,6 +39,8 @@ export function AccountStatsPanel() {
   );
 
   const assetAllocation = () => calculateAssetAllocation(positionsState.positions);
+  const monthlyStats = () => calculateMonthlyStats(ordersState.tradeHistory).slice(0, 4);
+  const concentration = () => calculateMarketConcentration(positionsState.positions);
 
   const totalBalance = () => walletState.balance + portfolioSummary().totalValue;
 
@@ -51,6 +62,13 @@ export function AccountStatsPanel() {
     if (exposure < 0.7) return "medium";
     return "high";
   };
+
+  const concentrationColor = () =>
+    concentration().riskLevel === "low"
+      ? theme.success
+      : concentration().riskLevel === "medium"
+        ? theme.warning
+        : theme.error;
 
   return (
     <box
@@ -85,6 +103,7 @@ export function AccountStatsPanel() {
           </box>
         }
       >
+        <scrollbox flexGrow={1} width="100%">
         <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingTop={1}>
           <box flexDirection="row" width="100%" gap={4}>
             <box flexDirection="column" width="25%">
@@ -117,11 +136,9 @@ export function AccountStatsPanel() {
 
           <text content="" />
           <text content="────────────────────────────────────────────────────────" fg={theme.textMuted} />
-          <text content="" />
 
           <text content="TRADING STATS" fg={theme.primary} />
-          <text content="" />
-          
+
           <box flexDirection="row" width="100%" gap={4}>
             <box flexDirection="column">
               <text content="Trades" fg={theme.textMuted} />
@@ -147,8 +164,6 @@ export function AccountStatsPanel() {
             </box>
           </box>
 
-          <text content="" />
-          
           <box flexDirection="row" width="100%" gap={4}>
             <box flexDirection="column">
               <text content="Total Profit" fg={theme.textMuted} />
@@ -176,13 +191,74 @@ export function AccountStatsPanel() {
             </box>
           </box>
 
+          <text content="" />
+          <text content="MONTHLY EXECUTION" fg={theme.primary} />
+          <Show
+            when={monthlyStats().length > 0}
+            fallback={<text content="No filled trades yet" fg={theme.textMuted} />}
+          >
+            <box flexDirection="row" width="100%">
+              <text content="MONTH    " fg={theme.textMuted} width={9} />
+              <text content="TRADES " fg={theme.textMuted} width={7} />
+              <text content="VOLUME      " fg={theme.textMuted} width={12} />
+              <text content="REALIZED P&L" fg={theme.textMuted} />
+            </box>
+            <For each={monthlyStats()}>
+              {(row) => (
+                <box flexDirection="row" width="100%">
+                  <text content={row.month.padEnd(8, " ")} fg={theme.text} width={9} />
+                  <text content={String(row.tradeCount).padStart(6, " ")} fg={theme.text} width={7} />
+                  <text content={fmtCompactUsd(row.volume).padStart(11, " ")} fg={theme.textMuted} width={12} />
+                  <text content={fmtUsd(row.pnl)} fg={row.pnl >= 0 ? theme.success : theme.error} />
+                </box>
+              )}
+            </For>
+          </Show>
+
+          <text content="" />
+          <text content="MARKET CONCENTRATION" fg={theme.primary} />
+          <box flexDirection="row" width="100%" gap={4}>
+            <box flexDirection="column">
+              <text content="Top Exposure" fg={theme.textMuted} />
+              <text content={`${concentration().topExposurePct.toFixed(1)}%`} fg={concentrationColor()} />
+            </box>
+            <box flexDirection="column">
+              <text content="HHI" fg={theme.textMuted} />
+              <text content={concentration().hhi.toFixed(0)} fg={concentrationColor()} />
+            </box>
+            <box flexDirection="column">
+              <text content="Effective Mkts" fg={theme.textMuted} />
+              <text content={concentration().effectiveMarketCount.toFixed(1)} fg={theme.text} />
+            </box>
+            <box flexDirection="column">
+              <text content="Risk" fg={theme.textMuted} />
+              <text content={concentration().riskLevel.toUpperCase()} fg={concentrationColor()} />
+            </box>
+          </box>
+          <Show when={concentration().entries.length > 0}>
+            <box flexDirection="row" width="100%">
+              <text content="MARKET" fg={theme.textMuted} width={28} />
+              <text content="EXPO" fg={theme.textMuted} width={8} />
+              <text content="VALUE      " fg={theme.textMuted} width={11} />
+              <text content="P&L" fg={theme.textMuted} />
+            </box>
+            <For each={concentration().entries.slice(0, 3)}>
+              {(entry) => (
+                <box flexDirection="row" width="100%">
+                  <text content={entry.marketTitle.slice(0, 27).padEnd(27, " ")} fg={theme.text} width={28} />
+                  <text content={`${entry.percentage.toFixed(1)}%`.padStart(7, " ")} fg={theme.textMuted} width={8} />
+                  <text content={fmtCompactUsd(entry.value).padStart(10, " ")} fg={theme.textMuted} width={11} />
+                  <text content={fmtUsd(entry.pnl)} fg={entry.pnl >= 0 ? theme.success : theme.error} />
+                </box>
+              )}
+            </For>
+          </Show>
+
           <Show when={assetAllocation().length > 0}>
             <text content="" />
             <text content="────────────────────────────────────────────────────────" fg={theme.textMuted} />
-            <text content="" />
             <text content="ASSET ALLOCATION" fg={theme.primary} />
-            <text content="" />
-            
+
             <box flexDirection="row" width="100%" gap={3}>
               <For each={assetAllocation().slice(0, 5)}>
                 {(asset) => (
@@ -197,6 +273,7 @@ export function AccountStatsPanel() {
           </Show>
 
         </box>
+        </scrollbox>
       </Show>
     </box>
   );

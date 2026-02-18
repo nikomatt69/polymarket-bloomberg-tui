@@ -1,5 +1,5 @@
 import { Show, createMemo } from "solid-js";
-import { Market, PriceHistory } from "../types/market";
+import { Market, PriceHistory, PricePoint } from "../types/market";
 import {
   generateSimpleChart,
   generateSparkline,
@@ -22,6 +22,7 @@ interface ChartData {
   trendLine: string;
   indicators: string;
   rsiLine: string;
+  volumeInfo: string;
 }
 
 const CHART_WIDTH = 52;
@@ -48,6 +49,11 @@ function calculateVolatility(prices: number[]): number {
   const mean = returns.reduce((sum, value) => sum + value, 0) / returns.length;
   const variance = returns.reduce((sum, value) => sum + (value - mean) ** 2, 0) / returns.length;
   return Math.sqrt(variance) * 100;
+}
+
+function calculateVolumeStats(data: PricePoint[]): { avg: number; max: number; trend: string } {
+  // Volume is not available in PricePoint, return N/A
+  return { avg: 0, max: 0, trend: "N/A" };
 }
 
 export function Chart(props: ChartProps) {
@@ -94,6 +100,10 @@ export function Chart(props: ChartProps) {
       ? lastRsi >= 70 ? " (OVERBOUGHT)" : lastRsi <= 30 ? " (OVERSOLD)" : ""
       : "";
 
+    // Volume stats
+    const volumeStats = calculateVolumeStats(props.priceHistory?.data || []);
+    const volumeInfo = `Volume: Avg $${(volumeStats.avg / 1000).toFixed(1)}K  Max $${(volumeStats.max / 1000).toFixed(1)}K  Trend: ${volumeStats.trend}`;
+
     const first = prices[0];
     const last = prices[prices.length - 1];
     const movePct = first > 0 ? ((last - first) / first) * 100 : 0;
@@ -118,12 +128,13 @@ export function Chart(props: ChartProps) {
       trendLine: `Last: ${formatChartLabel(last)}  |  Move: ${formatSignedPercent(movePct)}  |  Regime: ${direction}  |  Vol: ${volatility.toFixed(2)}%`,
       indicators,
       rsiLine: `RSI(14): ${rsiStr}${rsiLevel}`,
+      volumeInfo,
     };
   });
 
   return (
     <box flexDirection="column" width="100%">
-      <text content={`PRICE HISTORY (${props.priceHistory?.timeframe?.toUpperCase() || "7D"})`} fg={theme.primary} />
+      <text content={`📊 PRICE HISTORY (${props.priceHistory?.timeframe?.toUpperCase() || "7D"})`} fg={theme.primary} />
       <Show
         when={chartOutput()}
         fallback={<text content="No price history available" fg={theme.textMuted} />}
@@ -134,6 +145,8 @@ export function Chart(props: ChartProps) {
             <text content={data().chart} fg={theme.text} />
             <text content={data().stats} fg={theme.textMuted} />
             <text content={data().trendLine} fg={theme.textMuted} />
+            <text content={data().volumeInfo} fg={theme.textMuted} />
+            <text content="────────────────────────────────" fg={theme.borderSubtle} />
             <text content={data().indicators} fg={theme.accent} />
             <text content={data().rsiLine} fg={
               (() => {

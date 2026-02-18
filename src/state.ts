@@ -10,6 +10,46 @@ import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
 type PersistedThemeMode = "dark" | "light";
+type PersistedActiveView = "market" | "portfolio";
+
+export type AIProviderKind = "anthropic" | "openrouter" | "custom";
+
+export interface AIProviderConfig {
+  id: string;
+  name: string;
+  kind: AIProviderKind;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+}
+
+export interface AIProviderSettings {
+  activeProviderId: string;
+  providers: AIProviderConfig[];
+}
+
+type ProviderEditableField = "apiKey" | "baseUrl" | "model";
+
+const DEFAULT_AI_PROVIDERS: AIProviderConfig[] = [
+  {
+    id: "openrouter",
+    name: "OpenRouter",
+    kind: "openrouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "anthropic/claude-sonnet-4",
+    apiKey: "",
+  },
+  {
+    id: "anthropic",
+    name: "Anthropic",
+    kind: "anthropic",
+    baseUrl: "https://api.anthropic.com",
+    model: "claude-sonnet-4-20250514",
+    apiKey: "",
+  },
+];
+
+const DEFAULT_ACTIVE_AI_PROVIDER_ID = "openrouter";
 
 interface RawPersistedConfig extends Partial<PersistentState> {
   [key: string]: unknown;
@@ -49,8 +89,23 @@ export const [walletModalOpen, setWalletModalOpen] = createSignal(false);
 export const [walletModalMode, setWalletModalMode] = createSignal<"view" | "enter">("view");
 export const [walletModalInput, setWalletModalInput] = createSignal("");
 
-// Portfolio panel visibility signal
-export const [portfolioOpen, setPortfolioOpen] = createSignal(false);
+// Main view state (unifies layout mode)
+const [activeMainViewSignal, setActiveMainViewSignal] = createSignal<PersistedActiveView>("market");
+export const activeMainView = activeMainViewSignal;
+
+export function setActiveMainView(view: PersistedActiveView): void {
+  setActiveMainViewSignal(view);
+  savePersistedState();
+}
+
+// Compatibility wrappers
+export function portfolioOpen(): boolean {
+  return activeMainViewSignal() === "portfolio";
+}
+
+export function setPortfolioOpen(open: boolean): void {
+  setActiveMainView(open ? "portfolio" : "market");
+}
 
 // Order history panel visibility signal
 export const [orderHistoryOpen, setOrderHistoryOpen] = createSignal(false);
@@ -84,10 +139,199 @@ export const [accountStatsOpen, setAccountStatsOpen] = createSignal(false);
 
 // Settings panel visibility and active tab signals
 export const [settingsPanelOpen, setSettingsPanelOpen] = createSignal(false);
-export const [settingsPanelTab, setSettingsPanelTab] = createSignal<"theme" | "account" | "display" | "keys">("theme");
+export const [settingsPanelTab, setSettingsPanelTab] = createSignal<"theme" | "providers" | "account" | "display" | "keys">("theme");
+export const [settingsThemeQuery, setSettingsThemeQuery] = createSignal("");
+export const [settingsThemeSearchEditing, setSettingsThemeSearchEditing] = createSignal(false);
+
+// Search input focus state: while typing, global shortcuts must be blocked
+export const [searchInputFocused, setSearchInputFocused] = createSignal(false);
+
+function serializeProvider(provider: AIProviderConfig): AIProviderConfig {
+  return {
+    id: provider.id,
+    name: provider.name,
+    kind: provider.kind,
+    baseUrl: normalizeBaseUrl(provider.baseUrl),
+    model: provider.model,
+    apiKey: provider.apiKey ?? "",
+  };
+}
+
+const initialAiProviderSettings = normalizeAiProviderSettings(readPersistedConfigRaw());
+
+export const [aiProviderState, setAiProviderState] = createStore<AIProviderSettings>(initialAiProviderSettings);
+
+export const [settingsSelectedProviderId, setSettingsSelectedProviderId] = createSignal(
+  initialAiProviderSettings.activeProviderId,
+);
+
+function saveAiProviderSettingsToConfig(settings: AIProviderSettings): void {
+  try {
+    const existing = readPersistedConfigRaw();
+    const nextConfig: RawPersistedConfig = {
+      ...existing,
+      aiActiveProviderId: settings.activeProviderId,
+      aiProviders: settings.providers.map(serializeProvider),
+    };
+    writePersistedConfigRaw(nextConfig);
+  } catch (error) {
+    console.error("Failed to save AI provider settings:", error);
+  }
+}
+
+function syncSelectedProviderId(): void {
+  const selected = settingsSelectedProviderId();
+  if (!aiProviderState.providers.some((p) => p.id === selected)) {
+    setSettingsSelectedProviderId(aiProviderState.activeProviderId);
+  }
+}
+
+export function getActiveAIProvider(): AIProviderConfig | null {
+  const selected = aiProviderState.providers.find((provider) => provider.id === aiProviderState.activeProviderId);
+  if (selected) return selected;
+  return aiProviderState.providers[0] ?? null;
+}
+
+export function setActiveAIProvider(providerId: string): boolean {
+  if (!aiProviderState.providers.some((provider) => provider.id === providerId)) {
+    return false;
+  }
+
+  setAiProviderState("activeProviderId", providerId);
+  saveAiProviderSettingsToConfig({
+    activeProviderId: providerId,
+    providers: aiProviderState.providers,
+  });
+  return true;
+}
+
+export function updateAIProviderField(
+  providerId: string,
+  field: ProviderEditableField,
+  value: string,
+): boolean {
+  const index = aiProviderState.providers.findIndex((provider) => provider.id === providerId);
+  if (index === -1) {
+    return false;
+  }
+
+  const trimmed = field === "apiKey" ? value.trim() : value;
+  const normalized = field === "baseUrl" ? normalizeBaseUrl(trimmed) : trimmed;
+
+  setAiProviderState("providers", index, field, normalized);
+  saveAiProviderSettingsToConfig({
+    activeProviderId: aiProviderState.activeProviderId,
+    providers: aiProviderState.providers,
+  });
+  return true;
+}
+
+export function addAIProvider(provider: {
+  id: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+  kind?: AIProviderKind;
+}): { ok: true } | { ok: false; error: string } {
+  const id = provider.id.trim();
+  const name = provider.name.trim();
+  const baseUrl = normalizeBaseUrl(provider.baseUrl.trim());
+  const model = provider.model.trim();
+  const apiKey = (provider.apiKey ?? "").trim();
+  const kind = provider.kind ?? "custom";
+
+  if (!id) return { ok: false, error: "Provider id is required" };
+  if (!/^[a-z0-9][a-z0-9-_]{1,31}$/i.test(id)) {
+    return { ok: false, error: "Provider id must be 2-32 chars (letters, numbers, - or _)" };
+  }
+  if (aiProviderState.providers.some((entry) => entry.id === id)) {
+    return { ok: false, error: `Provider \"${id}\" already exists` };
+  }
+  if (!name) return { ok: false, error: "Provider name is required" };
+  if (!baseUrl || !/^https?:\/\//i.test(baseUrl)) {
+    return { ok: false, error: "Base URL must start with http:// or https://" };
+  }
+  if (!model) return { ok: false, error: "Model id is required" };
+
+  const nextProvider: AIProviderConfig = {
+    id,
+    name,
+    kind,
+    baseUrl,
+    model,
+    apiKey,
+  };
+
+  const nextProviders = [...aiProviderState.providers, nextProvider];
+  setAiProviderState("providers", nextProviders);
+  saveAiProviderSettingsToConfig({
+    activeProviderId: aiProviderState.activeProviderId,
+    providers: nextProviders,
+  });
+  return { ok: true };
+}
+
+export function removeAIProvider(providerId: string): { ok: true } | { ok: false; error: string } {
+  if (providerId === "openrouter" || providerId === "anthropic") {
+    return { ok: false, error: "Built-in providers cannot be removed" };
+  }
+
+  const nextProviders = aiProviderState.providers.filter((provider) => provider.id !== providerId);
+  if (nextProviders.length === aiProviderState.providers.length) {
+    return { ok: false, error: "Provider not found" };
+  }
+
+  const nextActive =
+    aiProviderState.activeProviderId === providerId
+      ? nextProviders.find((p) => p.id === "openrouter")?.id
+        ?? nextProviders[0]?.id
+        ?? DEFAULT_ACTIVE_AI_PROVIDER_ID
+      : aiProviderState.activeProviderId;
+
+  setAiProviderState({
+    activeProviderId: nextActive,
+    providers: nextProviders,
+  });
+  saveAiProviderSettingsToConfig({
+    activeProviderId: nextActive,
+    providers: nextProviders,
+  });
+  syncSelectedProviderId();
+  return { ok: true };
+}
+
+export function maskSecret(value: string | undefined): string {
+  if (!value) return "(empty)";
+  if (value.length <= 8) return "*".repeat(value.length);
+  return `${value.slice(0, 4)}${"*".repeat(Math.max(4, value.length - 8))}${value.slice(-4)}`;
+}
+
+
 
 // Shortcuts panel visibility signal
 export const [shortcutsPanelOpen, setShortcutsPanelOpen] = createSignal(false);
+
+// Chat/Assistant state signals
+export const [chatInputFocused, setChatInputFocused] = createSignal(false);
+export const [chatInputValue, setChatInputValue] = createSignal("");
+export const [chatMessages, setChatMessages] = createSignal<ChatMessage[]>([]);
+export const [chatLoading, setChatLoading] = createSignal(false);
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+  toolCalls?: ToolCall[];
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: unknown;
+}
 
 /**
  * Get path to config directory
@@ -114,6 +358,119 @@ function isThemeMode(value: unknown): value is PersistedThemeMode {
   return value === "dark" || value === "light";
 }
 
+function isActiveView(value: unknown): value is PersistedActiveView {
+  return value === "market" || value === "portfolio";
+}
+
+function isProviderKind(value: unknown): value is AIProviderKind {
+  return value === "anthropic" || value === "openrouter" || value === "custom";
+}
+
+function sanitizeProviderText(value: unknown, fallback: string): string {
+  if (typeof value !== "string") return fallback;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+function sanitizeProviderConfig(value: unknown, fallbackIndex: number): AIProviderConfig | null {
+  if (!value || typeof value !== "object") return null;
+
+  const raw = value as Record<string, unknown>;
+  const id = sanitizeProviderText(raw.id, `custom-${fallbackIndex}`);
+  const name = sanitizeProviderText(raw.name, id);
+  const kind = isProviderKind(raw.kind) ? raw.kind : "custom";
+  const baseUrl = normalizeBaseUrl(
+    sanitizeProviderText(
+      raw.baseUrl,
+      kind === "anthropic"
+        ? "https://api.anthropic.com"
+        : "https://openrouter.ai/api/v1",
+    ),
+  );
+  const model = sanitizeProviderText(
+    raw.model,
+    kind === "anthropic" ? "claude-sonnet-4-20250514" : "anthropic/claude-sonnet-4",
+  );
+  const apiKey = typeof raw.apiKey === "string" ? raw.apiKey.trim() : "";
+
+  return {
+    id,
+    name,
+    kind,
+    baseUrl,
+    model,
+    apiKey,
+  };
+}
+
+function mergeProviderWithDefault(provider: AIProviderConfig): AIProviderConfig {
+  const fallback = DEFAULT_AI_PROVIDERS.find((x) => x.id === provider.id);
+  if (!fallback) {
+    return provider;
+  }
+
+  return {
+    ...fallback,
+    ...provider,
+    baseUrl: normalizeBaseUrl(provider.baseUrl || fallback.baseUrl),
+    model: provider.model || fallback.model,
+    name: provider.name || fallback.name,
+  };
+}
+
+function normalizeAiProviderSettings(raw: RawPersistedConfig): AIProviderSettings {
+  const merged = new Map<string, AIProviderConfig>();
+  for (const provider of DEFAULT_AI_PROVIDERS) {
+    merged.set(provider.id, { ...provider });
+  }
+
+  const storedProviders = Array.isArray(raw.aiProviders) ? raw.aiProviders : [];
+  storedProviders.forEach((entry, idx) => {
+    const parsed = sanitizeProviderConfig(entry, idx);
+    if (!parsed) return;
+
+    if (merged.has(parsed.id)) {
+      merged.set(parsed.id, mergeProviderWithDefault(parsed));
+    } else {
+      merged.set(parsed.id, parsed);
+    }
+  });
+
+  const legacyAnthropicKey =
+    typeof raw.anthropicApiKey === "string" && raw.anthropicApiKey.trim().length > 0
+      ? raw.anthropicApiKey.trim()
+      : "";
+
+  if (legacyAnthropicKey) {
+    const anthropic = merged.get("anthropic");
+    if (anthropic && !anthropic.apiKey) {
+      merged.set("anthropic", { ...anthropic, apiKey: legacyAnthropicKey });
+    }
+  }
+
+  const providers = Array.from(merged.values());
+  const configuredOpenRouter = providers.find((p) => p.id === "openrouter" && p.apiKey);
+  const configuredAnthropic = providers.find((p) => p.id === "anthropic" && p.apiKey);
+  const storedActiveProvider = typeof raw.aiActiveProviderId === "string" ? raw.aiActiveProviderId : undefined;
+
+  const activeProviderId =
+    (storedActiveProvider && providers.some((p) => p.id === storedActiveProvider) && storedActiveProvider)
+    || configuredOpenRouter?.id
+    || configuredAnthropic?.id
+    || providers.find((p) => p.id === DEFAULT_ACTIVE_AI_PROVIDER_ID)?.id
+    || providers[0]?.id
+    || DEFAULT_ACTIVE_AI_PROVIDER_ID;
+
+  return {
+    activeProviderId,
+    providers,
+  };
+}
+
 function readPersistedConfigRaw(): RawPersistedConfig {
   try {
     const configPath = getConfigPath();
@@ -131,7 +488,7 @@ function readPersistedConfigRaw(): RawPersistedConfig {
 
 function writePersistedConfigRaw(config: RawPersistedConfig): void {
   const configPath = getConfigPath();
-  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
 }
 
 /**
@@ -159,6 +516,7 @@ export function loadPersistedState(): PersistentState | null {
     searchQuery,
     sortBy,
     timeframe,
+    activeView: isActiveView(raw.activeView) ? raw.activeView : undefined,
     themeMode: isThemeMode(raw.themeMode) ? raw.themeMode : undefined,
     themeName: typeof raw.themeName === "string" ? raw.themeName : undefined,
   };
@@ -176,6 +534,7 @@ export function savePersistedState(): void {
       searchQuery: appState.searchQuery,
       sortBy: appState.sortBy,
       timeframe: appState.timeframe,
+      activeView: activeMainViewSignal(),
     };
     writePersistedConfigRaw(nextConfig);
   } catch (error) {
@@ -217,6 +576,23 @@ export function savePersistedThemePreferences(preferences: PersistedThemePrefere
   }
 }
 
+export function loadAnthropicApiKey(): string | null {
+  const raw = readPersistedConfigRaw();
+  return typeof raw.anthropicApiKey === "string" && raw.anthropicApiKey.trim().length > 0
+    ? raw.anthropicApiKey
+    : null;
+}
+
+export function saveAnthropicApiKey(apiKey: string): void {
+  try {
+    const existing = readPersistedConfigRaw();
+    const nextConfig: RawPersistedConfig = { ...existing, anthropicApiKey: apiKey };
+    writePersistedConfigRaw(nextConfig);
+  } catch (error) {
+    console.error("Failed to save Anthropic API key:", error);
+  }
+}
+
 /**
  * Initialize state from persisted config
  */
@@ -227,6 +603,7 @@ export function initializeState(): void {
     setAppState("searchQuery", persisted.searchQuery);
     setAppState("sortBy", persisted.sortBy);
     setAppState("timeframe", persisted.timeframe);
+    setActiveMainViewSignal(persisted.activeView === "portfolio" ? "portfolio" : "market");
   }
 }
 

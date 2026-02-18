@@ -53,6 +53,10 @@ function formatThreshold(alert: Pick<PriceAlert, "metric" | "threshold">): strin
   return String(alert.threshold);
 }
 
+function formatAlertConfig(alert: Pick<PriceAlert, "cooldownMinutes" | "debouncePasses">): string {
+  return `CD:${alert.cooldownMinutes}m DB:${alert.debouncePasses}x`;
+}
+
 export function AlertsPanel() {
   const { theme } = useTheme();
 
@@ -101,7 +105,8 @@ export function AlertsPanel() {
           <text content="TIME         " fg={theme.textMuted} width={14} />
           <text content="METRIC " fg={theme.textMuted} width={8} />
           <text content="COND  " fg={theme.textMuted} width={7} />
-          <text content="THRESHOLD     " fg={theme.textMuted} width={14} />
+          <text content="THRESHOLD   " fg={theme.textMuted} width={12} />
+          <text content="CONFIG      " fg={theme.textMuted} width={12} />
           <text content="STATUS    " fg={theme.textMuted} width={11} />
           <text content="MARKET / OUTCOME" fg={theme.textMuted} />
         </box>
@@ -134,17 +139,22 @@ export function AlertsPanel() {
                       width={7}
                     />
                     <text
-                      content={formatThreshold(alert).padStart(13, " ")}
+                      content={formatThreshold(alert).padStart(11, " ")}
                       fg={isSelected() ? theme.highlightText : theme.text}
-                      width={14}
+                      width={12}
+                    />
+                    <text
+                      content={formatAlertConfig(alert).padEnd(11, " ")}
+                      fg={isSelected() ? theme.highlightText : theme.textMuted}
+                      width={12}
                     />
                     <text
                       content={alert.status.padEnd(10, " ")}
                       fg={statusColor(alert.status)}
                       width={11}
                     />
-                    <text content={truncate(alert.marketTitle, 24)} fg={isSelected() ? theme.highlightText : theme.textMuted} width={25} />
-                    <text content={alert.outcomeTitle.slice(0, 6)} fg={theme.accent} />
+                    <text content={truncate(alert.marketTitle, 20)} fg={isSelected() ? theme.highlightText : theme.textMuted} width={21} />
+                    <text content={truncate(alert.outcomeTitle, 8)} fg={theme.accent} />
                   </box>
                 );
               }}
@@ -197,16 +207,41 @@ export function AlertsPanel() {
                 fg={theme.textMuted}
               />
             </box>
+            <box flexDirection="row" gap={2}>
+              <text
+                content={alertsState.addFocus === "cooldown" ? "▶ Cooldown:  " : "  Cooldown:  "}
+                fg={alertsState.addFocus === "cooldown" ? theme.accent : theme.textMuted}
+                width={14}
+              />
+              <text content={`${alertsState.addCooldownMinutes} min`} fg={theme.textBright} />
+              <text content="  (+/- or ←/→)" fg={theme.textMuted} />
+            </box>
+            <box flexDirection="row" gap={2}>
+              <text
+                content={alertsState.addFocus === "debounce" ? "▶ Debounce:  " : "  Debounce:  "}
+                fg={alertsState.addFocus === "debounce" ? theme.accent : theme.textMuted}
+                width={14}
+              />
+              <text content={`${alertsState.addDebouncePasses} hits`} fg={theme.textBright} />
+              <text content="  (+/- or ←/→)" fg={theme.textMuted} />
+            </box>
             <Show when={alertsState.addError !== ""}>
               <text content={`✗ ${alertsState.addError}`} fg={theme.error} />
             </Show>
-            <text content="[ENTER] Save  [TAB] Switch  [M] Metric  [C] Condition  [ESC] Cancel" fg={theme.textMuted} />
+            <text content="[ENTER] Save  [TAB] Focus  [M] Metric  [C] Condition  [+/-] Cooldown/Debounce  [ESC] Cancel" fg={theme.textMuted} />
           </box>
         </Show>
 
         <Show when={!alertsState.adding}>
           <box flexDirection="row" gap={3}>
-            <box onMouseDown={() => { setAlertsState("adding", true); setAlertsState("addFocus", "threshold"); setAlertsState("addThreshold", ""); setAlertsState("addError", ""); }}>
+            <box onMouseDown={() => {
+              setAlertsState("adding", true);
+              setAlertsState("addFocus", "threshold");
+              setAlertsState("addThreshold", "");
+              setAlertsState("addCooldownMinutes", "5");
+              setAlertsState("addDebouncePasses", 1);
+              setAlertsState("addError", "");
+            }}>
               <text content="[A] Add" fg={theme.success} />
             </box>
             <box onMouseDown={() => {

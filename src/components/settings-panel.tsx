@@ -1,20 +1,30 @@
 /**
- * Settings panel — tabbed overlay for theme, account, display, and key bindings
+ * Settings panel — tabbed overlay for theme, providers, account, display, and key bindings
  * Key: E — toggle open/close
- * Tabs: THEME · ACCOUNT · DISPLAY · KEYS
+ * Tabs: THEME · PROVIDERS · ACCOUNT · DISPLAY · KEYS
  */
 
-import { For, Show } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 import { useTheme } from "../context/theme";
 import {
   walletState,
   appState,
+  aiProviderState,
+  settingsSelectedProviderId,
+  setSettingsSelectedProviderId,
   setSettingsPanelOpen,
   settingsPanelTab,
+  settingsThemeQuery,
+  settingsThemeSearchEditing,
   setSettingsPanelTab,
   setSortBy,
   setTimeframe,
   setWalletModalOpen,
+  setActiveAIProvider,
+  updateAIProviderField,
+  addAIProvider,
+  removeAIProvider,
+  maskSecret,
 } from "../state";
 import { disconnectWalletHook, refreshWalletBalance } from "../hooks/useWallet";
 import { watchlistState, toggleWatchlistFilter } from "../hooks/useWatchlist";
@@ -24,6 +34,55 @@ export function SettingsPanel() {
   const ctx = useTheme();
   const { theme, toggleMode } = ctx;
   const THEME_LIST_WINDOW = 8;
+
+  const fuzzyScore = (query: string, target: string): number | null => {
+    const q = query.trim().toLowerCase();
+    if (q.length === 0) return 0;
+
+    const t = target.toLowerCase();
+    let cursor = 0;
+    let lastIdx = -10;
+    let score = 0;
+
+    for (const ch of q) {
+      const idx = t.indexOf(ch, cursor);
+      if (idx === -1) {
+        return null;
+      }
+
+      score += idx <= 1 ? 5 : 1;
+      if (idx === lastIdx + 1) {
+        score += 7;
+      }
+      if (target[idx] === query[0]) {
+        score += 2;
+      }
+
+      cursor = idx + 1;
+      lastIdx = idx;
+    }
+
+    score += Math.max(0, 16 - (t.length - q.length));
+    return score;
+  };
+
+  const matchedThemeNames = () => {
+    const query = settingsThemeQuery().trim();
+    const names = ctx.availableThemes;
+
+    if (query.length === 0) {
+      return names;
+    }
+
+    return names
+      .map((name) => ({
+        name,
+        score: fuzzyScore(query, name),
+      }))
+      .filter((entry): entry is { name: string; score: number } => entry.score !== null)
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+      .map((entry) => entry.name);
+  };
 
   const themeCount = () => ctx.availableThemes.length;
 
@@ -53,7 +112,7 @@ export function SettingsPanel() {
   };
 
   const visibleThemeEntries = () => {
-    const names = ctx.availableThemes;
+    const names = matchedThemeNames();
     if (names.length === 0) {
       return [] as Array<{ name: string; index: number; active: boolean }>;
     }
@@ -77,7 +136,80 @@ export function SettingsPanel() {
     });
   };
 
-  const themeIndexPad = () => Math.max(2, String(themeCount()).length);
+  const themeIndexPad = () => Math.max(2, String(Math.max(themeCount(), matchedThemeNames().length)).length);
+
+  const [addingProvider, setAddingProvider] = createSignal(false);
+  const [newProviderId, setNewProviderId] = createSignal("");
+  const [newProviderName, setNewProviderName] = createSignal("");
+  const [newProviderBaseUrl, setNewProviderBaseUrl] = createSignal("https://openrouter.ai/api/v1");
+  const [newProviderModel, setNewProviderModel] = createSignal("anthropic/claude-sonnet-4");
+  const [newProviderApiKey, setNewProviderApiKey] = createSignal("");
+  const [providerError, setProviderError] = createSignal("");
+
+  const selectedProvider = () =>
+    aiProviderState.providers.find((provider) => provider.id === settingsSelectedProviderId())
+    ?? aiProviderState.providers.find((provider) => provider.id === aiProviderState.activeProviderId)
+    ?? aiProviderState.providers[0]
+    ?? null;
+
+  const isActiveProvider = (providerId: string) => aiProviderState.activeProviderId === providerId;
+
+  const providerRowColor = (providerId: string) => {
+    if (providerId === settingsSelectedProviderId()) return theme.highlight;
+    if (isActiveProvider(providerId)) return theme.success;
+    return theme.text;
+  };
+
+  const startAddProvider = () => {
+    setAddingProvider(true);
+    setProviderError("");
+    setNewProviderId("");
+    setNewProviderName("");
+    setNewProviderBaseUrl("https://openrouter.ai/api/v1");
+    setNewProviderModel("");
+    setNewProviderApiKey("");
+  };
+
+  const createProvider = () => {
+    const result = addAIProvider({
+      id: newProviderId(),
+      name: newProviderName(),
+      baseUrl: newProviderBaseUrl(),
+      model: newProviderModel(),
+      apiKey: newProviderApiKey(),
+      kind: "custom",
+    });
+
+    if (!result.ok) {
+      setProviderError(result.error);
+      return;
+    }
+
+    setSettingsSelectedProviderId(newProviderId().trim());
+    setAddingProvider(false);
+    setProviderError("");
+  };
+
+  const removeSelectedProvider = () => {
+    const selected = selectedProvider();
+    if (!selected) {
+      return;
+    }
+
+    const result = removeAIProvider(selected.id);
+    if (!result.ok) {
+      setProviderError(result.error);
+      return;
+    }
+
+    const fallback = aiProviderState.providers.find((provider) => provider.id === aiProviderState.activeProviderId)
+      ?? aiProviderState.providers[0]
+      ?? null;
+    if (fallback) {
+      setSettingsSelectedProviderId(fallback.id);
+    }
+    setProviderError("");
+  };
 
   return (
     <box
@@ -113,6 +245,12 @@ export function SettingsPanel() {
             fg={settingsPanelTab() === "account" ? theme.primary : theme.textMuted}
           />
         </box>
+        <box onMouseDown={() => setSettingsPanelTab("providers")}>
+          <text
+            content={settingsPanelTab() === "providers" ? " [PROVIDERS] " : "  PROVIDERS  "}
+            fg={settingsPanelTab() === "providers" ? theme.primary : theme.textMuted}
+          />
+        </box>
         <box onMouseDown={() => setSettingsPanelTab("display")}>
           <text
             content={settingsPanelTab() === "display" ? " [DISPLAY] " : "  DISPLAY  "}
@@ -141,6 +279,14 @@ export function SettingsPanel() {
             <text content="  Theme:" fg={theme.textMuted} />
             <text content={`${ctx.themeName} (${themePosition()}/${themeCount()})`} fg={theme.accent} />
           </box>
+          <box flexDirection="row" gap={1}>
+            <text content="Search:" fg={theme.textMuted} />
+            <text
+              content={settingsThemeSearchEditing() ? `${settingsThemeQuery()}▌` : (settingsThemeQuery() || "(none)")}
+              fg={settingsThemeSearchEditing() ? theme.warning : theme.text}
+            />
+            <text content={`  Matches: ${matchedThemeNames().length}`} fg={theme.textMuted} />
+          </box>
           <box flexDirection="row" gap={3}>
             <box onMouseDown={() => toggleMode()}>
               <text content="[T/Enter] Mode" fg={theme.text} />
@@ -167,6 +313,7 @@ export function SettingsPanel() {
           </box>
           <text content="" />
           <text content="Theme list (click to apply):" fg={theme.textMuted} />
+          <Show when={matchedThemeNames().length > 0} fallback={<text content="No themes match current search" fg={theme.error} />}>
           <box flexDirection="column">
             <For each={visibleThemeEntries()}>
               {(entry) => (
@@ -179,6 +326,7 @@ export function SettingsPanel() {
               )}
             </For>
           </box>
+          </Show>
           <text content="" />
           <text content="Color palette:" fg={theme.textMuted} />
           <box flexDirection="row" gap={2}>
@@ -193,6 +341,143 @@ export function SettingsPanel() {
             <text content="  Error" fg={theme.textMuted} />
             <text content="███" fg={theme.error} />
           </box>
+        </Show>
+
+        {/* PROVIDERS tab */}
+        <Show when={settingsPanelTab() === "providers"}>
+          <box flexDirection="row" width="100%" gap={3}>
+            <box flexDirection="column" width={34}>
+              <text content="AI Providers" fg={theme.primary} />
+              <text content="Select provider:" fg={theme.textMuted} />
+              <For each={aiProviderState.providers}>
+                {(provider) => (
+                  <box onMouseDown={() => setSettingsSelectedProviderId(provider.id)}>
+                    <text
+                      content={`${provider.id === settingsSelectedProviderId() ? ">" : " "} ${provider.name} (${provider.id})${isActiveProvider(provider.id) ? " *ACTIVE" : ""}`}
+                      fg={providerRowColor(provider.id)}
+                    />
+                  </box>
+                )}
+              </For>
+
+              <text content="" />
+              <box flexDirection="row" gap={2}>
+                <box onMouseDown={startAddProvider}>
+                  <text content="[Click] Add" fg={theme.success} />
+                </box>
+                <box onMouseDown={removeSelectedProvider}>
+                  <text content="[D/Click] Remove" fg={theme.error} />
+                </box>
+              </box>
+            </box>
+
+            <box flexDirection="column" flexGrow={1}>
+              <Show when={!addingProvider()} fallback={
+                <box flexDirection="column" width="100%">
+                  <text content="Create custom provider" fg={theme.primary} />
+                  <box flexDirection="row" gap={1}>
+                    <text content="Id:" fg={theme.textMuted} width={11} />
+                    <input width="100%" value={newProviderId()} onInput={setNewProviderId} />
+                  </box>
+                  <box flexDirection="row" gap={1}>
+                    <text content="Name:" fg={theme.textMuted} width={11} />
+                    <input width="100%" value={newProviderName()} onInput={setNewProviderName} />
+                  </box>
+                  <box flexDirection="row" gap={1}>
+                    <text content="Base URL:" fg={theme.textMuted} width={11} />
+                    <input width="100%" value={newProviderBaseUrl()} onInput={setNewProviderBaseUrl} />
+                  </box>
+                  <box flexDirection="row" gap={1}>
+                    <text content="Model id:" fg={theme.textMuted} width={11} />
+                    <input width="100%" value={newProviderModel()} onInput={setNewProviderModel} />
+                  </box>
+                  <box flexDirection="row" gap={1}>
+                    <text content="API key:" fg={theme.textMuted} width={11} />
+                    <input width="100%" value={newProviderApiKey()} onInput={setNewProviderApiKey} />
+                  </box>
+                  <Show when={providerError().length > 0}>
+                    <text content={providerError()} fg={theme.error} />
+                  </Show>
+                  <box flexDirection="row" gap={2}>
+                    <box onMouseDown={createProvider}>
+                      <text content="[CLICK] Save Provider" fg={theme.success} />
+                    </box>
+                    <box onMouseDown={() => { setAddingProvider(false); setProviderError(""); }}>
+                      <text content="[CLICK] Cancel" fg={theme.textMuted} />
+                    </box>
+                  </box>
+                </box>
+              }>
+                <Show when={selectedProvider()}>
+                  <text content={`Selected: ${selectedProvider()!.name}`} fg={theme.primary} />
+                  <box flexDirection="row" gap={1}>
+                    <text content="Provider id:" fg={theme.textMuted} width={11} />
+                    <text content={selectedProvider()!.id} fg={theme.text} />
+                  </box>
+                  <box flexDirection="row" gap={1}>
+                    <text content="Type:" fg={theme.textMuted} width={11} />
+                    <text content={selectedProvider()!.kind.toUpperCase()} fg={theme.text} />
+                  </box>
+                  <box flexDirection="row" gap={1}>
+                    <text content="Base URL:" fg={theme.textMuted} width={11} />
+                    <input
+                      width="100%"
+                      value={selectedProvider()!.baseUrl}
+                      onInput={(value: string) => {
+                        updateAIProviderField(selectedProvider()!.id, "baseUrl", value);
+                        setProviderError("");
+                      }}
+                    />
+                  </box>
+                  <box flexDirection="row" gap={1}>
+                    <text content="Model id:" fg={theme.textMuted} width={11} />
+                    <input
+                      width="100%"
+                      value={selectedProvider()!.model}
+                      onInput={(value: string) => {
+                        updateAIProviderField(selectedProvider()!.id, "model", value);
+                        setProviderError("");
+                      }}
+                    />
+                  </box>
+                  <box flexDirection="row" gap={1}>
+                    <text content="API key:" fg={theme.textMuted} width={11} />
+                    <input
+                      width="100%"
+                      value={selectedProvider()!.apiKey ?? ""}
+                      onInput={(value: string) => {
+                        updateAIProviderField(selectedProvider()!.id, "apiKey", value);
+                        setProviderError("");
+                      }}
+                    />
+                  </box>
+                  <box flexDirection="row" gap={1}>
+                    <text content="Stored key:" fg={theme.textMuted} width={11} />
+                    <text content={maskSecret(selectedProvider()!.apiKey)} fg={theme.text} />
+                  </box>
+
+                  <box flexDirection="row" gap={2}>
+                    <box onMouseDown={() => {
+                      if (setActiveAIProvider(selectedProvider()!.id)) {
+                        setProviderError("");
+                      }
+                    }}>
+                      <text content="[Click] Set Active" fg={theme.success} />
+                    </box>
+                    <text
+                      content={isActiveProvider(selectedProvider()!.id) ? "ACTIVE" : ""}
+                      fg={isActiveProvider(selectedProvider()!.id) ? theme.success : theme.textMuted}
+                    />
+                  </box>
+                  <text content="Model id is fully manual: write any provider model string." fg={theme.textMuted} />
+                </Show>
+              </Show>
+            </box>
+          </box>
+
+          <Show when={providerError().length > 0}>
+            <text content={providerError()} fg={theme.error} />
+          </Show>
         </Show>
 
         {/* ACCOUNT tab */}
@@ -416,7 +701,7 @@ export function SettingsPanel() {
 
         {/* Footer hint */}
         <text content="" />
-        <text content="[Tab/←/→] Switch tab    [↑/↓/N/P] Theme list    [T/R] Mode/Reload    [ESC] Close" fg={theme.textMuted} />
+        <text content="[Tab/←/→] Switch tab    [/] Theme search    [↑/↓] Provider list    [Click] Set active    [ESC] Close" fg={theme.textMuted} />
       </box>
     </box>
   );

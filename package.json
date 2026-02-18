@@ -13,10 +13,11 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.45",
-    "@anthropic-ai/sdk": "^0.39.0",
+    "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/openai": "1.0.0",
     "@opentui/core": "^0.1.80",
     "@opentui/solid": "^0.1.80",
+    "ai": "^4.0.0",
     "graphql": "^16.9.0",
     "graphql-request": "7.4.0",
     "simple-ascii-chart": "^1.0.2",

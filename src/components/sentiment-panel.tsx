@@ -1,7 +1,7 @@
 import { Show, For, createSignal, createEffect } from "solid-js";
 import { useTheme } from "../context/theme";
 import { appState, setSentimentPanelOpen } from "../state";
-import { analyzeMarketSentiment, SentimentAnalysis } from "../api/sentiment";
+import { analyzeMarketSentiment, getSentimentProviderError, SentimentAnalysis } from "../api/sentiment";
 
 const [sentimentData, setSentimentData] = createSignal<SentimentAnalysis | null>(null);
 const [isLoading, setIsLoading] = createSignal(false);
@@ -23,7 +23,7 @@ async function loadSentiment(marketId: string) {
   try {
     const analysis = await analyzeMarketSentiment(market);
     if (!analysis) {
-      setErrorMessage("Set ANTHROPIC_API_KEY to enable sentiment analysis");
+      setErrorMessage(getSentimentProviderError() ?? "Sentiment analysis unavailable");
       setSentimentData(null);
       return;
     }

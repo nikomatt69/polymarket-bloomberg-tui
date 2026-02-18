@@ -15,7 +15,11 @@ export interface PriceAlert {
   metric: AlertMetric;
   condition: AlertCondition;
   threshold: number;
+  cooldownMinutes: number;
+  debouncePasses: number;
   status: AlertStatus;
   createdAt: number;
   triggeredAt?: number;
+  lastNotifiedAt?: number;
+  triggerCount?: number;
 }

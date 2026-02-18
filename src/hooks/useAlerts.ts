@@ -18,9 +18,39 @@ interface AlertsState {
   addMetric: AlertMetric;
   addCondition: "above" | "below";
   addThreshold: string;
-  addFocus: "condition" | "threshold";
+  addCooldownMinutes: string;
+  addDebouncePasses: number;
+  addFocus: "condition" | "threshold" | "cooldown" | "debounce";
   addError: string;
   selectedIdx: number;
+}
+
+interface AlertRuntimeState {
+  consecutiveHits: number;
+  latched: boolean;
+}
+
+const alertRuntimeState = new Map<string, AlertRuntimeState>();
+
+function normalizeCooldownMinutes(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? "0"), 10);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(1_440, Math.round(parsed)));
+}
+
+function normalizeDebouncePasses(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? "1"), 10);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(1, Math.min(10, Math.round(parsed)));
+}
+
+function ensureRuntimeState(alertId: string): AlertRuntimeState {
+  const current = alertRuntimeState.get(alertId);
+  if (current) return current;
+
+  const next: AlertRuntimeState = { consecutiveHits: 0, latched: false };
+  alertRuntimeState.set(alertId, next);
+  return next;
 }
 
 export const [alertsState, setAlertsState] = createStore<AlertsState>({
@@ -31,6 +61,8 @@ export const [alertsState, setAlertsState] = createStore<AlertsState>({
   addMetric: "price",
   addCondition: "above",
   addThreshold: "",
+  addCooldownMinutes: "5",
+  addDebouncePasses: 1,
   addFocus: "threshold",
   addError: "",
   selectedIdx: 0,
@@ -75,6 +107,12 @@ export function loadAlerts(): void {
             : Number.parseFloat(String(item.threshold ?? "0"));
         if (!Number.isFinite(threshold)) return null;
 
+        const cooldownMinutes = normalizeCooldownMinutes((item as { cooldownMinutes?: unknown }).cooldownMinutes);
+        const debouncePasses = normalizeDebouncePasses((item as { debouncePasses?: unknown }).debouncePasses);
+        const triggerCount = Number.isFinite((item as { triggerCount?: unknown }).triggerCount as number)
+          ? Number((item as { triggerCount?: unknown }).triggerCount)
+          : 0;
+
         return {
           id: String(item.id),
           marketId: String(item.marketId),
@@ -84,16 +122,30 @@ export function loadAlerts(): void {
           metric,
           condition,
           threshold,
+          cooldownMinutes,
+          debouncePasses,
           status,
           createdAt: typeof item.createdAt === "number" ? item.createdAt : Date.now(),
           triggeredAt: typeof item.triggeredAt === "number" ? item.triggeredAt : undefined,
+          lastNotifiedAt: typeof (item as { lastNotifiedAt?: unknown }).lastNotifiedAt === "number"
+            ? Number((item as { lastNotifiedAt?: unknown }).lastNotifiedAt)
+            : undefined,
+          triggerCount,
         };
       })
       .filter((item): item is PriceAlert => item !== null);
 
     setAlertsState("alerts", normalized);
+    alertRuntimeState.clear();
+    for (const alert of normalized) {
+      alertRuntimeState.set(alert.id, {
+        consecutiveHits: 0,
+        latched: alert.status === "triggered",
+      });
+    }
   } catch {
     setAlertsState("alerts", []);
+    alertRuntimeState.clear();
   }
 }
 
@@ -112,7 +164,9 @@ export function addAlert(
   outcomeTitle: string,
   metric: AlertMetric,
   condition: AlertCondition,
-  threshold: number
+  threshold: number,
+  cooldownMinutes: number,
+  debouncePasses: number,
 ): void {
   const alert: PriceAlert = {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -123,10 +177,14 @@ export function addAlert(
     metric,
     condition,
     threshold,
+    cooldownMinutes: normalizeCooldownMinutes(cooldownMinutes),
+    debouncePasses: normalizeDebouncePasses(debouncePasses),
     status: "active",
     createdAt: Date.now(),
+    triggerCount: 0,
   };
   setAlertsState("alerts", (prev) => [alert, ...prev]);
+  alertRuntimeState.set(alert.id, { consecutiveHits: 0, latched: false });
   saveAlerts();
 }
 
@@ -134,11 +192,13 @@ export function dismissAlert(id: string): void {
   setAlertsState("alerts", (prev) =>
     prev.map((a) => (a.id === id ? { ...a, status: "dismissed" as const } : a))
   );
+  alertRuntimeState.delete(id);
   saveAlerts();
 }
 
 export function deleteAlert(id: string): void {
   setAlertsState("alerts", (prev) => prev.filter((a) => a.id !== id));
+  alertRuntimeState.delete(id);
   saveAlerts();
 }
 
@@ -162,7 +222,9 @@ export function evaluateAlerts(markets: Market[]): void {
   }
 
   let anyTriggered = false;
+  let hasStateChange = false;
   let lastTriggeredId: string | null = null;
+  const now = Date.now();
 
   const resolveMetricValue = (alert: PriceAlert): number | null => {
     const market = marketMap.get(alert.marketId);
@@ -189,29 +251,67 @@ export function evaluateAlerts(markets: Market[]): void {
 
   setAlertsState("alerts", (prev) =>
     prev.map((alert) => {
-      if (alert.status !== "active") return alert;
+      if (alert.status === "dismissed") return alert;
 
       const value = resolveMetricValue(alert);
 
       if (value === null || !Number.isFinite(value)) return alert;
+
+      const runtime = ensureRuntimeState(alert.id);
+      const debouncePasses = normalizeDebouncePasses(alert.debouncePasses);
+      const cooldownMinutes = normalizeCooldownMinutes(alert.cooldownMinutes);
 
       const hit =
         alert.condition === "above" ? value >= alert.threshold :
         value <= alert.threshold;
 
       if (hit) {
-        anyTriggered = true;
-        lastTriggeredId = alert.id;
-        return { ...alert, status: "triggered" as const, triggeredAt: Date.now() };
+        runtime.consecutiveHits = Math.min(debouncePasses, runtime.consecutiveHits + 1);
+
+        const debounceSatisfied = runtime.consecutiveHits >= debouncePasses;
+        const cooldownMs = cooldownMinutes * 60_000;
+        const cooledDown =
+          alert.lastNotifiedAt === undefined
+            ? true
+            : now - alert.lastNotifiedAt >= cooldownMs;
+
+        if (!runtime.latched && debounceSatisfied && cooledDown) {
+          runtime.latched = true;
+          anyTriggered = true;
+          hasStateChange = true;
+          lastTriggeredId = alert.id;
+
+          return {
+            ...alert,
+            status: "triggered" as const,
+            triggeredAt: now,
+            lastNotifiedAt: now,
+            triggerCount: (alert.triggerCount ?? 0) + 1,
+          };
+        }
+
+        return alert;
       }
+
+      runtime.consecutiveHits = 0;
+      runtime.latched = false;
+
+      if (alert.status === "triggered") {
+        hasStateChange = true;
+        return { ...alert, status: "active" as const };
+      }
+
       return alert;
     })
   );
 
   if (anyTriggered) {
     setAlertsState("lastTriggered", lastTriggeredId);
-    saveAlerts();
     // system bell
     process.stdout.write("\x07");
+  }
+
+  if (hasStateChange || anyTriggered) {
+    saveAlerts();
   }
 }

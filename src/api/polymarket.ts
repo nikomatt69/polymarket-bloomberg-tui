@@ -1,12 +1,16 @@
 /**
  * Polymarket API client for fetching market data
- * Uses Gamma API for markets and CLOB API for price history
+ * Uses Gamma API for markets and CLOB API for price history and trading
  */
 
-import { Market, Outcome, PriceHistory, PricePoint } from "../types/market";
+import { Market, Outcome, PriceHistory, PricePoint, Event, Series, Tag, Category } from "../types/market";
 
 const GAMMA_API_BASE = "https://gamma-api.polymarket.com";
 const CLOB_API_BASE = "https://clob.polymarket.com";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
 
 interface GammaMarket {
   id: string;
@@ -27,6 +31,38 @@ interface GammaMarket {
   volume24hr: number | null;
   oneDayPriceChange: number | null;
   clobTokenIds: string | null;
+  groupItemTitle?: string | null;
+  tags?: string[] | null;
+}
+
+interface GammaEvent {
+  id: string;
+  title: string;
+  slug: string;
+  description?: string;
+  startDate?: string;
+  endDate?: string;
+  seriesId?: string;
+  seriesTitle?: string;
+  markets?: GammaMarket[];
+  tags?: string[];
+  active?: boolean;
+}
+
+interface GammaSeries {
+  id: string;
+  slug: string;
+  title: string;
+  description?: string;
+  imageUrl?: string;
+  category?: string;
+}
+
+interface GammaTag {
+  id: string;
+  slug: string;
+  name: string;
+  category?: string;
 }
 
 interface ClobPriceHistoryResponse {
@@ -63,6 +99,51 @@ export interface OrderBookSummary {
   tickSize: number | null;
   updatedAt: number | null;
 }
+
+export interface MarketQuote {
+  tokenId: string;
+  outcome: string;
+  price: number;
+  bid: number;
+  ask: number;
+  spread: number;
+  volume24h: number;
+  liquidity: number;
+}
+
+export interface MarketDepth {
+  bids: Array<{ price: number; size: number; total: number }>;
+  asks: Array<{ price: number; size: number; total: number }>;
+  spread: number;
+  midPrice: number;
+}
+
+export interface TradeInfo {
+  orderId: string;
+  side: "BUY" | "SELL";
+  price: number;
+  size: number;
+  status: string;
+  marketTitle: string;
+  outcomeTitle: string;
+  timestamp: string;
+}
+
+export interface PositionInfo {
+  asset: string;
+  outcome: string;
+  marketId: string;
+  marketTitle: string;
+  size: number;
+  avgPrice: number;
+  curPrice: number;
+  cashPnl: number;
+  percentPnl: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper Functions
+// ─────────────────────────────────────────────────────────────────────────────
 
 function parseNumeric(value: unknown, fallback: number = 0): number {
   if (typeof value === "number") {
@@ -120,6 +201,10 @@ function parseGammaMarket(market: GammaMarket): Market {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Market Data API
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function getMarkets(limit: number = 50): Promise<Market[]> {
   const response = await fetch(
     `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&order=volumeNum&ascending=false`
@@ -148,7 +233,7 @@ export async function getMarketDetails(marketId: string): Promise<Market | null>
     }
 
     const data = await response.json();
-    
+
     if (!Array.isArray(data) || data.length === 0) {
       return null;
     }
@@ -159,6 +244,47 @@ export async function getMarketDetails(marketId: string): Promise<Market | null>
     return null;
   }
 }
+
+export async function getMarketsByCategory(category: string, limit: number = 50): Promise<Market[]> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&category=${encodeURIComponent(category)}&order=volumeNum&ascending=false`
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data
+      .map((item) => parseGammaMarket(item as GammaMarket))
+      .filter((market) => market.outcomes.length > 0);
+  } catch (error) {
+    console.error("Failed to fetch markets by category:", error);
+    return [];
+  }
+}
+
+export async function searchMarkets(query: string): Promise<Market[]> {
+  const allMarkets = await getMarkets(100);
+  return allMarkets.filter(
+    (m) =>
+      m.title.toLowerCase().includes(query.toLowerCase()) ||
+      (m.description && m.description.toLowerCase().includes(query.toLowerCase()))
+  );
+}
+
+export async function getTrendingMarkets(limit: number = 20): Promise<Market[]> {
+  return getMarkets(limit);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Price History API
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function getPriceHistory(
   marketId: string,
@@ -220,6 +346,10 @@ export async function getPriceHistory(
     return null;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Order Book API
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function getOrderBookSummary(tokenId: string): Promise<OrderBookSummary | null> {
   try {
@@ -283,11 +413,398 @@ export async function getOrderBookSummaries(tokenIds: string[]): Promise<Record<
   return result;
 }
 
-export async function searchMarkets(query: string): Promise<Market[]> {
-  const allMarkets = await getMarkets(100);
-  return allMarkets.filter(
-    (m) =>
-      m.title.toLowerCase().includes(query.toLowerCase()) ||
-      (m.description && m.description.toLowerCase().includes(query.toLowerCase()))
+// ─────────────────────────────────────────────────────────────────────────────
+// Market Quotes API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getMarketQuotes(marketId: string): Promise<MarketQuote[]> {
+  const market = await getMarketDetails(marketId);
+  if (!market) return [];
+
+  const quotes: MarketQuote[] = [];
+
+  for (const outcome of market.outcomes) {
+    const orderBook = await getOrderBookSummary(outcome.id);
+
+    quotes.push({
+      tokenId: outcome.id,
+      outcome: outcome.title,
+      price: outcome.price,
+      bid: orderBook?.bestBid ?? outcome.price,
+      ask: orderBook?.bestAsk ?? outcome.price,
+      spread: orderBook?.spread ?? 0,
+      volume24h: market.volume24h,
+      liquidity: market.liquidity,
+    });
+  }
+
+  return quotes;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Market Depth API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getMarketDepth(tokenId: string, levels: number = 10): Promise<MarketDepth | null> {
+  try {
+    const response = await fetch(`${CLOB_API_BASE}/book?token_id=${tokenId}`);
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as ClobBookResponse;
+    const bids = Array.isArray(data.bids) ? data.bids : [];
+    const asks = Array.isArray(data.asks) ? data.asks : [];
+
+    let bidTotal = 0;
+    const bidLevels = bids.slice(0, levels).map((level) => {
+      const size = parseNumeric(level.size, 0);
+      bidTotal += size;
+      return { price: parseNumeric(level.price, 0), size, total: bidTotal };
+    });
+
+    let askTotal = 0;
+    const askLevels = asks.slice(0, levels).map((level) => {
+      const size = parseNumeric(level.size, 0);
+      askTotal += size;
+      return { price: parseNumeric(level.price, 0), size, total: askTotal };
+    });
+
+    const bestBid = bidLevels[0]?.price ?? 0;
+    const bestAsk = askLevels[0]?.price ?? 0;
+    const spread = bestAsk - bestBid;
+    const midPrice = (bestBid + bestAsk) / 2;
+
+    return {
+      bids: bidLevels,
+      asks: askLevels,
+      spread,
+      midPrice,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Events & Series API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getActiveEvents(limit: number = 50): Promise<Event[]> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/events?limit=${limit}&active=true`
+    );
+
+    if (!response.ok) {
+      throw new Error(`Gamma API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data.map((item: GammaEvent) => ({
+      id: item.id,
+      title: item.title,
+      description: item.description,
+      slug: item.slug,
+      startDate: item.startDate,
+      endDate: item.endDate,
+      seriesId: item.seriesId,
+      seriesName: item.seriesTitle,
+      markets: (item.markets || []).map((m) => parseGammaMarket(m)).filter((market) => market.outcomes.length > 0),
+      tags: item.tags,
+      status: item.endDate && new Date(item.endDate) < new Date() ? "resolved" : (item.active ? "live" : "upcoming"),
+    }));
+  } catch (error) {
+    console.error("Failed to fetch active events:", error);
+    return [];
+  }
+}
+
+export async function getMarketsBySeries(seriesSlug: string, limit: number = 50): Promise<Market[]> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&series=${encodeURIComponent(seriesSlug)}&order=volumeNum&ascending=false`
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data
+      .map((item) => parseGammaMarket(item as GammaMarket))
+      .filter((market) => market.outcomes.length > 0);
+  } catch (error) {
+    console.error("Failed to fetch markets by series:", error);
+    return [];
+  }
+}
+
+export async function getMarketsByTag(tagSlug: string, limit: number = 50): Promise<Market[]> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&tag=${encodeURIComponent(tagSlug)}&order=volumeNum&ascending=false`
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data
+      .map((item) => parseGammaMarket(item as GammaMarket))
+      .filter((market) => market.outcomes.length > 0);
+  } catch (error) {
+    console.error("Failed to fetch markets by tag:", error);
+    return [];
+  }
+}
+
+export async function getSeries(): Promise<Series[]> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/series`);
+
+    if (!response.ok) {
+      throw new Error(`Gamma API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data.map((item: GammaSeries) => ({
+      id: item.id,
+      slug: item.slug,
+      name: item.title,
+      description: item.description,
+      imageUrl: item.imageUrl,
+      category: item.category,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch series:", error);
+    return [];
+  }
+}
+
+export async function getTags(): Promise<Tag[]> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/tags`);
+
+    if (!response.ok) {
+      throw new Error(`Gamma API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data.map((item: GammaTag) => ({
+      id: item.id,
+      slug: item.slug,
+      name: item.name,
+      category: item.category,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch tags:", error);
+    return [];
+  }
+}
+
+export async function getCategories(): Promise<Category[]> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/categories`);
+
+    if (!response.ok) {
+      throw new Error(`Gamma API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data.map((item: { category?: string; slug?: string; count?: number }) => ({
+      slug: item.category || item.slug || "",
+      name: item.category || item.slug || "",
+      marketsCount: item.count || 0,
+    }));
+  } catch (error) {
+    console.error("Failed to fetch categories:", error);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sports Markets API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getLiveSportsMarkets(): Promise<Market[]> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets?limit=200&closed=false&order=volumeNum&ascending=false`
+    );
+
+    if (!response.ok) {
+      throw new Error(`Gamma API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    const sportsKeywords = [
+      "nba", "nfl", "nhl", "mlb", "ncaa", "soccer", "football",
+      "basketball", "baseball", "hockey", "ufc", "mma", "tennis",
+      "golf", "boxing", "cricket", "rugby", "world cup", "olympics"
+    ];
+
+    return data
+      .map((item) => parseGammaMarket(item as GammaMarket))
+      .filter((market) => {
+        if (market.outcomes.length === 0) return false;
+        const titleLower = market.title.toLowerCase();
+        const categoryLower = (market.category || "").toLowerCase();
+        return sportsKeywords.some((kw) => titleLower.includes(kw) || categoryLower.includes(kw));
+      })
+      .slice(0, 50);
+  } catch (error) {
+    console.error("Failed to fetch live sports markets:", error);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Token Info API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TokenInfo {
+  assetId: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  color: string;
+  icon?: string;
+}
+
+export async function getTokenInfo(tokenId: string): Promise<TokenInfo | null> {
+  try {
+    const response = await fetch(`${CLOB_API_BASE}/token?asset_id=${tokenId}`);
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as Record<string, unknown>;
+    return {
+      assetId: (data.asset_id as string) ?? tokenId,
+      symbol: (data.symbol as string) ?? "UNKNOWN",
+      name: (data.name as string) ?? "Unknown Token",
+      decimals: parseNumeric(data.decimals, 6),
+      color: (data.color as string) ?? "#000000",
+      icon: data.icon as string | undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function getMultipleTokenInfo(tokenIds: string[]): Promise<Record<string, TokenInfo>> {
+  const unique = Array.from(new Set(tokenIds.filter(Boolean)));
+  const results: Record<string, TokenInfo> = {};
+
+  await Promise.all(
+    unique.map(async (tokenId) => {
+      const info = await getTokenInfo(tokenId);
+      if (info) {
+        results[tokenId] = info;
+      }
+    })
   );
+
+  return results;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Market Status API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface MarketStatus {
+  marketId: string;
+  status: "open" | "closed" | "resolved" | "pending";
+  resolvedOutcome?: string;
+  resolutionDate?: string;
+}
+
+export async function getMarketStatus(marketId: string): Promise<MarketStatus | null> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/markets?id=${marketId}`);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+
+    const market = data[0];
+
+    return {
+      marketId,
+      status: market.closed ? "closed" : market.resolved ? "resolved" : "open",
+      resolvedOutcome: market.resolvedOutcome ?? undefined,
+      resolutionDate: market.endDate ?? undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Global Metrics API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface GlobalMetrics {
+  totalVolume24h: number;
+  totalMarkets: number;
+  activeMarkets: number;
+  topCategories: Array<{ category: string; volume: number }>;
+}
+
+export async function getGlobalMetrics(): Promise<GlobalMetrics> {
+  try {
+    const [markets, categories] = await Promise.all([
+      getMarkets(100),
+      getCategories(),
+    ]);
+
+    const totalVolume24h = markets.reduce((sum, m) => sum + m.volume24h, 0);
+    const topCategories = categories
+      .map((c) => ({
+        category: c.name,
+        volume: c.marketsCount * 1000000, // Estimate
+      }))
+      .sort((a, b) => b.volume - a.volume)
+      .slice(0, 5);
+
+    return {
+      totalVolume24h,
+      totalMarkets: markets.length,
+      activeMarkets: markets.filter((m) => !m.closed).length,
+      topCategories,
+    };
+  } catch {
+    return {
+      totalVolume24h: 0,
+      totalMarkets: 0,
+      activeMarkets: 0,
+      topCategories: [],
+    };
+  }
 }

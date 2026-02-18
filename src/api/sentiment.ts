@@ -1,5 +1,8 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { generateText } from "ai";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
 import { Market } from "../types/market";
+import { getActiveAIProvider } from "../state";
 
 export interface SentimentAnalysis {
   marketId: string;
@@ -9,10 +12,6 @@ export interface SentimentAnalysis {
   keyFactors: string[];
   timestamp: number;
 }
-
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
-
-const anthropic = ANTHROPIC_API_KEY ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
 
 function normalizeResponseJson(raw: string): string {
   const trimmed = raw.trim();
@@ -56,17 +55,81 @@ function parseSentiment(raw: string): {
   };
 }
 
+function resolveSentimentModel():
+  | { model: unknown; providerLabel: string }
+  | { error: string } {
+  const provider = getActiveAIProvider();
+  if (!provider) {
+    return { error: "No AI provider configured" };
+  }
+
+  const apiKey = (provider.apiKey ?? "").trim();
+  if (!apiKey) {
+    return {
+      error: `Provider \"${provider.name}\" has no API key`,
+    };
+  }
+
+  const modelId = provider.model.trim();
+  if (!modelId) {
+    return {
+      error: `Provider \"${provider.name}\" has no model id`,
+    };
+  }
+
+  if (provider.kind === "anthropic") {
+    const anthropic = createAnthropic({
+      apiKey,
+      baseURL: provider.baseUrl,
+    });
+
+    return {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      model: anthropic(modelId) as any,
+      providerLabel: `${provider.name} / ${modelId}`,
+    };
+  }
+
+  const openai = createOpenAI({
+    apiKey,
+    baseURL: provider.baseUrl,
+    headers:
+      provider.kind === "openrouter"
+        ? {
+            "HTTP-Referer": "https://polymarket-tui.local",
+            "X-Title": "Polymarket Bloomberg TUI",
+          }
+        : undefined,
+  });
+
+  return {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    model: openai(modelId) as any,
+    providerLabel: `${provider.name} / ${modelId}`,
+  };
+}
+
+export function getSentimentProviderError(): string | null {
+  const resolved = resolveSentimentModel();
+  if ("error" in resolved) {
+    return `${resolved.error}. Configure Settings > PROVIDERS.`;
+  }
+  return null;
+}
+
 export async function analyzeMarketSentiment(market: Market): Promise<SentimentAnalysis | null> {
-  if (!anthropic) {
+  const resolved = resolveSentimentModel();
+  if ("error" in resolved) {
     return null;
   }
 
-  const outcomesInfo = market.outcomes?.map(o => 
-    `${o.title}: ${(o.price * 100).toFixed(1)}¢ (Vol: $${((o.volume || 0) / 1000).toFixed(1)}K)`
+  const outcomesInfo = market.outcomes?.map((outcome) =>
+    `${outcome.title}: ${(outcome.price * 100).toFixed(1)}¢ (Vol: $${((outcome.volume || 0) / 1000).toFixed(1)}K)`
   ).join(", ") || "Binary outcome market";
 
   const prompt = `You are a financial analyst specializing in prediction markets. Analyze the following Polymarket market and provide a brief sentiment assessment.
 
+PROVIDER: ${resolved.providerLabel}
 MARKET: ${market.title}
 ${market.description ? `DESCRIPTION: ${market.description}` : ""}
 CURRENT PRICES: ${outcomesInfo}
@@ -84,14 +147,15 @@ Provide your analysis in this exact JSON format:
 Respond only with valid JSON, no other text.`;
 
   try {
-    const result = await anthropic.messages.create({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1024,
-      messages: [{ role: "user", content: prompt }],
+    const result = await generateText({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      model: resolved.model as any,
+      prompt,
+      maxTokens: 900,
+      temperature: 0.2,
     });
 
-    const text = result.content[0].type === "text" ? result.content[0].text.trim() : "{}";
-    const parsed = parseSentiment(text);
+    const parsed = parseSentiment(result.text.trim());
 
     return {
       marketId: market.id,
@@ -109,14 +173,14 @@ Respond only with valid JSON, no other text.`;
 
 export async function analyzeMultipleMarkets(markets: Market[]): Promise<SentimentAnalysis[]> {
   const results: SentimentAnalysis[] = [];
-  
+
   for (const market of markets.slice(0, 5)) {
     const analysis = await analyzeMarketSentiment(market);
     if (analysis) {
       results.push(analysis);
     }
   }
-  
+
   return results;
 }
 
@@ -129,9 +193,9 @@ export function getOverallMarketSentiment(analyses: SentimentAnalysis[]): {
     return { sentiment: "neutral", avgConfidence: 0, marketCount: 0 };
   }
 
-  const bullishCount = analyses.filter(a => a.sentiment === "bullish").length;
-  const bearishCount = analyses.filter(a => a.sentiment === "bearish").length;
-  const avgConfidence = analyses.reduce((sum, a) => sum + a.confidence, 0) / analyses.length;
+  const bullishCount = analyses.filter((item) => item.sentiment === "bullish").length;
+  const bearishCount = analyses.filter((item) => item.sentiment === "bearish").length;
+  const avgConfidence = analyses.reduce((sum, item) => sum + item.confidence, 0) / analyses.length;
 
   let sentiment: "bullish" | "bearish" | "neutral";
   if (bullishCount > bearishCount) {

@@ -25,6 +25,22 @@ export interface MonthlyStats {
   tradeCount: number;
 }
 
+export interface MarketConcentrationEntry {
+  marketTitle: string;
+  value: number;
+  percentage: number;
+  pnl: number;
+  outcomeCount: number;
+}
+
+export interface MarketConcentrationRisk {
+  hhi: number;
+  topExposurePct: number;
+  effectiveMarketCount: number;
+  riskLevel: "low" | "medium" | "high";
+  entries: MarketConcentrationEntry[];
+}
+
 export interface AssetAllocation {
   outcome: string;
   value: number;
@@ -121,32 +137,130 @@ export function calculateAssetAllocation(positions: Position[]): AssetAllocation
 }
 
 export function calculateMonthlyStats(orders: PlacedOrder[]): MonthlyStats[] {
-  const monthlyMap = new Map<string, MonthlyStats>();
+  type Bucket = MonthlyStats & { monthStartTs: number };
+  type Lot = { size: number; price: number };
 
-  orders.forEach(order => {
-    if (order.status !== "FILLED" && order.status !== "MATCHED") return;
-    
+  const monthlyMap = new Map<string, Bucket>();
+  const inventoryLots = new Map<string, Lot[]>();
+
+  const filledOrders = orders
+    .filter((order) => order.status === "FILLED" || order.status === "MATCHED")
+    .slice()
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  for (const order of filledOrders) {
+    const filledSize = order.sizeMatched > 0 ? order.sizeMatched : order.originalSize;
+    if (!Number.isFinite(filledSize) || filledSize <= 0) {
+      continue;
+    }
+
     const date = new Date(order.createdAt);
     const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
     const monthLabel = date.toLocaleString("en-US", { month: "short", year: "2-digit" });
-    
-    const volume = order.price * order.originalSize;
-    
-    const existing = monthlyMap.get(monthKey);
-    if (existing) {
-      existing.volume += volume;
-      existing.tradeCount += 1;
+    const monthStartTs = Date.UTC(date.getFullYear(), date.getMonth(), 1);
+
+    const bucket = monthlyMap.get(monthKey) ?? {
+      month: monthLabel,
+      volume: 0,
+      pnl: 0,
+      tradeCount: 0,
+      monthStartTs,
+    };
+
+    bucket.volume += order.price * filledSize;
+    bucket.tradeCount += 1;
+
+    const tokenLots = inventoryLots.get(order.tokenId) ?? [];
+
+    if (order.side === "BUY") {
+      tokenLots.push({ size: filledSize, price: order.price });
+      inventoryLots.set(order.tokenId, tokenLots);
     } else {
-      monthlyMap.set(monthKey, {
-        month: monthLabel,
-        volume,
-        pnl: 0,
-        tradeCount: 1,
+      let remainingToMatch = filledSize;
+      let realizedPnl = 0;
+
+      while (remainingToMatch > 1e-8 && tokenLots.length > 0) {
+        const lot = tokenLots[0]!;
+        const matchedSize = Math.min(remainingToMatch, lot.size);
+        realizedPnl += (order.price - lot.price) * matchedSize;
+
+        lot.size -= matchedSize;
+        remainingToMatch -= matchedSize;
+
+        if (lot.size <= 1e-8) {
+          tokenLots.shift();
+        }
+      }
+
+      bucket.pnl += realizedPnl;
+      inventoryLots.set(order.tokenId, tokenLots);
+    }
+
+    monthlyMap.set(monthKey, bucket);
+  }
+
+  return Array.from(monthlyMap.values())
+    .sort((a, b) => b.monthStartTs - a.monthStartTs)
+    .map(({ monthStartTs: _monthStartTs, ...row }) => row);
+}
+
+export function calculateMarketConcentration(positions: Position[]): MarketConcentrationRisk {
+  const totalValue = positions.reduce((sum, position) => sum + position.currentValue, 0);
+
+  if (totalValue <= 0) {
+    return {
+      hhi: 0,
+      topExposurePct: 0,
+      effectiveMarketCount: 0,
+      riskLevel: "low",
+      entries: [],
+    };
+  }
+
+  const marketMap = new Map<string, MarketConcentrationEntry>();
+
+  for (const position of positions) {
+    const key = position.title || "Unknown market";
+    const existing = marketMap.get(key);
+    if (existing) {
+      existing.value += position.currentValue;
+      existing.pnl += position.cashPnl;
+      existing.outcomeCount += 1;
+    } else {
+      marketMap.set(key, {
+        marketTitle: key,
+        value: position.currentValue,
+        percentage: 0,
+        pnl: position.cashPnl,
+        outcomeCount: 1,
       });
     }
-  });
+  }
 
-  return Array.from(monthlyMap.values()).sort((a, b) => a.month.localeCompare(b.month));
+  const entries = Array.from(marketMap.values())
+    .map((entry) => ({
+      ...entry,
+      percentage: (entry.value / totalValue) * 100,
+    }))
+    .sort((a, b) => b.value - a.value);
+
+  const hhi = entries.reduce((sum, entry) => sum + entry.percentage * entry.percentage, 0);
+  const topExposurePct = entries[0]?.percentage ?? 0;
+  const effectiveMarketCount = hhi > 0 ? 10_000 / hhi : 0;
+  const riskLevel: "low" | "medium" | "high" =
+    hhi >= 3_500 || topExposurePct >= 55
+      ? "high"
+      : hhi >= 2_000 || topExposurePct >= 35
+        ? "medium"
+        : "low";
+
+  return {
+    hhi,
+    topExposurePct,
+    effectiveMarketCount,
+    riskLevel,
+    entries,
+  };
 }
 
 export function calculateROI(initialBalance: number, currentValue: number): number {

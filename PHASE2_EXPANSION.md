@@ -29,7 +29,7 @@ No mocks, no synthetic runtime data, no placeholder flows.
 - [x] Selected-market panel upgrade (market pulse, trend, regime, depth context)
 - [x] Outcome table enriched with live bid/ask/spread/depth snapshot
 
-### Quarter 2 - Core Trading (in progress, advanced items pending)
+### Quarter 2 - Core Trading (complete for current scope)
 
 - [x] Order form with BUY/SELL and GTC/FOK/GTD
 - [x] EIP-712 order signing against CTF Exchange domain
@@ -41,17 +41,28 @@ No mocks, no synthetic runtime data, no placeholder flows.
 - [x] Account stats modal (`U`) tied to real wallet/positions/trades state
 - [x] Order history filters (status/market/date)
 - [x] CSV export and replay/duplicate order action
+- [x] Dual-cursor order-history navigation (`TAB` open/trades) with quick status presets
+- [x] Post-only toggle with runtime FOK guardrail
+- [x] Book-aware pre-submit checks (tick size, min order size, balance/notional)
+- [x] Spread/slippage warning layer based on live top-of-book
+- [x] Bulk cancel actions (all open / selected market)
+- [x] Cancel-reason drilldown and delayed/unmatched status guidance
 
-### Quarter 3 - Advanced Features (in progress)
+### Quarter 3 - Advanced Features (mostly complete)
 
 - [x] Alerts persisted to `~/.polymarket-tui/alerts.json`
 - [x] Alert trigger engine with system bell notification
 - [x] Multi-metric alerts: price, 24h change, 24h volume, liquidity
+- [x] Alert cooldown + debounce controls with persistence
 - [x] Technical indicators panel on real historical data (SMA/RSI/MACD/Bollinger)
 - [x] Sentiment panel with Anthropic integration (hard fail if API key missing, no fake output)
 - [x] Comparison panel and watchlist panel overlays
-- [ ] View manager fully unified with layout persistence
-- [ ] Theme selector and persisted theme mode
+- [x] Settings and shortcuts overlays integrated in global keyboard flow
+- [x] View manager unified with persisted main layout mode (market/portfolio)
+- [x] Account analytics expanded with monthly execution + concentration risk
+- [x] Theme selector with persisted mode/name and nikcli theme list selection
+- [x] Theme list fuzzy search/jump in settings
+- [x] Compact responsive footer that keeps only main shortcuts + `[K]` for full list
 
 ### Quarter 4 - Polish and Expansion (not started)
 
@@ -82,6 +93,14 @@ No mocks, no synthetic runtime data, no placeholder flows.
 15. Added dual-cursor order-history navigation (open orders vs trade history) with `TAB` section switching.
 16. Added post-only toggle in order form with runtime validation against FOK.
 17. Added bulk cancel actions for all open orders and selected-market orders.
+18. Added cancel-reason drilldown + status guidance copy for delayed/unmatched/live states.
+19. Added nikcli theme engine integration with JSON reference resolution, persisted theme mode/name, and on-demand theme reload.
+20. Added theme list selector in Settings (mouse select + keyboard cycle) with active theme index.
+21. Added alert cooldown/debounce controls (creation + persistence + runtime trigger gating) to reduce noisy repeat alerts.
+22. Added monthly execution analytics and market-concentration risk metrics in account stats.
+23. Unified and persisted main layout view state (`market`/`portfolio`) in app config.
+24. Added compact responsive footer behavior with primary shortcuts only and explicit `[K]` shortcut-panel hint.
+25. Added theme-list fuzzy search mode in Settings (`/` to edit, `X` clear, `ENTER` apply top match).
 
 ---
 
@@ -93,22 +112,28 @@ No mocks, no synthetic runtime data, no placeholder flows.
 2. Add per-market replay from trade rows (secondary selection cursor).
 3. Add optional post-only order toggle in order form.
 4. Add bulk cancel actions (selected market / all open).
+5. Add per-order cancel reason drilldown in order history rows.
+6. Add delayed/unmatched status badges with retry guidance.
+7. Add pre-submit sanity checks for notional/tick/min-size.
+8. Add market-depth-aware slippage and spread warnings in order form.
 
 Status: Completed.
-
-Next Q2 focus:
-
-1. Add per-order cancel reason drilldown in order history rows.
-2. Add explicit status badges for delayed/unmatched retry guidance.
-3. Add optional pre-submit sanity checks for notional and spread distance.
-4. Add market-depth-aware slippage warning in order form.
 
 ### Q3 - Complete Power Features
 
 1. Unify view manager with the top-level layout and persist the active view.
-2. Add persistent theme mode control (dark/light) with keyboard toggle.
-3. Expand account analytics with monthly section and market concentration risk.
-4. Add alert cooldown/debounce options to avoid repeated noise.
+2. Expand account analytics with monthly section and market concentration risk.
+3. Add alert cooldown/debounce options to avoid repeated noise.
+4. Add compact responsive footer strategy for narrow terminals (priority hint rotation/ellipsis).
+5. Add optional fuzzy jump/search for very long theme lists.
+
+Status: Completed.
+
+Next Q3 stabilization focus:
+
+1. Optional auto-reload watcher for theme JSON file changes.
+2. Add per-alert "auto-reset" policy toggle (latch vs repeat-after-cooldown).
+3. Normalize chat/assistant module type-check issues to restore fully green `bun run type-check`.
 
 ### Q4 - UX and ecosystem
 
@@ -144,6 +169,8 @@ If an external API is unavailable, UI must show explicit unavailable/error state
 - `C` comparison
 - `L` watchlist
 - `X` watch toggle, `F` watch filter
+- `E` settings
+- `K` shortcuts panel
 - `R` refresh
 - `Ctrl+K` sort cycle
 - `1 / 5 / 7 / A` timeframe
@@ -151,6 +178,7 @@ If an external API is unavailable, UI must show explicit unavailable/error state
 
 Order history panel keys:
 
+- `C` cancel selected open order
 - `V` status filter
 - `1-7` quick status presets
 - `B` side filter
@@ -166,3 +194,21 @@ Order form panel keys:
 
 - `T` order type (GTC/FOK/GTD)
 - `P` post-only toggle
+- `TAB` switch field
+- `ENTER` submit
+
+Settings panel (Theme tab) keys:
+
+- `T` / `ENTER` toggle dark/light mode
+- `N` / `↓` next theme
+- `P` / `↑` previous theme
+- `R` reload theme files from nikcli theme directory
+- `/` start fuzzy-search editing
+- `X` clear theme search query
+
+Alerts add-mode keys:
+
+- `M` metric cycle, `C` condition toggle
+- `TAB` focus cycle (condition/threshold/cooldown/debounce)
+- `+/-` or `←/→` adjust cooldown/debounce
+- `ENTER` save alert, `ESC` cancel
