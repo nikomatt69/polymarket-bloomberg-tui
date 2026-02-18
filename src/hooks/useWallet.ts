@@ -2,9 +2,7 @@
  * SolidJS reactive hook for wallet state management
  */
 
-import { createSignal } from "solid-js";
 import {
-  WalletState,
   loadWalletConfig,
   connectFromPrivateKey,
   disconnectWallet,

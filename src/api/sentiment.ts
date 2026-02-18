@@ -14,14 +14,55 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 
 const anthropic = ANTHROPIC_API_KEY ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
 
+function normalizeResponseJson(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("```")) {
+    return trimmed;
+  }
+
+  return trimmed
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+}
+
+function parseSentiment(raw: string): {
+  sentiment: "bullish" | "bearish" | "neutral";
+  confidence: number;
+  summary: string;
+  keyFactors: string[];
+} {
+  const cleaned = normalizeResponseJson(raw);
+  const parsed = JSON.parse(cleaned) as {
+    sentiment?: string;
+    confidence?: number;
+    summary?: string;
+    keyFactors?: string[];
+  };
+
+  const sentiment =
+    parsed.sentiment === "bullish" || parsed.sentiment === "bearish" || parsed.sentiment === "neutral"
+      ? parsed.sentiment
+      : "neutral";
+
+  return {
+    sentiment,
+    confidence: Math.max(0, Math.min(100, Number(parsed.confidence ?? 50))),
+    summary: String(parsed.summary ?? "No analysis available"),
+    keyFactors: Array.isArray(parsed.keyFactors)
+      ? parsed.keyFactors.map(String).filter(Boolean)
+      : [],
+  };
+}
+
 export async function analyzeMarketSentiment(market: Market): Promise<SentimentAnalysis | null> {
   if (!anthropic) {
-    console.warn("ANTHROPIC_API_KEY not set");
     return null;
   }
 
   const outcomesInfo = market.outcomes?.map(o => 
-    `${o.title}: ${(o.price * 100).toFixed(1)}¢ (Vol: $${(o.volume || 0 / 1000).toFixed(1)}K)`
+    `${o.title}: ${(o.price * 100).toFixed(1)}¢ (Vol: $${((o.volume || 0) / 1000).toFixed(1)}K)`
   ).join(", ") || "Binary outcome market";
 
   const prompt = `You are a financial analyst specializing in prediction markets. Analyze the following Polymarket market and provide a brief sentiment assessment.
@@ -49,8 +90,8 @@ Respond only with valid JSON, no other text.`;
       messages: [{ role: "user", content: prompt }],
     });
 
-    const text = result.content[0].type === "text" ? result.content[0].text.trim() : "";
-    const parsed = JSON.parse(text);
+    const text = result.content[0].type === "text" ? result.content[0].text.trim() : "{}";
+    const parsed = parseSentiment(text);
 
     return {
       marketId: market.id,

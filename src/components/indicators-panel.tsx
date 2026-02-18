@@ -1,13 +1,15 @@
-import { Show, For, createSignal } from "solid-js";
+import { Show, createSignal, createEffect, createMemo, For } from "solid-js";
+import { RGBA } from "@opentui/core";
 import { useTheme } from "../context/theme";
-import { appState } from "../state";
-import { 
-  calculateSMA, 
-  calculateRSI, 
-  calculateMACD, 
+import { appState, setIndicatorsPanelOpen } from "../state";
+import {
+  calculateSMA,
+  calculateRSI,
+  calculateMACD,
   calculateBollingerBands,
-  OHLCV 
 } from "../utils/indicators";
+import { usePriceHistory } from "../hooks/useMarketData";
+import { PriceHistory } from "../types/market";
 
 type IndicatorType = "sma" | "rsi" | "macd" | "bollinger";
 
@@ -17,121 +19,190 @@ const [rsiPeriod, setRsiPeriod] = createSignal(14);
 
 export function IndicatorsPanel() {
   const { theme } = useTheme();
+  const [history, setHistory] = createSignal<PriceHistory | null>(null);
+  const [loading, setLoading] = createSignal(false);
+  const [errorMessage, setErrorMessage] = createSignal<string | null>(null);
 
-  const selectedMarket = () => 
-    appState.markets.find(m => m.id === appState.selectedMarketId);
+  const selectedMarket = () => appState.markets.find((m) => m.id === appState.selectedMarketId);
 
-  const mockPriceData = (): number[] => {
-    const base = selectedMarket()?.outcomes?.[0]?.price || 0.5;
-    return Array.from({ length: 30 }, (_, i) => 
-      base + (Math.sin(i * 0.3) * 0.1) + (Math.random() * 0.05 - 0.025)
-    );
-  };
+  createEffect(() => {
+    const market = selectedMarket();
+    if (!market) {
+      setHistory(null);
+      setErrorMessage(null);
+      return;
+    }
 
-  const indicatorValues = () => {
-    const data = mockPriceData();
+    let cancelled = false;
+    setLoading(true);
+    setErrorMessage(null);
+
+    void (async () => {
+      try {
+        const nextHistory = await usePriceHistory(market.id, appState.timeframe);
+        if (cancelled) return;
+
+        if (!nextHistory || nextHistory.data.length === 0) {
+          setHistory(null);
+          setErrorMessage("No historical ticks for this timeframe");
+        } else {
+          setHistory(nextHistory);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setHistory(null);
+          setErrorMessage(error instanceof Error ? error.message : "Unable to load indicators");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  });
+
+  const prices = createMemo(() => (history()?.data ?? []).map((point) => point.price));
+
+  const indicatorValues = createMemo(() => {
+    const data = prices();
+    if (data.length < 3) return null;
+
+    const takeLast = (values: number[]) => values.filter((value) => !Number.isNaN(value)).slice(-8);
+
     switch (selectedIndicator()) {
-      case "sma":
-        return { 
-          name: "SMA", 
-          values: calculateSMA(data, smaPeriod()).slice(-10),
-          current: data[data.length - 1],
-          prev: data[data.length - 2],
+      case "sma": {
+        const sma = calculateSMA(data, smaPeriod());
+        return {
+          name: `SMA(${smaPeriod()})`,
+          values: takeLast(sma),
+          current: sma[sma.length - 1],
+          prev: sma[sma.length - 2],
         };
-      case "rsi":
-        return { 
-          name: "RSI", 
-          values: calculateRSI(data, rsiPeriod()).slice(-10),
-          current: calculateRSI(data, rsiPeriod())[data.length - 1] || 50,
-          prev: calculateRSI(data, rsiPeriod())[data.length - 2] || 50,
+      }
+      case "rsi": {
+        const rsi = calculateRSI(data, rsiPeriod());
+        return {
+          name: `RSI(${rsiPeriod()})`,
+          values: takeLast(rsi),
+          current: rsi[rsi.length - 1],
+          prev: rsi[rsi.length - 2],
         };
-      case "macd":
+      }
+      case "macd": {
         const macd = calculateMACD(data);
         return {
-          name: "MACD",
-          values: macd.histogram.slice(-10),
-          current: macd.histogram[data.length - 1] || 0,
-          prev: macd.histogram[data.length - 2] || 0,
+          name: "MACD HIST",
+          values: takeLast(macd.histogram),
+          current: macd.histogram[macd.histogram.length - 1],
+          prev: macd.histogram[macd.histogram.length - 2],
         };
-      case "bollinger":
+      }
+      case "bollinger": {
         const bb = calculateBollingerBands(data, smaPeriod());
         return {
-          name: "BBANDS",
-          values: bb.middle.slice(-10),
-          current: bb.middle[data.length - 1] || 0,
-          prev: bb.middle[data.length - 2] || 0,
+          name: `BB MID(${smaPeriod()})`,
+          values: takeLast(bb.middle),
+          current: bb.middle[bb.middle.length - 1],
+          prev: bb.middle[bb.middle.length - 2],
         };
+      }
+      default:
+        return null;
     }
-  };
+  });
 
-  const getIndicatorColor = (indicator: IndicatorType) => {
-    switch (indicator) {
-      case "sma": return theme.success;
-      case "rsi": return theme.warning;
-      case "macd": return theme.accent;
-      case "bollinger": return theme.primary;
-    }
-  };
+  const validIndicator = createMemo(() => {
+    const value = indicatorValues();
+    if (!value) return null;
+    if (!Number.isFinite(value.current) || !Number.isFinite(value.prev)) return null;
+    return value;
+  });
+
+  type IndicatorOption = { id: IndicatorType; label: string; color: RGBA };
+  const indicatorOptions: IndicatorOption[] = [
+    { id: "sma",      label: "SMA",  color: theme.success },
+    { id: "rsi",      label: "RSI",  color: theme.warning },
+    { id: "macd",     label: "MACD", color: theme.accent  },
+    { id: "bollinger",label: "BB",   color: theme.primary },
+  ];
 
   return (
     <box
       position="absolute"
       top={2}
-      left="35%"
-      width="30%"
-      height={16}
-      backgroundColor={theme.backgroundPanel}
+      left="32%"
+      width="36%"
+      height={18}
+      backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={150}
     >
-      <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
-        <text content=" TECHNICAL INDICATORS " fg={theme.highlightText} width={22} />
+      {/* Header */}
+      <box height={1} width="100%" backgroundColor={theme.accent} flexDirection="row">
+        <text content=" ◈ INDICATORS " fg={theme.highlightText} />
         <box flexGrow={1} />
-        <text content=" [ESC] Close " fg={theme.highlightText} width={14} />
+        <box onMouseDown={() => setIndicatorsPanelOpen(false)}>
+          <text content=" [ESC] ✕ " fg={theme.highlightText} />
+        </box>
       </box>
 
-      <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingTop={1}>
+      {/* Separator */}
+      <box height={1} width="100%" backgroundColor={theme.accentMuted} />
+
+      <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
         <Show when={selectedMarket()}>
-          <text content={selectedMarket()!.title.slice(0, 45)} fg={theme.textBright} />
+          <text content={selectedMarket()!.title.slice(0, 48)} fg={theme.textBright} />
           <text content="" />
 
+          {/* Indicator selector — mouse clickable */}
           <box flexDirection="row" gap={2}>
-            <text 
-              content={selectedIndicator() === "sma" ? "[SMA]" : " SMA "} 
-              fg={selectedIndicator() === "sma" ? theme.success : theme.textMuted}
-            />
-            <text 
-              content={selectedIndicator() === "rsi" ? "[RSI]" : " RSI "} 
-              fg={selectedIndicator() === "rsi" ? theme.warning : theme.textMuted}
-            />
-            <text 
-              content={selectedIndicator() === "macd" ? "[MACD]" : " MACD "} 
-              fg={selectedIndicator() === "macd" ? theme.accent : theme.textMuted}
-            />
-            <text 
-              content={selectedIndicator() === "bollinger" ? "[BB]" : " BB "} 
-              fg={selectedIndicator() === "bollinger" ? theme.primary : theme.textMuted}
-            />
+            <For each={indicatorOptions}>
+              {(opt) => (
+                <box onMouseDown={() => setSelectedIndicator(opt.id)}>
+                  <text
+                    content={selectedIndicator() === opt.id ? `[${opt.label}]` : ` ${opt.label} `}
+                    fg={selectedIndicator() === opt.id ? opt.color : theme.textMuted}
+                  />
+                </box>
+              )}
+            </For>
           </box>
 
           <text content="" />
-          
-          <Show when={indicatorValues()}>
-            <box flexDirection="row" gap={4}>
-              <text content={`Current: ${indicatorValues()!.current.toFixed(4)}`} fg={getIndicatorColor(selectedIndicator())} />
-              <text 
-                content={`${indicatorValues()!.current >= indicatorValues()!.prev ? "↑" : "↓"}`} 
-                fg={indicatorValues()!.current >= indicatorValues()!.prev ? theme.success : theme.error} 
+
+          <Show when={loading()}>
+            <text content="Loading price data..." fg={theme.warning} />
+          </Show>
+
+          <Show when={!loading() && errorMessage()}>
+            <text content={errorMessage()!} fg={theme.error} />
+          </Show>
+
+          <Show when={!loading() && !errorMessage() && validIndicator()}>
+            <box flexDirection="row" gap={3}>
+              <text content={validIndicator()!.name} fg={theme.primary} />
+              <text
+                content={validIndicator()!.current >= validIndicator()!.prev ? "↑ Rising" : "↓ Falling"}
+                fg={validIndicator()!.current >= validIndicator()!.prev ? theme.success : theme.error}
               />
             </box>
-            
+            <text content={`Current: ${validIndicator()!.current.toFixed(4)}`} fg={theme.text} />
+
             <text content="" />
-            <text content={`Last 10 values:`} fg={theme.textMuted} />
-            <text content={indicatorValues()!.values.map(v => v.toFixed(3)).join(" ")} fg={theme.text} width="95%" />
+            <text content="Last values:" fg={theme.textMuted} />
+            <text content={validIndicator()!.values.map((v) => v.toFixed(3)).join("  ")} fg={theme.text} width="95%" />
+          </Show>
+
+          <Show when={!loading() && !errorMessage() && !validIndicator()}>
+            <text content="Not enough price data" fg={theme.textMuted} />
           </Show>
 
           <text content="" />
-          <text content=" [1-4] Select Indicator  [+/=] Period " fg={theme.textMuted} />
+          <text content="[1-4] Select  [+/=] Period  Click to select" fg={theme.textMuted} />
         </Show>
 
         <Show when={!selectedMarket()}>
@@ -142,4 +213,4 @@ export function IndicatorsPanel() {
   );
 }
 
-export { selectedIndicator, setSelectedIndicator, smaPeriod, rsiPeriod };
+export { selectedIndicator, setSelectedIndicator, smaPeriod, setSmaPeriod, rsiPeriod, setRsiPeriod };

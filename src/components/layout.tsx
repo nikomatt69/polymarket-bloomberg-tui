@@ -1,4 +1,5 @@
 import { Show } from "solid-js";
+import { RGBA } from "@opentui/core";
 import { TopBar } from "./top-bar";
 import { SearchBar } from "./search-bar";
 import { MarketList } from "./market-list";
@@ -10,8 +11,28 @@ import { WalletConnect } from "./wallet-connect";
 import { OrderForm } from "./order-form";
 import { OrderHistory } from "./order-history";
 import { AlertsPanel } from "./alerts-panel";
+import { IndicatorsPanel } from "./indicators-panel";
+import { SentimentPanel } from "./sentiment-panel";
+import { ComparisonPanel } from "./comparison-panel";
+import { WatchlistPanel } from "./watchlist-panel";
+import { AccountStatsPanel } from "./account-stats";
+import { SettingsPanel } from "./settings-panel";
+import { ShortcutsPanel } from "./shortcuts-panel";
 import { useTheme } from "../context/theme";
-import { walletModalOpen, portfolioOpen, orderFormOpen, orderHistoryOpen } from "../state";
+import {
+  walletModalOpen,
+  portfolioOpen,
+  orderFormOpen,
+  orderHistoryOpen,
+  indicatorsPanelOpen,
+  sentimentPanelOpen,
+  comparisonPanelOpen,
+  comparisonSelectedMarketId,
+  watchlistPanelOpen,
+  accountStatsOpen,
+  settingsPanelOpen,
+  shortcutsPanelOpen,
+} from "../state";
 import { alertsState } from "../hooks/useAlerts";
 
 export function Layout() {
@@ -26,6 +47,9 @@ export function Layout() {
     >
       {/* Top Bar */}
       <TopBar />
+
+      {/* Gap */}
+      <box height={1} width="100%" backgroundColor={theme.background} />
 
       {/* Search Bar */}
       <box height={1} width="100%" backgroundColor={theme.background}>
@@ -65,6 +89,23 @@ export function Layout() {
       {/* Footer */}
       <Footer />
 
+      {/* Backdrop — dims main content behind any open panel */}
+      <Show when={
+        walletModalOpen() || orderFormOpen() || orderHistoryOpen() ||
+        alertsState.panelOpen || indicatorsPanelOpen() || sentimentPanelOpen() ||
+        comparisonPanelOpen() || watchlistPanelOpen() || settingsPanelOpen() || shortcutsPanelOpen()
+      }>
+        <box
+          position="absolute"
+          top={0}
+          left={0}
+          width="100%"
+          height="100%"
+          backgroundColor={RGBA.fromInts(0, 0, 0, 200)}
+          zIndex={90}
+        />
+      </Show>
+
       {/* Wallet Modal Overlay */}
       <Show when={walletModalOpen()}>
         <WalletConnect />
@@ -83,6 +124,41 @@ export function Layout() {
       {/* Alerts Panel Modal */}
       <Show when={alertsState.panelOpen}>
         <AlertsPanel />
+      </Show>
+
+      {/* Indicators Panel Modal */}
+      <Show when={indicatorsPanelOpen()}>
+        <IndicatorsPanel />
+      </Show>
+
+      {/* Sentiment Panel Modal */}
+      <Show when={sentimentPanelOpen()}>
+        <SentimentPanel />
+      </Show>
+
+      {/* Comparison Panel Modal */}
+      <Show when={comparisonPanelOpen()}>
+        <ComparisonPanel secondaryMarketId={comparisonSelectedMarketId()} />
+      </Show>
+
+      {/* Watchlist Panel Modal */}
+      <Show when={watchlistPanelOpen()}>
+        <WatchlistPanel />
+      </Show>
+
+      {/* Account Stats Panel Modal */}
+      <Show when={accountStatsOpen()}>
+        <AccountStatsPanel />
+      </Show>
+
+      {/* Settings Panel Modal */}
+      <Show when={settingsPanelOpen()}>
+        <SettingsPanel />
+      </Show>
+
+      {/* Shortcuts Panel Modal */}
+      <Show when={shortcutsPanelOpen()}>
+        <ShortcutsPanel />
       </Show>
     </box>
   );

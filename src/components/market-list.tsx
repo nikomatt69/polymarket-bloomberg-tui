@@ -12,7 +12,7 @@ export function MarketList() {
   return (
     <scrollbox flexGrow={1} width="100%" paddingLeft={1}>
       <Show when={watchlistState.filterActive}>
-        <text content={`★ Watchlist filter active (L to toggle)${filterLabel()}`} fg={theme.accent} />
+        <text content={`★ Watchlist filter active (F to toggle)${filterLabel()}`} fg={theme.accent} />
       </Show>
       <Show
         when={!appState.loading}
@@ -30,7 +30,7 @@ export function MarketList() {
             </box>
           }
         >
-          <For each={filtered().slice(0, 18)}>
+          <For each={filtered()}>
             {(market, index) => {
               const isHighlighted = () => index() === highlightedIndex();
               const watched = () => isWatched(market.id);

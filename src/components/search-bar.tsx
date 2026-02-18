@@ -37,7 +37,6 @@ export function SearchBar() {
       {/* Search Input */}
       <input
         width="100%"
-        placeholder="Search markets..."
         value={appState.searchQuery}
         onInput={(value: string) => updateSearchQuery(value)}
       />

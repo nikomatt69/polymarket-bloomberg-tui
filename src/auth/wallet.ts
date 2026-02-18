@@ -1,30 +1,34 @@
-/**
- * Wallet authentication for Polymarket CLOB API
- * Stores address + private key in ~/.polymarket-tui/config.json
- * Uses L1 ECDSA auth for signed API requests
- */
-
-import { createWalletClient, createPublicClient, http, formatUnits } from "viem";
+import { createPublicClient, http, formatUnits } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
+import { createHmac } from "crypto";
 import { homedir } from "os";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
 const CLOB_API_BASE = "https://clob.polymarket.com";
-const GAMMA_API_BASE = "https://gamma-api.polymarket.com";
-const USDC_CONTRACT = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // USDC on Polygon
+const USDC_CONTRACT = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+const CLOB_AUTH_MESSAGE = "This message attests that I control the given wallet";
+
+export interface ApiCredentials {
+  apiKey: string;
+  apiSecret: string;
+  apiPassphrase: string;
+}
 
 export interface WalletConfig {
   address: string;
-  privateKey: string; // stored locally, never sent to any server
+  privateKey: string;
   connectedAt: number;
+  apiKey?: string;
+  apiSecret?: string;
+  apiPassphrase?: string;
 }
 
 export interface WalletState {
   address: string | null;
   connected: boolean;
-  balance: number; // USDC balance
+  balance: number;
   username?: string;
   apiKey?: string;
   apiSecret?: string;
@@ -46,7 +50,9 @@ function getWalletConfigPath(): string {
 export function loadWalletConfig(): WalletConfig | null {
   try {
     const data = readFileSync(getWalletConfigPath(), "utf-8");
-    return JSON.parse(data) as WalletConfig;
+    const parsed = JSON.parse(data) as WalletConfig;
+    if (!parsed || !parsed.address || !parsed.privateKey) return null;
+    return parsed;
   } catch {
     return null;
   }
@@ -58,18 +64,25 @@ export function saveWalletConfig(config: WalletConfig): void {
 
 export function clearWalletConfig(): void {
   try {
-    const path = getWalletConfigPath();
-    writeFileSync(path, JSON.stringify({}), { mode: 0o600 });
+    writeFileSync(getWalletConfigPath(), JSON.stringify({}), { mode: 0o600 });
   } catch {
     // ignore
   }
 }
 
-/**
- * Derive account from private key and persist config
- */
+export function persistApiCredentials(creds: ApiCredentials): void {
+  const config = loadWalletConfig();
+  if (!config) return;
+
+  saveWalletConfig({
+    ...config,
+    apiKey: creds.apiKey,
+    apiSecret: creds.apiSecret,
+    apiPassphrase: creds.apiPassphrase,
+  });
+}
+
 export function connectFromPrivateKey(privateKey: string): WalletConfig {
-  // Normalize: ensure 0x prefix
   const normalized = (privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`) as `0x${string}`;
   const account = privateKeyToAccount(normalized);
   const config: WalletConfig = {
@@ -81,30 +94,119 @@ export function connectFromPrivateKey(privateKey: string): WalletConfig {
   return config;
 }
 
-/**
- * Generate L1 auth headers for CLOB API using ECDSA signature
- * Polymarket CLOB L1 auth: sign timestamp with private key
- */
-export async function getClobAuthHeaders(privateKey: `0x${string}`): Promise<Record<string, string>> {
-  const account = privateKeyToAccount(privateKey);
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const nonce = "0";
-
-  // Message format per Polymarket CLOB docs
-  const message = `${timestamp}${nonce}`;
-  const signature = await account.signMessage({ message });
-
+function getStoredApiCredentials(): ApiCredentials | null {
+  const config = loadWalletConfig();
+  if (!config?.apiKey || !config.apiSecret || !config.apiPassphrase) {
+    return null;
+  }
   return {
-    "POLY_ADDRESS": account.address,
-    "POLY_SIGNATURE": signature,
-    "POLY_TIMESTAMP": timestamp,
-    "POLY_NONCE": nonce,
+    apiKey: config.apiKey,
+    apiSecret: config.apiSecret,
+    apiPassphrase: config.apiPassphrase,
   };
 }
 
-/**
- * Fetch USDC balance on Polygon for the given address
- */
+function parseApiCredentials(payload: unknown): ApiCredentials | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  const candidate = payload as {
+    apiKey?: unknown;
+    key?: unknown;
+    secret?: unknown;
+    passphrase?: unknown;
+  };
+
+  const apiKey = typeof candidate.apiKey === "string" ? candidate.apiKey : typeof candidate.key === "string" ? candidate.key : "";
+  const apiSecret = typeof candidate.secret === "string" ? candidate.secret : "";
+  const apiPassphrase = typeof candidate.passphrase === "string" ? candidate.passphrase : "";
+
+  if (!apiKey || !apiSecret || !apiPassphrase) return null;
+  return { apiKey, apiSecret, apiPassphrase };
+}
+
+export async function getClobAuthHeaders(
+  privateKey: `0x${string}`,
+  nonce: number = 0,
+  timestamp?: number,
+): Promise<Record<string, string>> {
+  const account = privateKeyToAccount(privateKey);
+  const ts = timestamp ?? Math.floor(Date.now() / 1000);
+
+  const signature = await account.signTypedData({
+    domain: {
+      name: "ClobAuthDomain",
+      version: "1",
+      chainId: 137,
+    },
+    types: {
+      ClobAuth: [
+        { name: "address", type: "address" },
+        { name: "timestamp", type: "string" },
+        { name: "nonce", type: "uint256" },
+        { name: "message", type: "string" },
+      ],
+    },
+    primaryType: "ClobAuth",
+    message: {
+      address: account.address,
+      timestamp: String(ts),
+      nonce: BigInt(nonce),
+      message: CLOB_AUTH_MESSAGE,
+    },
+  });
+
+  return {
+    POLY_ADDRESS: account.address,
+    POLY_SIGNATURE: signature,
+    POLY_TIMESTAMP: String(ts),
+    POLY_NONCE: String(nonce),
+  };
+}
+
+function toUrlSafeBase64(value: string): string {
+  return value.replace(/\+/g, "-").replace(/\//g, "_");
+}
+
+export function buildClobL2Signature(
+  secret: string,
+  timestamp: number,
+  method: string,
+  requestPath: string,
+  body?: string,
+): string {
+  const normalizedSecret = secret.replace(/-/g, "+").replace(/_/g, "/").replace(/[^A-Za-z0-9+/=]/g, "");
+  const message = `${timestamp}${method.toUpperCase()}${requestPath}${body ?? ""}`;
+  const hmac = createHmac("sha256", Buffer.from(normalizedSecret, "base64"));
+  hmac.update(message);
+  return toUrlSafeBase64(hmac.digest("base64"));
+}
+
+export async function getClobL2Headers(
+  privateKey: `0x${string}`,
+  creds: ApiCredentials,
+  args: { method: string; requestPath: string; body?: string },
+  timestamp?: number,
+): Promise<Record<string, string>> {
+  const account = privateKeyToAccount(privateKey);
+  const ts = timestamp ?? Math.floor(Date.now() / 1000);
+
+  const signature = buildClobL2Signature(
+    creds.apiSecret,
+    ts,
+    args.method,
+    args.requestPath,
+    args.body,
+  );
+
+  return {
+    POLY_ADDRESS: account.address,
+    POLY_SIGNATURE: signature,
+    POLY_TIMESTAMP: String(ts),
+    POLY_API_KEY: creds.apiKey,
+    POLY_PASSPHRASE: creds.apiPassphrase,
+  };
+}
+
 export async function fetchUsdcBalance(address: string): Promise<number> {
   try {
     const client = createPublicClient({
@@ -112,7 +214,6 @@ export async function fetchUsdcBalance(address: string): Promise<number> {
       transport: http("https://polygon-rpc.com"),
     });
 
-    // ERC-20 balanceOf ABI
     const balance = await client.readContract({
       address: USDC_CONTRACT as `0x${string}`,
       abi: [
@@ -128,86 +229,75 @@ export async function fetchUsdcBalance(address: string): Promise<number> {
       args: [address as `0x${string}`],
     });
 
-    // USDC has 6 decimals
     return parseFloat(formatUnits(balance, 6));
   } catch {
-    // Fallback: try CLOB API balance endpoint
     return fetchClobBalance(address);
   }
 }
 
-/**
- * Fallback balance fetch via Polymarket CLOB API
- */
 async function fetchClobBalance(address: string): Promise<number> {
   try {
     const response = await fetch(`${CLOB_API_BASE}/balance?address=${address}`);
     if (!response.ok) return 0;
-    const data = await response.json() as { balance?: string | number };
+    const data = (await response.json()) as { balance?: string | number };
     return parseFloat(String(data.balance ?? "0"));
   } catch {
     return 0;
   }
 }
 
-/**
- * Fetch CLOB API credentials (apiKey, secret, passphrase) for an address.
- * Creates them if they don't exist for this address.
- */
-export async function fetchOrCreateApiCredentials(
-  privateKey: `0x${string}`
-): Promise<{ apiKey: string; apiSecret: string; apiPassphrase: string } | null> {
-  try {
-    const account = privateKeyToAccount(privateKey);
-    const headers = await getClobAuthHeaders(privateKey);
+export async function fetchOrCreateApiCredentials(privateKey: `0x${string}`): Promise<ApiCredentials | null> {
+  const stored = getStoredApiCredentials();
+  if (stored) return stored;
 
-    // Try to get existing credentials
-    const getResp = await fetch(`${CLOB_API_BASE}/auth/api-key`, {
-      headers: { ...headers, "Content-Type": "application/json" },
+  try {
+    const l1Headers = await getClobAuthHeaders(privateKey, 0);
+
+    const deriveResponse = await fetch(`${CLOB_API_BASE}/auth/derive-api-key`, {
+      method: "GET",
+      headers: {
+        ...l1Headers,
+        "Content-Type": "application/json",
+      },
     });
 
-    if (getResp.ok) {
-      const data = await getResp.json() as { apiKey?: string; secret?: string; passphrase?: string };
-      if (data.apiKey) {
-        return {
-          apiKey: data.apiKey,
-          apiSecret: data.secret ?? "",
-          apiPassphrase: data.passphrase ?? "",
-        };
+    if (deriveResponse.ok) {
+      const derivedPayload = await deriveResponse.json();
+      const derived = parseApiCredentials(derivedPayload);
+      if (derived) {
+        persistApiCredentials(derived);
+        return derived;
       }
     }
 
-    // Create new credentials
-    const createResp = await fetch(`${CLOB_API_BASE}/auth/api-key`, {
+    const createResponse = await fetch(`${CLOB_API_BASE}/auth/api-key`, {
       method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ address: account.address }),
+      headers: {
+        ...l1Headers,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
     });
 
-    if (!createResp.ok) return null;
-    const created = await createResp.json() as { apiKey?: string; secret?: string; passphrase?: string };
-    if (!created.apiKey) return null;
+    if (!createResponse.ok) {
+      return null;
+    }
 
-    return {
-      apiKey: created.apiKey,
-      apiSecret: created.secret ?? "",
-      apiPassphrase: created.passphrase ?? "",
-    };
+    const createdPayload = await createResponse.json();
+    const created = parseApiCredentials(createdPayload);
+    if (!created) return null;
+
+    persistApiCredentials(created);
+    return created;
   } catch {
     return null;
   }
 }
 
-/**
- * Disconnect wallet: clear persisted config
- */
 export function disconnectWallet(): void {
   clearWalletConfig();
 }
 
-/**
- * Truncate address for display: 0x1234...abcd
- */
 export function truncateAddress(address: string): string {
   if (address.length < 10) return address;
   return `${address.slice(0, 6)}...${address.slice(-4)}`;

@@ -17,10 +17,17 @@ const HINTS: KeyHint[] = [
   { key: "H", label: "Orders" },
   { key: "P", label: "Portfolio" },
   { key: "Z", label: "Alerts" },
-  { key: "X", label: "Watch" },
+  { key: "I", label: "Indicators" },
+  { key: "M", label: "Sentiment" },
+  { key: "U", label: "Account" },
+  { key: "C", label: "Compare" },
+  { key: "L", label: "Watchlist" },
+  { key: "X", label: "Watch+" },
   { key: "F", label: "Filter" },
   { key: "R", label: "Refresh" },
   { key: "1/5/7/A", label: "Timeframe" },
+  { key: "K", label: "Shortcuts" },
+  { key: "E", label: "Settings" },
   { key: "Q", label: "Quit" },
 ];
 

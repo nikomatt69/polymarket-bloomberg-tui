@@ -58,6 +58,8 @@ export interface PersistentState {
   searchQuery: string;
   sortBy: 'volume' | 'change' | 'name';
   timeframe: '1d' | '5d' | '7d' | 'all';
+  themeMode?: 'dark' | 'light';
+  themeName?: string;
 }
 
 export interface WalletState {

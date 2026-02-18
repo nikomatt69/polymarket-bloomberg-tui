@@ -29,15 +29,73 @@ interface GammaMarket {
   clobTokenIds: string | null;
 }
 
-function parseGammaMarket(market: GammaMarket): Market {
-  const outcomes = market.outcomes ? JSON.parse(market.outcomes) : ["Yes", "No"];
-  const outcomePrices = market.outcomePrices ? JSON.parse(market.outcomePrices) : [0.5, 0.5];
-  const clobTokenIds = market.clobTokenIds ? JSON.parse(market.clobTokenIds) : [];
+interface ClobPriceHistoryResponse {
+  history?: Array<{ t: number; p: number | string }>;
+}
 
-  const outcomeList: Outcome[] = outcomes.map((title: string, i: number) => ({
+interface ClobBookLevel {
+  price: string;
+  size: string;
+}
+
+interface ClobBookResponse {
+  market?: string;
+  asset_id?: string;
+  timestamp?: string;
+  bids?: ClobBookLevel[];
+  asks?: ClobBookLevel[];
+  min_order_size?: string;
+  tick_size?: string;
+  neg_risk?: boolean;
+}
+
+export interface OrderBookSummary {
+  marketId: string;
+  tokenId: string;
+  bestBid: number | null;
+  bestAsk: number | null;
+  midpoint: number | null;
+  spread: number | null;
+  spreadBps: number | null;
+  bidDepth: number;
+  askDepth: number;
+  minOrderSize: number | null;
+  tickSize: number | null;
+  updatedAt: number | null;
+}
+
+function parseNumeric(value: unknown, fallback: number = 0): number {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : fallback;
+  }
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function parseJsonArray(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseGammaMarket(market: GammaMarket): Market {
+  const outcomes = parseJsonArray(market.outcomes);
+  const outcomePrices = parseJsonArray(market.outcomePrices).map((value) => parseNumeric(value, 0.5));
+  const clobTokenIds = parseJsonArray(market.clobTokenIds);
+
+  const normalizedOutcomes = outcomes.length > 0 ? outcomes : ["Yes", "No"];
+
+  const outcomeList: Outcome[] = normalizedOutcomes.map((title: string, i: number) => ({
     id: clobTokenIds[i] || `outcome_${i}`,
     title,
-    price: parseFloat(outcomePrices[i]) || 0.5,
+    price: parseNumeric(outcomePrices[i], 0.5),
     volume24h: 0,
     volume: 0,
     liquidity: 0,
@@ -49,10 +107,10 @@ function parseGammaMarket(market: GammaMarket): Market {
     title: market.question || "Unknown Market",
     description: market.description || "",
     outcomes: outcomeList,
-    volume24h: market.volume24hr || 0,
-    volume: parseFloat(market.volume || "0"),
-    liquidity: parseFloat(market.liquidity || "0") || market.liquidityNum || 0,
-    change24h: market.oneDayPriceChange || 0,
+    volume24h: parseNumeric(market.volume24hr, 0),
+    volume: parseNumeric(market.volume, 0),
+    liquidity: parseNumeric(market.liquidity, parseNumeric(market.liquidityNum, 0)),
+    change24h: parseNumeric(market.oneDayPriceChange, 0),
     openInterest: 0,
     resolutionDate: market.endDate ? new Date(market.endDate) : undefined,
     totalTrades: 0,
@@ -63,27 +121,22 @@ function parseGammaMarket(market: GammaMarket): Market {
 }
 
 export async function getMarkets(limit: number = 50): Promise<Market[]> {
-  try {
-    const response = await fetch(
-      `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&order=volumeNum&ascending=false`
-    );
+  const response = await fetch(
+    `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&order=volumeNum&ascending=false`
+  );
 
-    if (!response.ok) {
-      throw new Error(`Gamma API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    
-    if (!Array.isArray(data)) {
-      console.error("Unexpected API response:", data);
-      return getMockMarkets(limit);
-    }
-
-    return data.map(parseGammaMarket);
-  } catch (error) {
-    console.error("Failed to fetch from Gamma API:", error);
-    return getMockMarkets(limit);
+  if (!response.ok) {
+    throw new Error(`Gamma API error: ${response.status}`);
   }
+
+  const data = await response.json();
+  if (!Array.isArray(data)) {
+    throw new Error("Unexpected Gamma API response format");
+  }
+
+  return data
+    .map((item) => parseGammaMarket(item as GammaMarket))
+    .filter((market) => market.outcomes.length > 0);
 }
 
 export async function getMarketDetails(marketId: string): Promise<Market | null> {
@@ -110,23 +163,23 @@ export async function getMarketDetails(marketId: string): Promise<Market | null>
 export async function getPriceHistory(
   marketId: string,
   timeframe: "1d" | "5d" | "7d" | "all" = "7d"
-): Promise<PriceHistory> {
+): Promise<PriceHistory | null> {
   try {
     const marketDetails = await getMarketDetails(marketId);
     if (!marketDetails || marketDetails.outcomes.length === 0) {
-      return generateSyntheticHistory(marketId, timeframe);
+      return null;
     }
 
     const tokenId = marketDetails.outcomes[0]?.id;
     if (!tokenId) {
-      return generateSyntheticHistory(marketId, timeframe);
+      return null;
     }
 
     const intervalMap: Record<string, string> = {
       "1d": "1h",
-      "5d": "1d",
+      "5d": "6h",
       "7d": "1d",
-      "all": "1w",
+      "all": "max",
     };
 
     const response = await fetch(
@@ -134,21 +187,27 @@ export async function getPriceHistory(
     );
 
     if (!response.ok) {
-      return generateSyntheticHistory(marketId, timeframe);
+      return null;
     }
 
-    const json = await response.json();
-    const data = json as { history?: Array<{ t: number; p: number }> };
+    const data = (await response.json()) as ClobPriceHistoryResponse;
 
     if (!data.history || !Array.isArray(data.history)) {
-      return generateSyntheticHistory(marketId, timeframe);
+      return null;
     }
 
     const pricePoints: PricePoint[] = data.history.map((point) => ({
       timestamp: point.t * 1000,
-      price: point.p / 100,
+      price: (() => {
+        const raw = parseNumeric(point.p, 0);
+        return raw > 1 ? raw / 100 : raw;
+      })(),
       outcomeId: tokenId,
     }));
+
+    if (pricePoints.length === 0) {
+      return null;
+    }
 
     return {
       marketId,
@@ -158,75 +217,70 @@ export async function getPriceHistory(
     };
   } catch (error) {
     console.error("Failed to fetch price history:", error);
-    return generateSyntheticHistory(marketId, timeframe);
+    return null;
   }
 }
 
-function generateSyntheticHistory(
-  marketId: string,
-  timeframe: "1d" | "5d" | "7d" | "all"
-): PriceHistory {
-  const data: PricePoint[] = [];
-  const now = Date.now();
-  
-  const points = timeframe === "1d" ? 24 : timeframe === "5d" ? 120 : timeframe === "7d" ? 168 : 720;
-  const interval = timeframe === "1d" ? 3600000 : timeframe === "5d" ? 3600000 : timeframe === "7d" ? 3600000 : 3600000;
+export async function getOrderBookSummary(tokenId: string): Promise<OrderBookSummary | null> {
+  try {
+    const response = await fetch(`${CLOB_API_BASE}/book?token_id=${tokenId}`);
+    if (!response.ok) return null;
 
-  for (let i = 0; i < points; i++) {
-    const price = 0.4 + Math.sin((i / points) * Math.PI) * 0.2 + Math.random() * 0.1;
-    data.push({
-      timestamp: now - (points - i) * interval,
-      price: Math.max(0.01, Math.min(0.99, price)),
-      outcomeId: "synthetic",
-    });
+    const data = (await response.json()) as ClobBookResponse;
+    const bids = Array.isArray(data.bids) ? data.bids : [];
+    const asks = Array.isArray(data.asks) ? data.asks : [];
+
+    const bestBid = bids.length > 0 ? parseNumeric(bids[0].price, 0) : null;
+    const bestAsk = asks.length > 0 ? parseNumeric(asks[0].price, 0) : null;
+    const midpoint =
+      bestBid !== null && bestAsk !== null
+        ? (bestBid + bestAsk) / 2
+        : bestBid !== null
+          ? bestBid
+          : bestAsk;
+    const spread = bestBid !== null && bestAsk !== null ? Math.max(0, bestAsk - bestBid) : null;
+    const spreadBps =
+      midpoint !== null && midpoint > 0 && spread !== null
+        ? (spread / midpoint) * 10_000
+        : null;
+    const bidDepth = bids.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
+    const askDepth = asks.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
+
+    return {
+      marketId: data.market ?? "",
+      tokenId: data.asset_id ?? tokenId,
+      bestBid,
+      bestAsk,
+      midpoint,
+      spread,
+      spreadBps,
+      bidDepth,
+      askDepth,
+      minOrderSize: data.min_order_size ? parseNumeric(data.min_order_size, 0) : null,
+      tickSize: data.tick_size ? parseNumeric(data.tick_size, 0) : null,
+      updatedAt: data.timestamp ? new Date(data.timestamp).getTime() : null,
+    };
+  } catch {
+    return null;
   }
-
-  return {
-    marketId,
-    outcomeId: "all",
-    data,
-    timeframe,
-  };
 }
 
-function getMockMarkets(limit: number): Market[] {
-  const mockQuestions = [
-    "Will BTC reach $200K by end of 2026?",
-    "Will ETH flip BTC market cap by 2027?",
-    "Will AI pass Turing test by 2027?",
-    "Will US enter recession in 2026?",
-    "Will Bitcoin ETF be approved in 2026?",
-    "Will Solana flip Ethereum by TVL?",
-    "Will SpaceX go public by 2027?",
-    "Will Apple release AR glasses?",
-    "Will Trump win 2028 election?",
-    "Will Fed cut rates to 0%?",
-    "Will Ethereum upgrade to PoS?",
-    "Will crypto regulation pass US?",
-    "Will Tesla Robotaxi launch?",
-    "Will nuclear fusion work?",
-    "Will Mars colony happen?",
-  ];
+export async function getOrderBookSummaries(tokenIds: string[]): Promise<Record<string, OrderBookSummary>> {
+  const unique = Array.from(new Set(tokenIds.filter(Boolean)));
+  if (unique.length === 0) return {};
 
-  return mockQuestions.slice(0, limit).map((question, i) => ({
-    id: `market_${i + 1}`,
-    title: question,
-    description: `Prediction market for: ${question}`,
-    outcomes: [
-      { id: `yes_${i}`, title: "Yes", price: 0.3 + Math.random() * 0.4, volume24h: Math.random() * 1000000, volume: Math.random() * 5000000, liquidity: Math.random() * 2000000, change24h: (Math.random() - 0.5) * 20 },
-      { id: `no_${i}`, title: "No", price: 0.3 + Math.random() * 0.4, volume24h: Math.random() * 1000000, volume: Math.random() * 5000000, liquidity: Math.random() * 2000000, change24h: (Math.random() - 0.5) * 20 },
-    ],
-    volume24h: Math.random() * 2000000,
-    volume: Math.random() * 10000000,
-    liquidity: Math.random() * 5000000,
-    change24h: (Math.random() - 0.5) * 20,
-    openInterest: Math.random() * 3000000,
-    resolutionDate: new Date(Date.now() + Math.random() * 365 * 24 * 60 * 60 * 1000),
-    totalTrades: Math.floor(Math.random() * 50000),
-    category: ["crypto", "politics", "economy", "tech", "science"][Math.floor(Math.random() * 5)],
-    closed: false,
-    resolved: false,
-  }));
+  const entries = await Promise.all(
+    unique.map(async (tokenId) => [tokenId, await getOrderBookSummary(tokenId)] as const)
+  );
+
+  const result: Record<string, OrderBookSummary> = {};
+  for (const [tokenId, summary] of entries) {
+    if (summary) {
+      result[tokenId] = summary;
+    }
+  }
+
+  return result;
 }
 
 export async function searchMarkets(query: string): Promise<Market[]> {

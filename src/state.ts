@@ -9,6 +9,12 @@ import { homedir } from "os";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
+type PersistedThemeMode = "dark" | "light";
+
+interface RawPersistedConfig extends Partial<PersistentState> {
+  [key: string]: unknown;
+}
+
 // Default app state
 const initialState: AppState = {
   markets: [],
@@ -59,6 +65,29 @@ export const [orderFormCurrentPrice, setOrderFormCurrentPrice] = createSignal(0)
 export const [orderFormPriceInput, setOrderFormPriceInput] = createSignal("");
 export const [orderFormSharesInput, setOrderFormSharesInput] = createSignal("");
 export const [orderFormFocusField, setOrderFormFocusField] = createSignal<"price" | "shares">("price");
+export const [orderFormType, setOrderFormType] = createSignal<"GTC" | "FOK" | "GTD">("GTC");
+export const [orderFormPostOnly, setOrderFormPostOnly] = createSignal(false);
+
+// Order history selected index for cancel
+export const [orderHistorySelectedIdx, setOrderHistorySelectedIdx] = createSignal(0);
+export const [orderHistoryTradeSelectedIdx, setOrderHistoryTradeSelectedIdx] = createSignal(0);
+export const [orderHistorySection, setOrderHistorySection] = createSignal<"open" | "trades">("open");
+
+// Panel visibility signals
+export const [indicatorsPanelOpen, setIndicatorsPanelOpen] = createSignal(false);
+export const [sentimentPanelOpen, setSentimentPanelOpen] = createSignal(false);
+export const [comparisonPanelOpen, setComparisonPanelOpen] = createSignal(false);
+export const [comparisonSelectMode, setComparisonSelectMode] = createSignal(false);
+export const [comparisonSelectedMarketId, setComparisonSelectedMarketId] = createSignal<string | null>(null);
+export const [watchlistPanelOpen, setWatchlistPanelOpen] = createSignal(false);
+export const [accountStatsOpen, setAccountStatsOpen] = createSignal(false);
+
+// Settings panel visibility and active tab signals
+export const [settingsPanelOpen, setSettingsPanelOpen] = createSignal(false);
+export const [settingsPanelTab, setSettingsPanelTab] = createSignal<"theme" | "account" | "display" | "keys">("theme");
+
+// Shortcuts panel visibility signal
+export const [shortcutsPanelOpen, setShortcutsPanelOpen] = createSignal(false);
 
 /**
  * Get path to config directory
@@ -73,17 +102,66 @@ function getConfigPath(): string {
   return join(configDir, "config.json");
 }
 
+function isSortBy(value: unknown): value is AppState["sortBy"] {
+  return value === "volume" || value === "change" || value === "name";
+}
+
+function isTimeframe(value: unknown): value is AppState["timeframe"] {
+  return value === "1d" || value === "5d" || value === "7d" || value === "all";
+}
+
+function isThemeMode(value: unknown): value is PersistedThemeMode {
+  return value === "dark" || value === "light";
+}
+
+function readPersistedConfigRaw(): RawPersistedConfig {
+  try {
+    const configPath = getConfigPath();
+    const data = readFileSync(configPath, "utf-8");
+    const parsed = JSON.parse(data) as unknown;
+
+    if (parsed && typeof parsed === "object") {
+      return parsed as RawPersistedConfig;
+    }
+  } catch {
+    // config does not exist or is invalid
+  }
+  return {};
+}
+
+function writePersistedConfigRaw(config: RawPersistedConfig): void {
+  const configPath = getConfigPath();
+  writeFileSync(configPath, JSON.stringify(config, null, 2));
+}
+
 /**
  * Load persistent state from disk
  */
 export function loadPersistedState(): PersistentState | null {
-  try {
-    const configPath = getConfigPath();
-    const data = readFileSync(configPath, "utf-8");
-    return JSON.parse(data);
-  } catch (error) {
+  const raw = readPersistedConfigRaw();
+
+  const selectedMarketId = raw.selectedMarketId;
+  const searchQuery = raw.searchQuery;
+  const sortBy = raw.sortBy;
+  const timeframe = raw.timeframe;
+
+  if (
+    !(selectedMarketId === null || typeof selectedMarketId === "string")
+    || typeof searchQuery !== "string"
+    || !isSortBy(sortBy)
+    || !isTimeframe(timeframe)
+  ) {
     return null;
   }
+
+  return {
+    selectedMarketId,
+    searchQuery,
+    sortBy,
+    timeframe,
+    themeMode: isThemeMode(raw.themeMode) ? raw.themeMode : undefined,
+    themeName: typeof raw.themeName === "string" ? raw.themeName : undefined,
+  };
 }
 
 /**
@@ -91,16 +169,51 @@ export function loadPersistedState(): PersistentState | null {
  */
 export function savePersistedState(): void {
   try {
-    const configPath = getConfigPath();
-    const persistentState: PersistentState = {
+    const existing = readPersistedConfigRaw();
+    const nextConfig: RawPersistedConfig = {
+      ...existing,
       selectedMarketId: appState.selectedMarketId,
       searchQuery: appState.searchQuery,
       sortBy: appState.sortBy,
       timeframe: appState.timeframe,
     };
-    writeFileSync(configPath, JSON.stringify(persistentState, null, 2));
+    writePersistedConfigRaw(nextConfig);
   } catch (error) {
     console.error("Failed to save persistent state:", error);
+  }
+}
+
+export interface PersistedThemePreferences {
+  themeMode?: PersistedThemeMode;
+  themeName?: string;
+}
+
+export function loadPersistedThemePreferences(): PersistedThemePreferences {
+  const raw = readPersistedConfigRaw();
+  return {
+    themeMode: isThemeMode(raw.themeMode) ? raw.themeMode : undefined,
+    themeName:
+      typeof raw.themeName === "string" && raw.themeName.trim().length > 0
+        ? raw.themeName
+        : undefined,
+  };
+}
+
+export function savePersistedThemePreferences(preferences: PersistedThemePreferences): void {
+  try {
+    const existing = readPersistedConfigRaw();
+    const nextConfig: RawPersistedConfig = { ...existing };
+
+    if (preferences.themeMode !== undefined) {
+      nextConfig.themeMode = preferences.themeMode;
+    }
+    if (preferences.themeName !== undefined) {
+      nextConfig.themeName = preferences.themeName;
+    }
+
+    writePersistedConfigRaw(nextConfig);
+  } catch (error) {
+    console.error("Failed to save theme preferences:", error);
   }
 }
 

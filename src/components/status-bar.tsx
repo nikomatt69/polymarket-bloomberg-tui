@@ -1,6 +1,9 @@
 import { createMemo } from "solid-js";
 import { appState, highlightedIndex, getFilteredMarkets } from "../state";
 import { useTheme } from "../context/theme";
+import { walletState } from "../state";
+import { watchlistState } from "../hooks/useWatchlist";
+import { alertsState } from "../hooks/useAlerts";
 
 export function StatusBar() {
   const { theme } = useTheme();
@@ -13,7 +16,12 @@ export function StatusBar() {
     const tf = appState.timeframe.toUpperCase();
     const status = appState.loading ? "⟳ Refreshing..." : "Ready";
     const lastRefresh = appState.lastRefresh ? new Date(appState.lastRefresh).toLocaleTimeString() : "never";
-    return `${status}  |  Sort: ${sortLabel}  |  TF: ${tf}  |  ${idx + 1}/${total}  |  Last: ${lastRefresh}`;
+    const wallet = walletState.connected ? "Wallet: ON" : "Wallet: OFF";
+    const watchFilter = watchlistState.filterActive ? "Watch: FILTER" : "Watch: ALL";
+    const activeAlerts = alertsState.alerts.filter((alert) => alert.status === "active").length;
+    const triggeredAlerts = alertsState.alerts.filter((alert) => alert.status === "triggered").length;
+
+    return `${status}  |  Sort: ${sortLabel}  |  TF: ${tf}  |  ${idx + 1}/${total}  |  ${wallet}  |  ${watchFilter}  |  Alerts A:${activeAlerts} T:${triggeredAlerts}  |  Last: ${lastRefresh}`;
   });
 
   return (

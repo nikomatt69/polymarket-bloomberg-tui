@@ -12,6 +12,7 @@ export interface Order {
   price: number;         // 0-1
   shares: number;        // number of shares
   type: OrderType;       // time-in-force
+  postOnly?: boolean;
   marketId?: string;     // gamma market ID for display
   outcomeTitle?: string;
   marketTitle?: string;
@@ -27,6 +28,7 @@ export interface PlacedOrder {
   sizeRemaining: number;
   status: OrderStatus;
   createdAt: number;     // unix ms
+  postOnly?: boolean;
   marketTitle?: string;
   outcomeTitle?: string;
 }

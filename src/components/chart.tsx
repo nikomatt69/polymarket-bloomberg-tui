@@ -19,12 +19,36 @@ interface ChartData {
   sparkline: string;
   chart: string;
   stats: string;
+  trendLine: string;
   indicators: string;
   rsiLine: string;
 }
 
-const CHART_WIDTH = 45;
+const CHART_WIDTH = 52;
 const CHART_HEIGHT = 6;
+
+function formatSignedPercent(value: number): string {
+  const sign = value >= 0 ? "+" : "";
+  return `${sign}${value.toFixed(2)}%`;
+}
+
+function calculateVolatility(prices: number[]): number {
+  if (prices.length < 3) return 0;
+
+  const returns: number[] = [];
+  for (let i = 1; i < prices.length; i++) {
+    const prev = prices[i - 1];
+    const curr = prices[i];
+    if (prev > 0) {
+      returns.push((curr - prev) / prev);
+    }
+  }
+
+  if (returns.length < 2) return 0;
+  const mean = returns.reduce((sum, value) => sum + value, 0) / returns.length;
+  const variance = returns.reduce((sum, value) => sum + (value - mean) ** 2, 0) / returns.length;
+  return Math.sqrt(variance) * 100;
+}
 
 export function Chart(props: ChartProps) {
   const { theme } = useTheme();
@@ -32,6 +56,8 @@ export function Chart(props: ChartProps) {
   const chartOutput = createMemo((): ChartData | null => {
     if (!props.priceHistory?.data || props.priceHistory.data.length === 0) return null;
     const prices = props.priceHistory.data.map((p) => p.price);
+    if (prices.length < 2) return null;
+
     const sparkline = generateSparkline(prices, CHART_WIDTH);
 
     const rawChart = generateSimpleChart(props.priceHistory.data, {
@@ -56,11 +82,23 @@ export function Chart(props: ChartProps) {
 
     // RSI
     const rsi = computeRSI(prices, 14);
-    const lastRsi = rsi.reverse().find((v) => !Number.isNaN(v));
+    let lastRsi: number | undefined;
+    for (let i = rsi.length - 1; i >= 0; i--) {
+      if (!Number.isNaN(rsi[i])) {
+        lastRsi = rsi[i];
+        break;
+      }
+    }
     const rsiStr = lastRsi !== undefined ? lastRsi.toFixed(1) : "N/A";
     const rsiLevel = lastRsi !== undefined
       ? lastRsi >= 70 ? " (OVERBOUGHT)" : lastRsi <= 30 ? " (OVERSOLD)" : ""
       : "";
+
+    const first = prices[0];
+    const last = prices[prices.length - 1];
+    const movePct = first > 0 ? ((last - first) / first) * 100 : 0;
+    const direction = movePct > 0.2 ? "UPTREND" : movePct < -0.2 ? "DOWNTREND" : "RANGE";
+    const volatility = calculateVolatility(prices);
 
     const minP = formatChartLabel(minPrice);
     const maxP = formatChartLabel(maxPrice);
@@ -77,6 +115,7 @@ export function Chart(props: ChartProps) {
       sparkline,
       chart,
       stats: `Min: ${minP}  |  Max: ${maxP}  |  Avg: ${avgP}`,
+      trendLine: `Last: ${formatChartLabel(last)}  |  Move: ${formatSignedPercent(movePct)}  |  Regime: ${direction}  |  Vol: ${volatility.toFixed(2)}%`,
       indicators,
       rsiLine: `RSI(14): ${rsiStr}${rsiLevel}`,
     };
@@ -94,6 +133,7 @@ export function Chart(props: ChartProps) {
             <text content={data().sparkline} fg={theme.success} />
             <text content={data().chart} fg={theme.text} />
             <text content={data().stats} fg={theme.textMuted} />
+            <text content={data().trendLine} fg={theme.textMuted} />
             <text content={data().indicators} fg={theme.accent} />
             <text content={data().rsiLine} fg={
               (() => {
