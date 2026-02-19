@@ -50,6 +50,8 @@ import {
   setOrderHistorySection,
   portfolioOpen,
   setPortfolioOpen,
+  orderBookPanelOpen,
+  setOrderBookPanelOpen,
   indicatorsPanelOpen,
   setIndicatorsPanelOpen,
   sentimentPanelOpen,
@@ -362,6 +364,14 @@ function AppContent() {
         }
       } else if (e.sequence === "/" || e.name === "slash") {
         startOrderHistorySearch();
+      }
+      return;
+    }
+
+    // Order book panel intercept
+    if (orderBookPanelOpen()) {
+      if (e.name === "escape") {
+        setOrderBookPanelOpen(false);
       }
       return;
     }
@@ -732,6 +742,7 @@ function AppContent() {
     const anyOverlayOpen =
       orderFormOpen()
       || orderHistoryOpen()
+      || orderBookPanelOpen()
       || indicatorsPanelOpen()
       || sentimentPanelOpen()
       || comparisonPanelOpen()
@@ -834,6 +845,10 @@ function AppContent() {
         if (wMarket) toggleWatchlist(wMarket.id);
         break;
       }
+      case "d":
+        // d — toggle live order book depth panel
+        setOrderBookPanelOpen(!orderBookPanelOpen());
+        break;
       case "i":
         // i — toggle indicators panel
         setIndicatorsPanelOpen(!indicatorsPanelOpen());

@@ -129,6 +129,7 @@ export const [orderHistoryTradeSelectedIdx, setOrderHistoryTradeSelectedIdx] = c
 export const [orderHistorySection, setOrderHistorySection] = createSignal<"open" | "trades">("open");
 
 // Panel visibility signals
+export const [orderBookPanelOpen, setOrderBookPanelOpen] = createSignal(false);
 export const [indicatorsPanelOpen, setIndicatorsPanelOpen] = createSignal(false);
 export const [sentimentPanelOpen, setSentimentPanelOpen] = createSignal(false);
 export const [comparisonPanelOpen, setComparisonPanelOpen] = createSignal(false);
@@ -700,6 +701,17 @@ export function setError(error: string | null): void {
 export function setMarkets(markets: Market[]): void {
   setAppState("markets", markets);
   setAppState("lastRefresh", new Date());
+}
+
+/**
+ * Append additional markets (for pagination), deduplicating by id
+ */
+export function appendMarkets(newMarkets: Market[]): void {
+  const existingIds = new Set(appState.markets.map((m) => m.id));
+  const deduped = newMarkets.filter((m) => !existingIds.has(m.id));
+  if (deduped.length > 0) {
+    setAppState("markets", [...appState.markets, ...deduped]);
+  }
 }
 
 /**
