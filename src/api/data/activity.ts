@@ -59,7 +59,7 @@ function parseActivityItem(raw: DataApiActivity): ActivityItem {
 export async function fetchActivity(address: string, limit: number = 50): Promise<ActivityItem[]> {
   try {
     const response = await fetch(
-      `${DATA_API_BASE}/activity?address=${encodeURIComponent(address)}&limit=${limit}`
+      `${DATA_API_BASE}/activity?user=${encodeURIComponent(address)}&limit=${limit}`
     );
 
     if (!response.ok) {

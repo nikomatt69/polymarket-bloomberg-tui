@@ -44,6 +44,7 @@ type StatusHandler = (status: WsStatus) => void;
 
 const CLOB_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 const MAX_RECONNECT_DELAY_MS = 30_000;
+const HEARTBEAT_INTERVAL_MS = 10_000;
 
 /**
  * Creates an auto-reconnecting WebSocket manager for CLOB market data.
@@ -52,6 +53,7 @@ const MAX_RECONNECT_DELAY_MS = 30_000;
 export function createClobWebSocket() {
   let ws: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let reconnectCount = 0;
   let destroyed = false;
   let currentAssetIds: string[] = [];
@@ -70,10 +72,36 @@ export function createClobWebSocket() {
     };
   }
 
-  function handleRawMessage(raw: unknown) {
-    if (!Array.isArray(raw)) return;
+  function parseNumber(raw: unknown): number {
+    if (typeof raw === "number") return raw;
+    if (typeof raw === "string") return Number.parseFloat(raw);
+    return Number.NaN;
+  }
 
-    for (const item of raw) {
+  function stopHeartbeat() {
+    if (heartbeatTimer !== null) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  }
+
+  function startHeartbeat() {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send("PING");
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  function handleRawMessage(raw: unknown) {
+    const entries = Array.isArray(raw)
+      ? raw
+      : raw && typeof raw === "object"
+        ? [raw]
+        : [];
+
+    for (const item of entries) {
       if (!item || typeof item !== "object") continue;
 
       const eventType = (item as Record<string, unknown>).event_type as string | undefined;
@@ -95,18 +123,25 @@ export function createClobWebSocket() {
         };
         messageHandlers.forEach((fn) => fn(msg));
       } else if (eventType === "price_change") {
-        const changes = Array.isArray((item as Record<string, unknown>).changes)
-          ? ((item as Record<string, unknown>).changes as Array<Record<string, unknown>>)
-          : [];
+        const priceChanges = Array.isArray((item as Record<string, unknown>).price_changes)
+          ? ((item as Record<string, unknown>).price_changes as Array<Record<string, unknown>>)
+          : Array.isArray((item as Record<string, unknown>).changes)
+            ? ((item as Record<string, unknown>).changes as Array<Record<string, unknown>>)
+            : [];
 
-        for (const change of changes) {
+        for (const change of priceChanges) {
           const side = (change.side as string) === "BUY" ? "BUY" : "SELL";
+          const assetId = String(change.asset_id ?? (item as Record<string, unknown>).asset_id ?? "");
+          const price = parseNumber(change.price);
+          const size = parseNumber(change.size);
+          if (!assetId || !Number.isFinite(price) || !Number.isFinite(size)) continue;
+
           const msg: WsPriceChange = {
             type: "price_change",
-            assetId: String((item as Record<string, unknown>).asset_id ?? ""),
+            assetId,
             side,
-            price: typeof change.price === "string" ? parseFloat(change.price) : Number(change.price),
-            size: typeof change.size === "string" ? parseFloat(change.size) : Number(change.size),
+            price,
+            size,
             timestamp: String((item as Record<string, unknown>).timestamp ?? ""),
           };
           messageHandlers.forEach((fn) => fn(msg));
@@ -129,12 +164,25 @@ export function createClobWebSocket() {
     }
   }
 
-  function sendSubscribe(assetIds: string[]) {
+  function sendInitialSubscribe(assetIds: string[]) {
     if (ws?.readyState === WebSocket.OPEN && assetIds.length > 0) {
       ws.send(
         JSON.stringify({
-          type: "subscribe",
+          type: "market",
           assets_ids: assetIds,
+          custom_feature_enabled: true,
+        })
+      );
+    }
+  }
+
+  function sendDynamicSubscribe(assetIds: string[]) {
+    if (ws?.readyState === WebSocket.OPEN && assetIds.length > 0) {
+      ws.send(
+        JSON.stringify({
+          operation: "subscribe",
+          assets_ids: assetIds,
+          custom_feature_enabled: true,
         })
       );
     }
@@ -149,14 +197,22 @@ export function createClobWebSocket() {
     ws.onopen = () => {
       reconnectCount = 0;
       emitStatus("connected");
+      startHeartbeat();
       if (currentAssetIds.length > 0) {
-        sendSubscribe(currentAssetIds);
+        sendInitialSubscribe(currentAssetIds);
       }
     };
 
     ws.onmessage = (event) => {
+      const rawPayload = typeof event.data === "string" ? event.data : String(event.data ?? "");
+      const normalized = rawPayload.trim().toUpperCase();
+
+      if (normalized === "PONG") {
+        return;
+      }
+
       try {
-        const data = JSON.parse(event.data as string);
+        const data = JSON.parse(rawPayload);
         handleRawMessage(data);
       } catch {
         // Ignore malformed messages
@@ -168,6 +224,7 @@ export function createClobWebSocket() {
     };
 
     ws.onclose = () => {
+      stopHeartbeat();
       if (destroyed) return;
       emitStatus("disconnected");
       const delay = Math.min(1_000 * Math.pow(2, reconnectCount), MAX_RECONNECT_DELAY_MS);
@@ -185,7 +242,7 @@ export function createClobWebSocket() {
     /** Subscribe to market asset IDs for real-time updates. */
     subscribe(assetIds: string[]) {
       currentAssetIds = Array.from(new Set(assetIds.filter(Boolean)));
-      sendSubscribe(currentAssetIds);
+      sendDynamicSubscribe(currentAssetIds);
     },
 
     /** Register a handler for incoming messages. Returns an unsubscribe function. */
@@ -207,6 +264,7 @@ export function createClobWebSocket() {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      stopHeartbeat();
       ws?.close();
       ws = null;
       messageHandlers.clear();

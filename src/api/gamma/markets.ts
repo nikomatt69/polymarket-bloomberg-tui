@@ -295,3 +295,477 @@ export async function getLiveSportsMarkets(limit: number = 50, offset: number = 
     return [];
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Additional Market Endpoints
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getMarketBySlug(slug: string): Promise<Market | null> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/markets/slug/${encodeURIComponent(slug)}`);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = await response.json();
+    return parseGammaMarket(data as GammaMarket);
+  } catch (error) {
+    console.error("Failed to fetch market by slug:", error);
+    return null;
+  }
+}
+
+export async function getMarketHistory(marketId: string): Promise<Array<{
+  id: string;
+  question: string;
+  description: string;
+  outcome: string;
+  resolutionDate: string | null;
+  resolvedAt: string | null;
+  yesPrice: number;
+  noPrice: number;
+  volume: number;
+}>> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/markets/${encodeURIComponent(marketId)}/history`);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Failed to fetch market history:", error);
+    return [];
+  }
+}
+
+export interface TopHolder {
+  user: string;
+  balance: string;
+  balanceNum: number;
+  percent: number;
+}
+
+export async function getTopHolders(marketId: string, limit: number = 10): Promise<TopHolder[]> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets/top-holders?market=${encodeURIComponent(marketId)}&limit=${limit}`
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data as TopHolder[];
+  } catch (error) {
+    console.error("Failed to fetch top holders:", error);
+    return [];
+  }
+}
+
+export async function getSampledMarkets(limit: number = 20): Promise<Market[]> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/markets/sampling?limit=${limit}`);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data
+      .map((item: GammaMarket) => parseGammaMarket(item))
+      .filter((market: Market) => market.outcomes.length > 0);
+  } catch (error) {
+    console.error("Failed to fetch sampled markets:", error);
+    return [];
+  }
+}
+
+export interface SimplifiedMarket {
+  id: string;
+  question: string;
+  slug: string;
+  volumeNum: number;
+  liquidityNum: number;
+  outcomePrices: string[];
+  clobTokenIds: string[];
+  endDate: string | null;
+}
+
+export async function getSimplifiedMarkets(limit: number = 50, offset: number = 0): Promise<SimplifiedMarket[]> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets/simplified?limit=${limit}&offset=${offset}`
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data as SimplifiedMarket[];
+  } catch (error) {
+    console.error("Failed to fetch simplified markets:", error);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Market Filters API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface MarketFilterOptions {
+  categories: Array<{ slug: string; name: string; count: number }>;
+  tags: Array<{ slug: string; name: string; count: number }>;
+  sportsMarketTypes: string[];
+  orderBy: string[];
+}
+
+export async function getMarketFilters(): Promise<MarketFilterOptions | null> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/markets/filters`);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as MarketFilterOptions;
+    return data;
+  } catch (error) {
+    console.error("Failed to fetch market filters:", error);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Group Item API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface GroupItem {
+  id: string;
+  title: string;
+  slug: string;
+  description: string | null;
+  imageUrl: string | null;
+  markets: Market[];
+  marketCount: number;
+  totalVolume: number;
+  totalLiquidity: number;
+}
+
+export async function getGroupItems(groupItemId?: string): Promise<GroupItem[]> {
+  try {
+    const url = groupItemId
+      ? `${GAMMA_API_BASE}/markets/group-item?id=${encodeURIComponent(groupItemId)}`
+      : `${GAMMA_API_BASE}/markets/group-item`;
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data.map((item: GroupItem & { markets?: GammaMarket[] }) => ({
+      ...item,
+      markets: (item.markets || []).map((m: GammaMarket) => parseGammaMarket(m)),
+    })) as GroupItem[];
+  } catch (error) {
+    console.error("Failed to fetch group items:", error);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Market Resolution Status API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface MarketResolution {
+  marketId: string;
+  question: string;
+  resolved: boolean;
+  resolvedAt: string | null;
+  resolution: string | null;
+  resolutionSource: string | null;
+}
+
+export async function getMarketResolutionStatus(marketId: string): Promise<MarketResolution | null> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/markets/${encodeURIComponent(marketId)}/resolution`);
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as MarketResolution;
+    return data;
+  } catch (error) {
+    console.error("Failed to fetch market resolution status:", error);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Trending Markets API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface TrendingMarket {
+  id: string;
+  question: string;
+  slug: string;
+  volume24hr: number;
+  change24hr: number;
+  rank: number;
+}
+
+export async function getTrendingMarketsList(limit: number = 20): Promise<TrendingMarket[]> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/markets/trending?limit=${limit}`);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data as TrendingMarket[];
+  } catch (error) {
+    console.error("Failed to fetch trending markets:", error);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Popular Markets API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getPopularMarkets(limit: number = 20): Promise<Market[]> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/markets/popular?limit=${limit}`);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data
+      .map((item: GammaMarket) => parseGammaMarket(item))
+      .filter((market: Market) => market.outcomes.length > 0);
+  } catch (error) {
+    console.error("Failed to fetch popular markets:", error);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Market Comments API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface MarketComment {
+  id: string;
+  user: string;
+  content: string;
+  createdAt: string;
+  likes: number;
+  replies: number;
+}
+
+export async function getMarketComments(marketId: string, limit: number = 50): Promise<MarketComment[]> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets/${encodeURIComponent(marketId)}/comments?limit=${limit}`
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data as MarketComment[];
+  } catch (error) {
+    console.error("Failed to fetch market comments:", error);
+    return [];
+  }
+}
+
+export async function postMarketComment(marketId: string, content: string): Promise<MarketComment | null> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets/${encodeURIComponent(marketId)}/comments`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content }),
+      }
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as MarketComment;
+    return data;
+  } catch (error) {
+    console.error("Failed to post market comment:", error);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Related Markets API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getRelatedMarkets(marketId: string, limit: number = 10): Promise<Market[]> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets/${encodeURIComponent(marketId)}/related?limit=${limit}`
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data
+      .map((item: GammaMarket) => parseGammaMarket(item))
+      .filter((market: Market) => market.outcomes.length > 0);
+  } catch (error) {
+    console.error("Failed to fetch related markets:", error);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Featured Markets API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface FeaturedGroup {
+  id: string;
+  title: string;
+  description: string;
+  markets: Market[];
+}
+
+export async function getFeaturedMarkets(): Promise<FeaturedGroup[]> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/markets/featured`);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data.map((group: FeaturedGroup & { markets?: GammaMarket[] }) => ({
+      ...group,
+      markets: (group.markets || []).map((m: GammaMarket) => parseGammaMarket(m)),
+    }));
+  } catch (error) {
+    console.error("Failed to fetch featured markets:", error);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Closed Markets API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getClosedMarkets(limit: number = 50, offset: number = 0): Promise<Market[]> {
+  try {
+    const query = buildMarketsQuery({ limit, offset, closed: true, order: "volumeNum", ascending: false });
+    const response = await fetch(`${GAMMA_API_BASE}/markets?${query}`);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data
+      .map((item: GammaMarket) => parseGammaMarket(item))
+      .filter((market: Market) => market.outcomes.length > 0);
+  } catch (error) {
+    console.error("Failed to fetch closed markets:", error);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Resolved Markets API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getResolvedMarkets(limit: number = 50, offset: number = 0): Promise<Market[]> {
+  try {
+    const query = buildMarketsQuery({
+      limit,
+      offset,
+      closed: false,
+      order: "endDate",
+      ascending: false,
+    });
+    const response = await fetch(`${GAMMA_API_BASE}/markets?${query}&resolved=true`);
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data
+      .map((item: GammaMarket) => parseGammaMarket(item))
+      .filter((market: Market) => market.outcomes.length > 0);
+  } catch (error) {
+    console.error("Failed to fetch resolved markets:", error);
+    return [];
+  }
+}

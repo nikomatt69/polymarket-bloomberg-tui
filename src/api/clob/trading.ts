@@ -16,6 +16,8 @@ import {
 import { Order, PlacedOrder, OrderStatus } from "../../types/orders";
 
 const CLOB_BASE = "https://clob.polymarket.com";
+const GEO_BLOCK_URL = "https://polymarket.com/api/geoblock";
+const GEO_BLOCK_CACHE_TTL_MS = 60_000;
 
 interface ClobSignedOrder {
   salt: number;
@@ -79,6 +81,25 @@ interface ClobTrade {
   type?: string;
 }
 
+interface ClobPagedResponse<T> {
+  data?: T[];
+  count?: number;
+  limit?: number;
+  next_cursor?: string;
+}
+
+interface GeoblockResponse {
+  blocked?: boolean;
+  ip?: string;
+  country?: string;
+  region?: string;
+}
+
+let geoblockCache: {
+  checkedAt: number;
+  result: GeoblockResponse;
+} | null = null;
+
 function parseNumber(value: unknown, fallback: number = 0): number {
   if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
   if (typeof value === "string") {
@@ -86,6 +107,28 @@ function parseNumber(value: unknown, fallback: number = 0): number {
     return Number.isFinite(parsed) ? parsed : fallback;
   }
   return fallback;
+}
+
+function parseTimestampMs(value: unknown): number {
+  const parsed = parseNumber(value, Date.now());
+  if (!Number.isFinite(parsed)) return Date.now();
+  return parsed < 1_000_000_000_000 ? Math.round(parsed * 1000) : Math.round(parsed);
+}
+
+function parseSize(value: unknown): number {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const parsed = parseNumber(trimmed, 0);
+    if (trimmed.includes(".")) return parsed;
+    return parsed / 1_000_000;
+  }
+
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? value / 1_000_000 : value;
+  }
+
+  const parsed = parseNumber(value, 0);
+  return Number.isInteger(parsed) ? parsed / 1_000_000 : parsed;
 }
 
 function mapOrderErrorMessage(rawError: string | undefined, status: number): string {
@@ -141,12 +184,84 @@ function mapCancelErrorMessage(rawError: string | undefined, status: number): st
 
 function normalizeStatus(status?: string): OrderStatus {
   const value = (status ?? "").toUpperCase();
+  if (value.includes("MATCHED")) return "MATCHED";
+  if (value.includes("FILLED")) return "FILLED";
+  if (value.includes("UNMATCHED")) return "UNMATCHED";
+  if (value.includes("DELAYED")) return "DELAYED";
+  if (value.includes("CANCELED") || value.includes("CANCELLED")) return "CANCELLED";
   if (value === "MATCHED") return "MATCHED";
   if (value === "FILLED") return "FILLED";
   if (value === "UNMATCHED") return "UNMATCHED";
   if (value === "DELAYED") return "DELAYED";
   if (value === "CANCELED" || value === "CANCELLED") return "CANCELLED";
   return "LIVE";
+}
+
+async function getGeoblockStatus(): Promise<GeoblockResponse | null> {
+  const now = Date.now();
+  if (geoblockCache && now - geoblockCache.checkedAt < GEO_BLOCK_CACHE_TTL_MS) {
+    return geoblockCache.result;
+  }
+
+  try {
+    const response = await fetch(GEO_BLOCK_URL);
+    if (!response.ok) return null;
+
+    const result = (await response.json()) as GeoblockResponse;
+    geoblockCache = { checkedAt: now, result };
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureTradingAllowed(): Promise<void> {
+  const geoblock = await getGeoblockStatus();
+  if (!geoblock?.blocked) return;
+
+  const region = geoblock.region ? `-${geoblock.region}` : "";
+  throw new Error(`Trading unavailable from your region (${geoblock.country ?? "unknown"}${region}).`);
+}
+
+async function sendHeartbeat(privateKey: `0x${string}`, creds: ApiCredentials): Promise<void> {
+  const requestPath = "/heartbeats";
+  const headers = await createL2Headers(privateKey, creds, "POST", requestPath);
+  const response = await fetch(`${CLOB_BASE}${requestPath}`, {
+    method: "POST",
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Heartbeat rejected with HTTP ${response.status}`);
+  }
+}
+
+function extractPagedRows<T>(payload: unknown): T[] {
+  if (Array.isArray(payload)) {
+    return payload as T[];
+  }
+
+  if (payload && typeof payload === "object" && Array.isArray((payload as { data?: unknown[] }).data)) {
+    return (payload as { data: T[] }).data;
+  }
+
+  return [];
+}
+
+async function resolveMarketByAssetId(
+  privateKey: `0x${string}`,
+  creds: ApiCredentials,
+  assetId: string,
+): Promise<string | null> {
+  const requestPath = `/orders?asset_id=${encodeURIComponent(assetId)}`;
+  const headers = await createL2Headers(privateKey, creds, "GET", requestPath);
+  const response = await fetch(`${CLOB_BASE}${requestPath}`, { headers });
+  if (!response.ok) return null;
+
+  const payload = (await response.json()) as unknown;
+  const rows = extractPagedRows<ClobOpenOrder>(payload);
+  const market = rows.find((row) => row.asset_id === assetId && row.market)?.market ?? rows[0]?.market;
+  return market ?? null;
 }
 
 async function getAuthContext(): Promise<{
@@ -291,6 +406,7 @@ async function buildSignedOrder(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function placeOrder(order: Order): Promise<PlacedOrder> {
+  await ensureTradingAllowed();
   const { privateKey, creds } = await getAuthContext();
   const signedOrder = await buildSignedOrder(
     privateKey,
@@ -324,6 +440,10 @@ export async function placeOrder(order: Order): Promise<PlacedOrder> {
 
   const orderId = data.orderId ?? data.orderID ?? "";
   const status = normalizeStatus(data.status);
+
+  void sendHeartbeat(privateKey, creds).catch(() => {
+    // Best-effort safety signal; order placement result is authoritative.
+  });
 
   return {
     orderId,
@@ -374,6 +494,10 @@ export async function cancelOrder(orderId: string): Promise<boolean> {
     throw new Error(`Cancel rejected: ${reason}`);
   }
 
+  void sendHeartbeat(privateKey, creds).catch(() => {
+    // Best-effort safety signal after cancel mutation.
+  });
+
   return true;
 }
 
@@ -402,6 +526,10 @@ async function cancelWithBody(
     throw new Error(mapCancelErrorMessage(reason, response.status));
   }
 
+  void sendHeartbeat(privateKey, creds).catch(() => {
+    // Best-effort safety signal after cancel mutation.
+  });
+
   return {
     canceled: Array.isArray(data.canceled) ? data.canceled : [],
     notCanceled: data.not_canceled ?? {},
@@ -427,13 +555,17 @@ export async function cancelOrdersForAssetIds(assetIds: string[]): Promise<{ can
     return { canceled: [], notCanceled: {} };
   }
 
+  const { privateKey, creds } = await getAuthContext();
   const aggregate: { canceled: string[]; notCanceled: Record<string, string> } = {
     canceled: [],
     notCanceled: {},
   };
 
   for (const assetId of uniqueIds) {
-    const body = JSON.stringify({ asset_id: assetId });
+    const market = await resolveMarketByAssetId(privateKey, creds, assetId);
+    const body = JSON.stringify(
+      market ? { market, asset_id: assetId } : { asset_id: assetId }
+    );
     const result = await cancelWithBody("/cancel-market-orders", body);
     aggregate.canceled.push(...result.canceled);
     Object.assign(aggregate.notCanceled, result.notCanceled);
@@ -449,23 +581,19 @@ export async function cancelOrdersForAssetIds(assetIds: string[]): Promise<{ can
 export async function fetchOpenOrders(): Promise<PlacedOrder[]> {
   try {
     const { privateKey, creds } = await getAuthContext();
-    const requestPath = "/data/orders";
+    const requestPath = "/orders";
     const headers = await createL2Headers(privateKey, creds, "GET", requestPath);
 
     const response = await fetch(`${CLOB_BASE}${requestPath}`, { headers });
     if (!response.ok) return [];
 
     const payload = (await response.json()) as unknown;
-    const rows = Array.isArray(payload)
-      ? (payload as ClobOpenOrder[])
-      : Array.isArray((payload as { data?: unknown[] })?.data)
-        ? ((payload as { data: ClobOpenOrder[] }).data)
-        : [];
+    const rows = extractPagedRows<ClobOpenOrder>(payload);
 
     return rows
       .map((row) => {
-        const originalSize = parseNumber(row.original_size ?? row.size, 0);
-        const sizeMatched = parseNumber(row.size_matched, 0);
+        const originalSize = parseSize(row.original_size ?? row.size);
+        const sizeMatched = parseSize(row.size_matched);
         return {
           orderId: row.id ?? row.orderId ?? "",
           tokenId: row.asset_id ?? "",
@@ -475,7 +603,7 @@ export async function fetchOpenOrders(): Promise<PlacedOrder[]> {
           sizeMatched,
           sizeRemaining: Math.max(0, originalSize - sizeMatched),
           status: normalizeStatus(row.status),
-          createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+          createdAt: parseTimestampMs(row.created_at),
           marketTitle: row.market,
           outcomeTitle: row.outcome,
         } as PlacedOrder;
@@ -489,22 +617,19 @@ export async function fetchOpenOrders(): Promise<PlacedOrder[]> {
 export async function fetchTradeHistory(): Promise<PlacedOrder[]> {
   try {
     const { privateKey, creds } = await getAuthContext();
-    const requestPath = "/data/trades";
+    const makerAddress = privateKeyToAccount(privateKey).address;
+    const requestPath = `/trades?maker_address=${encodeURIComponent(makerAddress)}`;
     const headers = await createL2Headers(privateKey, creds, "GET", requestPath);
 
     const response = await fetch(`${CLOB_BASE}${requestPath}`, { headers });
     if (!response.ok) return [];
 
     const payload = (await response.json()) as unknown;
-    const rows = Array.isArray(payload)
-      ? (payload as ClobTrade[])
-      : Array.isArray((payload as { data?: unknown[] })?.data)
-        ? ((payload as { data: ClobTrade[] }).data)
-        : [];
+    const rows = extractPagedRows<ClobTrade>(payload);
 
     return rows
       .map((trade) => {
-        const size = parseNumber(trade.size, 0);
+        const size = parseSize(trade.size);
         return {
           orderId: trade.taker_order_id ?? trade.id ?? "",
           tokenId: trade.asset_id ?? "",
@@ -514,11 +639,7 @@ export async function fetchTradeHistory(): Promise<PlacedOrder[]> {
           sizeMatched: size,
           sizeRemaining: 0,
           status: "FILLED" as OrderStatus,
-          createdAt: trade.match_time
-            ? new Date(trade.match_time).getTime()
-            : trade.last_update
-              ? new Date(trade.last_update).getTime()
-              : Date.now(),
+          createdAt: parseTimestampMs(trade.match_time ?? trade.last_update),
           marketTitle: trade.market,
           outcomeTitle: trade.outcome,
         } as PlacedOrder;
