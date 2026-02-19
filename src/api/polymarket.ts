@@ -205,9 +205,9 @@ function parseGammaMarket(market: GammaMarket): Market {
 // Market Data API
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function getMarkets(limit: number = 50): Promise<Market[]> {
+export async function getMarkets(limit: number = 50, offset: number = 0): Promise<Market[]> {
   const response = await fetch(
-    `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&order=volumeNum&ascending=false`
+    `${GAMMA_API_BASE}/markets?limit=${limit}&offset=${offset}&closed=false&order=volumeNum&ascending=false`
   );
 
   if (!response.ok) {
@@ -245,10 +245,10 @@ export async function getMarketDetails(marketId: string): Promise<Market | null>
   }
 }
 
-export async function getMarketsByCategory(category: string, limit: number = 50): Promise<Market[]> {
+export async function getMarketsByCategory(category: string, limit: number = 50, offset: number = 0): Promise<Market[]> {
   try {
     const response = await fetch(
-      `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&category=${encodeURIComponent(category)}&order=volumeNum&ascending=false`
+      `${GAMMA_API_BASE}/markets?limit=${limit}&offset=${offset}&closed=false&category=${encodeURIComponent(category)}&order=volumeNum&ascending=false`
     );
 
     if (!response.ok) {

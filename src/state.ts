@@ -704,6 +704,17 @@ export function setMarkets(markets: Market[]): void {
 }
 
 /**
+ * Append additional markets (for pagination), deduplicating by id
+ */
+export function appendMarkets(newMarkets: Market[]): void {
+  const existingIds = new Set(appState.markets.map((m) => m.id));
+  const deduped = newMarkets.filter((m) => !existingIds.has(m.id));
+  if (deduped.length > 0) {
+    setAppState("markets", [...appState.markets, ...deduped]);
+  }
+}
+
+/**
  * Get currently selected market
  */
 export function getSelectedMarket(): Market | undefined {
