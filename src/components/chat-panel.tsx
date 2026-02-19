@@ -76,7 +76,7 @@ export function ChatPanel() {
                       {(toolCall) => (
                         <box flexDirection="column" paddingLeft={2}>
                           <text
-                            content={`→ ${toolCall.name}`}
+                            content={`nikcli ${toolCall.name}`}
                             fg={theme.textMuted}
                           />
                           <Show when={toolCall.arguments && Object.keys(toolCall.arguments).length > 0}>
