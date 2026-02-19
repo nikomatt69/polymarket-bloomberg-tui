@@ -3,17 +3,11 @@ import { appState, highlightedIndex, getFilteredMarkets, navigateToIndex, setMar
 import { formatVolume, formatChange, truncateString } from "../utils/format";
 import { useTheme } from "../context/theme";
 import { isWatched, watchlistState } from "../hooks/useWatchlist";
-import { getMarketsByCategory, getTrendingMarkets } from "../api/polymarket";
+import { getMarketsByCategory, getTrendingMarkets, POLYMARKET_CATEGORIES } from "../api/gamma";
 
 const CATEGORIES = [
   { id: "trending", label: "Trending", emoji: "🔥", apiValue: "trending" },
-  { id: "Sports", label: "Sports", emoji: "⚽", apiValue: "Sports" },
-  { id: "Politics", label: "Politics", emoji: "🏛️", apiValue: "Politics" },
-  { id: "Crypto", label: "Crypto", emoji: "₿", apiValue: "Crypto" },
-  { id: "Business", label: "Business", emoji: "📊", apiValue: "Business" },
-  { id: "Entertainment", label: "Entertainment", emoji: "🎬", apiValue: "Entertainment" },
-  { id: "Science", label: "Science", emoji: "🔬", apiValue: "Science" },
-  { id: "AI", label: "AI", emoji: "🤖", apiValue: "AI" },
+  ...POLYMARKET_CATEGORIES.map(c => ({ id: c.id, label: c.label, emoji: c.emoji, apiValue: c.id })),
 ];
 
 export function MarketList() {
