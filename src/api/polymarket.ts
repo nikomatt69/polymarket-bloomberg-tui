@@ -356,9 +356,12 @@ export async function getOrderBookSummary(tokenId: string): Promise<OrderBookSum
     const response = await fetch(`${CLOB_API_BASE}/book?token_id=${tokenId}`);
     if (!response.ok) return null;
 
-    const data = (await response.json()) as ClobBookResponse;
-    const bids = Array.isArray(data.bids) ? data.bids : [];
-    const asks = Array.isArray(data.asks) ? data.asks : [];
+    const json = await response.json();
+    if (!json) return null;
+
+    const data = json as ClobBookResponse;
+    const bids = Array.isArray(data?.bids) ? data.bids : [];
+    const asks = Array.isArray(data?.asks) ? data.asks : [];
 
     const bestBid = bids.length > 0 ? parseNumeric(bids[0].price, 0) : null;
     const bestAsk = asks.length > 0 ? parseNumeric(asks[0].price, 0) : null;
@@ -450,9 +453,12 @@ export async function getMarketDepth(tokenId: string, levels: number = 10): Prom
     const response = await fetch(`${CLOB_API_BASE}/book?token_id=${tokenId}`);
     if (!response.ok) return null;
 
-    const data = (await response.json()) as ClobBookResponse;
-    const bids = Array.isArray(data.bids) ? data.bids : [];
-    const asks = Array.isArray(data.asks) ? data.asks : [];
+    const json = await response.json();
+    if (!json) return null;
+
+    const data = json as ClobBookResponse;
+    const bids = Array.isArray(data?.bids) ? data.bids : [];
+    const asks = Array.isArray(data?.asks) ? data.asks : [];
 
     let bidTotal = 0;
     const bidLevels = bids.slice(0, levels).map((level) => {

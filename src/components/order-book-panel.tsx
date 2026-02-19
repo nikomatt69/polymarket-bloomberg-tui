@@ -13,6 +13,7 @@ import { appState, setOrderBookPanelOpen } from "../state";
 import { createClobWebSocket, WsStatus } from "../api/ws";
 import type { WsBookSnapshot, WsPriceChange, WsTrade } from "../api/ws";
 import { getMarketDepth } from "../api/polymarket";
+import { formatPrice as fmtPct } from "../utils/format";
 
 interface DepthLevel {
   price: number;
@@ -30,16 +31,15 @@ interface LastTrade {
   side: "BUY" | "SELL";
 }
 
-function buildBar(fraction: number, width: number): string {
+function buildBar(fraction: number | undefined | null, width: number): string {
+  if (fraction == null || isNaN(fraction)) return " ".repeat(width);
   const filled = Math.max(0, Math.round(fraction * width));
   return "█".repeat(filled);
 }
 
-function formatPrice(p: number): string {
-  return p.toFixed(4);
-}
 
-function formatSize(s: number): string {
+function formatSize(s: number | undefined | null): string {
+  if (s == null || isNaN(s)) return "0";
   if (s >= 1_000_000) return `${(s / 1_000_000).toFixed(1)}M`;
   if (s >= 1_000) return `${(s / 1_000).toFixed(1)}K`;
   return s.toFixed(0);
@@ -69,19 +69,19 @@ export function OrderBookPanel() {
   });
 
   const spread = createMemo(() => {
-    const bestAsk = book.asks[0]?.price ?? 0;
-    const bestBid = book.bids[0]?.price ?? 0;
+    const bestAsk = book.asks?.[0]?.price ?? 0;
+    const bestBid = book.bids?.[0]?.price ?? 0;
     if (bestAsk > 0 && bestBid > 0) return bestAsk - bestBid;
     return null;
   });
 
-  const maxBidSize = createMemo(() => Math.max(...book.bids.map((b) => b.size), 1));
-  const maxAskSize = createMemo(() => Math.max(...book.asks.map((a) => a.size), 1));
+  const maxBidSize = createMemo(() => Math.max(...(book.bids ?? []).map((b) => b.size), 1));
+  const maxAskSize = createMemo(() => Math.max(...(book.asks ?? []).map((a) => a.size), 1));
 
   // Bootstrap REST snapshot, then switch to live WebSocket deltas
   createEffect(() => {
     const outcome = selectedOutcome();
-    if (!outcome) {
+    if (!outcome || !outcome.id) {
       setBook({ bids: [], asks: [] });
       return;
     }
@@ -95,7 +95,7 @@ export function OrderBookPanel() {
       const depth = await getMarketDepth(tokenId, 20);
       if (cancelled) return;
       setLoadingSnapshot(false);
-      if (depth) {
+      if (depth && depth.bids && depth.asks) {
         setBook({
           bids: depth.bids.map((l) => ({ price: l.price, size: l.size })),
           asks: depth.asks.map((l) => ({ price: l.price, size: l.size })),
@@ -114,10 +114,10 @@ export function OrderBookPanel() {
       if (msg.type === "book") {
         const snap = msg as WsBookSnapshot;
         setBook({
-          bids: snap.bids
+          bids: (snap.bids || [])
             .filter((l) => l.size > 0)
             .sort((a, b) => b.price - a.price),
-          asks: snap.asks
+          asks: (snap.asks || [])
             .filter((l) => l.size > 0)
             .sort((a, b) => a.price - b.price),
         });
@@ -206,15 +206,15 @@ export function OrderBookPanel() {
           </box>
           <text content=" | " fg={theme.borderSubtle} />
         </Show>
-        <Show when={spread() !== null}>
-          <text content={` Spread: ${(spread()! * 100).toFixed(2)}¢ `} fg={theme.textMuted} />
+        <Show when={spread() !== null && spread() !== undefined}>
+          <text content={` Spread: ${((spread() ?? 0) * 100).toFixed(2)}¢ `} fg={theme.textMuted} />
           <text content=" | " fg={theme.borderSubtle} />
         </Show>
         <Show when={lastTrade()}>
-          {(trade) => (
+          {(trade: LastTrade) => (
             <text
-              content={` Last: ${(trade().price * 100).toFixed(2)}¢  ${formatSize(trade().size)} shares `}
-              fg={trade().side === "BUY" ? theme.success : theme.error}
+              content={` Last: ${((trade.price ?? 0) * 100).toFixed(2)}¢  ${formatSize(trade.size)} shares `}
+              fg={trade.side === "BUY" ? theme.success : theme.error}
             />
           )}
         </Show>
@@ -242,26 +242,26 @@ export function OrderBookPanel() {
       <box flexGrow={1} flexDirection="column" overflow="hidden">
         <For each={Array.from({ length: DISPLAY_LEVELS }, (_, i) => i)}>
           {(rowIdx) => {
-            const bid = () => book.bids[rowIdx];
-            const ask = () => book.asks[rowIdx];
+            const bid = () => book.bids?.[rowIdx];
+            const ask = () => book.asks?.[rowIdx];
 
             return (
               <box height={1} width="100%" flexDirection="row">
                 {/* Bid side */}
                 <box width="50%" flexDirection="row" justifyContent="flex-end">
                   <Show when={bid()}>
-                    {(b) => (
+                    {(b: { price: number; size: number; total: number }) => (
                       <>
                         <text
-                          content={buildBar(b().size / maxBidSize(), BAR_WIDTH).padEnd(BAR_WIDTH + 1)}
+                          content={buildBar((b.size ?? 0) / maxBidSize(), BAR_WIDTH).padEnd(BAR_WIDTH + 1)}
                           fg={theme.successMuted}
                         />
                         <text
-                          content={formatSize(b().size).padStart(8)}
+                          content={formatSize(b.size).padStart(8)}
                           fg={theme.textMuted}
                         />
                         <text
-                          content={formatPrice(b().price).padStart(8)}
+                          content={fmtPct(b.price).padStart(8)}
                           fg={theme.success}
                         />
                       </>
@@ -275,18 +275,18 @@ export function OrderBookPanel() {
                 {/* Ask side */}
                 <box width="50%" flexDirection="row">
                   <Show when={ask()}>
-                    {(a) => (
+                    {(a: { price: number; size: number; total: number }) => (
                       <>
                         <text
-                          content={formatPrice(a().price).padEnd(8)}
+                          content={fmtPct(a.price).padEnd(8)}
                           fg={theme.error}
                         />
                         <text
-                          content={formatSize(a().size).padStart(8)}
+                          content={formatSize(a.size).padStart(8)}
                           fg={theme.textMuted}
                         />
                         <text
-                          content={(" " + buildBar(a().size / maxAskSize(), BAR_WIDTH)).padEnd(BAR_WIDTH + 1)}
+                          content={(" " + buildBar((a.size ?? 0) / maxAskSize(), BAR_WIDTH)).padEnd(BAR_WIDTH + 1)}
                           fg={theme.errorMuted}
                         />
                       </>

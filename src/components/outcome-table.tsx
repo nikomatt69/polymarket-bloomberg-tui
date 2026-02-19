@@ -1,4 +1,5 @@
 import { For, Show } from "solid-js";
+import { RGBA } from "@opentui/core";
 import { Market } from "../types/market";
 import { formatVolume, formatChange, padLeft } from "../utils/format";
 import { useTheme } from "../context/theme";
@@ -34,8 +35,8 @@ function probBar(price: number, width: number, fillChar = "â–ˆ", emptyChar = "â–
 function outcomeColor(
   idx: number,
   price: number,
-  theme: ReturnType<import("../context/theme").useTheme>["theme"],
-): ReturnType<typeof theme.success> {
+  theme: { success: RGBA; warning: RGBA; error: RGBA },
+): RGBA {
   // First outcome: green if confident, yellow if uncertain
   if (idx === 0) {
     return price >= 0.6 ? theme.success : price >= 0.4 ? theme.warning : theme.error;

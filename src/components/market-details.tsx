@@ -96,7 +96,7 @@ export function MarketDetails() {
 
   createEffect(() => {
     const market = selectedMarket();
-    if (!market || market.outcomes.length === 0) {
+    if (!market || !market.outcomes || market.outcomes.length === 0) {
       setOrderBooks({});
       return;
     }
