@@ -129,6 +129,7 @@ export const [orderHistoryTradeSelectedIdx, setOrderHistoryTradeSelectedIdx] = c
 export const [orderHistorySection, setOrderHistorySection] = createSignal<"open" | "trades">("open");
 
 // Panel visibility signals
+export const [orderBookPanelOpen, setOrderBookPanelOpen] = createSignal(false);
 export const [indicatorsPanelOpen, setIndicatorsPanelOpen] = createSignal(false);
 export const [sentimentPanelOpen, setSentimentPanelOpen] = createSignal(false);
 export const [comparisonPanelOpen, setComparisonPanelOpen] = createSignal(false);

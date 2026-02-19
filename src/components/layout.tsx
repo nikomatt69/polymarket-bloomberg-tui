@@ -20,6 +20,7 @@ import { WatchlistPanel } from "./watchlist-panel";
 import { AccountStatsPanel } from "./account-stats";
 import { SettingsPanel } from "./settings-panel";
 import { ShortcutsPanel } from "./shortcuts-panel";
+import { OrderBookPanel } from "./order-book-panel";
 import { useTheme } from "../context/theme";
 import {
   walletModalOpen,
@@ -34,6 +35,7 @@ import {
   accountStatsOpen,
   settingsPanelOpen,
   shortcutsPanelOpen,
+  orderBookPanelOpen,
 } from "../state";
 import { alertsState } from "../hooks/useAlerts";
 
@@ -111,7 +113,8 @@ export function Layout() {
       <Show when={
         walletModalOpen() || orderFormOpen() || orderHistoryOpen() ||
         alertsState.panelOpen || indicatorsPanelOpen() || sentimentPanelOpen() ||
-        comparisonPanelOpen() || watchlistPanelOpen() || settingsPanelOpen() || shortcutsPanelOpen()
+        comparisonPanelOpen() || watchlistPanelOpen() || settingsPanelOpen() || shortcutsPanelOpen() ||
+        orderBookPanelOpen()
       }>
         <box
           position="absolute"
@@ -177,6 +180,11 @@ export function Layout() {
       {/* Shortcuts Panel Modal */}
       <Show when={shortcutsPanelOpen()}>
         <ShortcutsPanel />
+      </Show>
+
+      {/* Live Order Book Panel Modal */}
+      <Show when={orderBookPanelOpen()}>
+        <OrderBookPanel />
       </Show>
     </box>
   );

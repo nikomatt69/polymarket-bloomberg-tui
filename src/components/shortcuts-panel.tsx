@@ -135,6 +135,10 @@ export function ShortcutsPanel() {
             <text content="  U      " fg={theme.textMuted} width={10} />
             <text content="Account stats" fg={theme.text} />
           </box>
+          <box flexDirection="row">
+            <text content="  D      " fg={theme.textMuted} width={10} />
+            <text content="Live order book" fg={theme.text} />
+          </box>
         </box>
 
         {/* Spacer */}
