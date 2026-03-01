@@ -24,3 +24,29 @@ export interface PortfolioSummary {
   totalPercentPnl: number;
   positionCount: number;
 }
+
+export interface SectorAllocation {
+  sector: string;
+  value: number;
+  percentage: number;
+  pnl: number;
+  positionCount: number;
+}
+
+export interface Performers {
+  title: string;
+  outcome: string;
+  pnl: number;
+  roi: number;
+}
+
+export interface PositionAnalytics extends PortfolioSummary {
+  weightedAvgEntry: number;
+  largestPosition: Position | null;
+  smallestPosition: Position | null;
+  sectorAllocations: SectorAllocation[];
+  topPerformers: Performers[];
+  bottomPerformers: Performers[];
+  bestPerformer: Performers | null;
+  worstPerformer: Performers | null;
+}

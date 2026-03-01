@@ -33,8 +33,8 @@ export interface TUIContext {
   alertsCount: number;
 
   // Filters & Settings
-  sortBy: "volume" | "change" | "name";
-  timeframe: "1d" | "5d" | "7d" | "all";
+  sortBy: "volume" | "change" | "name" | "liquidity" | "volatility";
+  timeframe: "1h" | "4h" | "1d" | "5d" | "1w" | "1M" | "all";
   watchlistFilterActive: boolean;
 
   // Panels
@@ -237,7 +237,7 @@ export const getMarketsByTagParams = z.object({
 
 // Navigation & UI tools
 export const setTimeframeParams = z.object({
-  timeframe: z.enum(["1d", "5d", "7d", "all"]).describe("Timeframe"),
+  timeframe: z.enum(["1h", "4h", "1d", "5d", "1w", "1M", "all"]).describe("Timeframe"),
 });
 export const setSortByParams = z.object({
   sort: z.enum(["volume", "change", "name"]).describe("Sort method"),

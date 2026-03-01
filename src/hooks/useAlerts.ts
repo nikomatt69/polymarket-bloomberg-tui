@@ -9,14 +9,30 @@ import { homedir } from "os";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
+export interface AlertHistoryEntry {
+  id: string;
+  alertId: string;
+  marketTitle: string;
+  outcomeTitle: string;
+  metric: AlertMetric;
+  condition: AlertCondition;
+  threshold: number;
+  triggeredValue: number;
+  triggeredAt: number;
+}
+
 interface AlertsState {
   alerts: PriceAlert[];
   panelOpen: boolean;
   lastTriggered: string | null; // alert id
+  soundEnabled: boolean;
+  alertHistory: AlertHistoryEntry[];
+  historyIdx: number;
+  showHistory: boolean;
   // add-form sub-state (driven from app.tsx keyboard handler)
   adding: boolean;
   addMetric: AlertMetric;
-  addCondition: "above" | "below";
+  addCondition: "above" | "below" | "crossesAbove" | "crossesBelow";
   addThreshold: string;
   addCooldownMinutes: string;
   addDebouncePasses: number;
@@ -53,10 +69,36 @@ function ensureRuntimeState(alertId: string): AlertRuntimeState {
   return next;
 }
 
+const previousValues = new Map<string, number>();
+
+function playSound(alertCount: number): void {
+  if (!alertsState.soundEnabled) return;
+  
+  const count = Math.min(alertCount, 3);
+  
+  if (count === 1) {
+    process.stdout.write("\x07");
+  } else if (count === 2) {
+    process.stdout.write("\x07\x07");
+  } else {
+    process.stdout.write("\x07\x07\x07");
+  }
+}
+
+function toggleSound(): void {
+  setAlertsState("soundEnabled", !alertsState.soundEnabled);
+}
+
+export { toggleSound };
+
 export const [alertsState, setAlertsState] = createStore<AlertsState>({
   alerts: [],
   panelOpen: false,
   lastTriggered: null,
+  soundEnabled: true,
+  alertHistory: [],
+  historyIdx: 0,
+  showHistory: false,
   adding: false,
   addMetric: "price",
   addCondition: "above",
@@ -96,7 +138,10 @@ export function loadAlerts(): void {
             ? item.metric
             : "price";
 
-        const condition: AlertCondition = item.condition === "below" ? "below" : "above";
+        const condition: AlertCondition = 
+          item.condition === "below" ? "below" :
+          item.condition === "crossesAbove" ? "crossesAbove" :
+          item.condition === "crossesBelow" ? "crossesBelow" : "above";
         const status =
           item.status === "triggered" || item.status === "dismissed"
             ? item.status
@@ -221,10 +266,11 @@ export function evaluateAlerts(markets: Market[]): void {
     }
   }
 
-  let anyTriggered = false;
+  let triggeredCount = 0;
   let hasStateChange = false;
   let lastTriggeredId: string | null = null;
   const now = Date.now();
+  const newHistoryEntries: AlertHistoryEntry[] = [];
 
   const resolveMetricValue = (alert: PriceAlert): number | null => {
     const market = marketMap.get(alert.marketId);
@@ -249,6 +295,23 @@ export function evaluateAlerts(markets: Market[]): void {
     }
   };
 
+  const checkCondition = (alert: PriceAlert, currentValue: number): boolean => {
+    const prevValue = previousValues.get(alert.id);
+    
+    switch (alert.condition) {
+      case "above":
+        return currentValue >= alert.threshold;
+      case "below":
+        return currentValue <= alert.threshold;
+      case "crossesAbove":
+        return prevValue !== undefined && prevValue < alert.threshold && currentValue >= alert.threshold;
+      case "crossesBelow":
+        return prevValue !== undefined && prevValue > alert.threshold && currentValue <= alert.threshold;
+      default:
+        return false;
+    }
+  };
+
   setAlertsState("alerts", (prev) =>
     prev.map((alert) => {
       if (alert.status === "dismissed") return alert;
@@ -257,13 +320,13 @@ export function evaluateAlerts(markets: Market[]): void {
 
       if (value === null || !Number.isFinite(value)) return alert;
 
+      previousValues.set(alert.id, value);
+
       const runtime = ensureRuntimeState(alert.id);
       const debouncePasses = normalizeDebouncePasses(alert.debouncePasses);
       const cooldownMinutes = normalizeCooldownMinutes(alert.cooldownMinutes);
 
-      const hit =
-        alert.condition === "above" ? value >= alert.threshold :
-        value <= alert.threshold;
+      const hit = checkCondition(alert, value);
 
       if (hit) {
         runtime.consecutiveHits = Math.min(debouncePasses, runtime.consecutiveHits + 1);
@@ -277,9 +340,21 @@ export function evaluateAlerts(markets: Market[]): void {
 
         if (!runtime.latched && debounceSatisfied && cooledDown) {
           runtime.latched = true;
-          anyTriggered = true;
+          triggeredCount++;
           hasStateChange = true;
           lastTriggeredId = alert.id;
+
+          newHistoryEntries.push({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            alertId: alert.id,
+            marketTitle: alert.marketTitle,
+            outcomeTitle: alert.outcomeTitle,
+            metric: alert.metric,
+            condition: alert.condition,
+            threshold: alert.threshold,
+            triggeredValue: value,
+            triggeredAt: now,
+          });
 
           return {
             ...alert,
@@ -294,7 +369,9 @@ export function evaluateAlerts(markets: Market[]): void {
       }
 
       runtime.consecutiveHits = 0;
-      runtime.latched = false;
+      if (alert.condition === "crossesAbove" || alert.condition === "crossesBelow") {
+        runtime.latched = false;
+      }
 
       if (alert.status === "triggered") {
         hasStateChange = true;
@@ -305,13 +382,16 @@ export function evaluateAlerts(markets: Market[]): void {
     })
   );
 
-  if (anyTriggered) {
+  if (triggeredCount > 0) {
     setAlertsState("lastTriggered", lastTriggeredId);
-    // system bell
-    process.stdout.write("\x07");
+    playSound(triggeredCount);
+    
+    if (newHistoryEntries.length > 0) {
+      setAlertsState("alertHistory", (prev) => [...newHistoryEntries, ...prev].slice(0, 100));
+    }
   }
 
-  if (hasStateChange || anyTriggered) {
+  if (hasStateChange || triggeredCount > 0) {
     saveAlerts();
   }
 }

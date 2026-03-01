@@ -9,9 +9,44 @@ import {
   fetchUsdcBalance,
   fetchOrCreateApiCredentials,
   truncateAddress,
+  InvalidPrivateKeyError,
+  NetworkError,
+  ConnectionTimeoutError,
+  WalletError,
 } from "../auth/wallet";
 import { setWalletState, walletState } from "../state";
 import { fetchUserPositions } from "./usePositions";
+
+/**
+ * Formats error for display in TUI
+ */
+function formatWalletError(err: unknown): string {
+  if (err instanceof InvalidPrivateKeyError) {
+    return err.message;
+  }
+  if (err instanceof ConnectionTimeoutError) {
+    return `${err.message}. Please try again.`;
+  }
+  if (err instanceof NetworkError) {
+    if (err.statusCode === 401) {
+      return "Authentication failed. Please check your credentials.";
+    }
+    if (err.statusCode === 403) {
+      return "Access forbidden. Please check your API permissions.";
+    }
+    if (err.statusCode && err.statusCode >= 500) {
+      return "Server error. Please try again later.";
+    }
+    return err.message;
+  }
+  if (err instanceof WalletError) {
+    return err.message;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return "An unexpected error occurred";
+}
 
 /**
  * Initialize wallet from persisted config on startup
@@ -38,7 +73,9 @@ export async function initializeWallet(): Promise<void> {
       setWalletState("apiPassphrase", creds.apiPassphrase);
     }
   } catch (err) {
-    setWalletState("error", err instanceof Error ? err.message : "Failed to load wallet");
+    const errorMessage = formatWalletError(err);
+    setWalletState("error", errorMessage);
+    console.error("Wallet initialization error:", err);
   } finally {
     setWalletState("loading", false);
   }
@@ -71,9 +108,11 @@ export async function connectWallet(privateKey: string): Promise<void> {
     }
     fetchUserPositions();
   } catch (err) {
-    setWalletState("error", err instanceof Error ? err.message : "Invalid private key");
+    const errorMessage = formatWalletError(err);
+    setWalletState("error", errorMessage);
     setWalletState("connected", false);
     setWalletState("address", null);
+    console.error("Wallet connection error:", err);
   } finally {
     setWalletState("loading", false);
   }
@@ -101,8 +140,10 @@ export async function refreshWalletBalance(): Promise<void> {
   try {
     const balance = await fetchUsdcBalance(walletState.address);
     setWalletState("balance", balance);
-  } catch {
-    // silent fail on refresh
+  } catch (err) {
+    const errorMessage = formatWalletError(err);
+    setWalletState("error", `Failed to refresh balance: ${errorMessage}`);
+    console.error("Balance refresh error:", err);
   }
 }
 

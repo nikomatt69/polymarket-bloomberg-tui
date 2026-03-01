@@ -35,19 +35,21 @@ export interface PricePoint {
   outcomeId: string;
 }
 
+export type Timeframe = '1h' | '4h' | '1d' | '5d' | '1w' | '1M' | 'all';
+
 export interface PriceHistory {
   marketId: string;
   outcomeId: string;
   data: PricePoint[];
-  timeframe: '1d' | '5d' | '7d' | 'all';
+  timeframe: Timeframe;
 }
 
 export interface AppState {
   markets: Market[];
   selectedMarketId: string | null;
   searchQuery: string;
-  sortBy: 'volume' | 'change' | 'name';
-  timeframe: '1d' | '5d' | '7d' | 'all';
+  sortBy: 'volume' | 'change' | 'name' | 'liquidity' | 'volatility';
+  timeframe: Timeframe;
   loading: boolean;
   error: string | null;
   lastRefresh: Date;
@@ -56,8 +58,8 @@ export interface AppState {
 export interface PersistentState {
   selectedMarketId: string | null;
   searchQuery: string;
-  sortBy: 'volume' | 'change' | 'name';
-  timeframe: '1d' | '5d' | '7d' | 'all';
+  sortBy: 'volume' | 'change' | 'name' | 'liquidity' | 'volatility';
+  timeframe: Timeframe;
   activeView?: 'market' | 'portfolio';
   themeMode?: 'dark' | 'light';
   themeName?: string;

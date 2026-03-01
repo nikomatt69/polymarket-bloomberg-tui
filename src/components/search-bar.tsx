@@ -5,12 +5,24 @@ import {
   walletState,
   searchInputFocused,
   setSearchInputFocused,
+  filterState,
+  setFilterPanelOpen,
 } from "../state";
 import { useTheme } from "../context/theme";
 import { truncateAddress } from "../auth/wallet";
 
 export function SearchBar() {
   const { theme } = useTheme();
+
+  const hasActiveFilters = createMemo(() =>
+    filterState.volumeMin !== undefined ||
+    filterState.volumeMax !== undefined ||
+    filterState.priceMin !== undefined ||
+    filterState.priceMax !== undefined ||
+    filterState.liquidityMin !== undefined ||
+    filterState.category !== undefined ||
+    filterState.sortBy2 !== undefined
+  );
 
   const walletChip = createMemo(() => {
     if (walletState.loading) return " ⟳ Connecting... ";
@@ -53,6 +65,18 @@ export function SearchBar() {
             setSearchInputFocused(true);
             updateSearchQuery(value);
           }}
+        />
+      </box>
+
+      {/* Filter indicator */}
+      <box
+        paddingX={1}
+        backgroundColor={hasActiveFilters() ? theme.accent : undefined}
+        onMouseDown={() => setFilterPanelOpen(true)}
+      >
+        <text
+          content={hasActiveFilters() ? " [L] Filters*" : " [L] Filters "}
+          fg={hasActiveFilters() ? theme.background : theme.textMuted}
         />
       </box>
 

@@ -96,12 +96,15 @@ export function OrderForm() {
 
   const priceValid = createMemo(() => {
     const v = parsedPrice();
-    return !isNaN(v) && v > 0 && v < 1;
+    return !isNaN(v) && v >= 0.01 && v <= 0.99;
   });
 
   const sharesValid = createMemo(() => {
     const v = parsedShares();
-    return !isNaN(v) && v > 0;
+    if (isNaN(v) || v <= 0) return false;
+    // Check max 2 decimal places
+    const sharesTimes100 = v * 100;
+    return Number.isInteger(sharesTimes100) || sharesTimes100 % 1 < 0.01;
   });
 
   const buyBalanceExceeded = createMemo(() =>
@@ -271,7 +274,7 @@ export function OrderForm() {
 
         <box flexDirection="row" alignItems="center">
           <text
-            content={orderFormFocusField() === "price" ? "▶ Price  (0-1): " : "  Price  (0-1): "}
+            content={orderFormFocusField() === "price" ? "▶ Price (0.01-0.99): " : "  Price (0.01-0.99): "}
             fg={orderFormFocusField() === "price" ? sideColor() : theme.textMuted}
             width={17}
           />
@@ -281,7 +284,7 @@ export function OrderForm() {
             focused={orderFormFocusField() === "price"}
           />
           <Show when={orderFormPriceInput() !== "" && !priceValid()}>
-            <text content="  ✗ 0-1" fg={theme.error} />
+            <text content="  ✗ 0.01-0.99" fg={theme.error} />
           </Show>
           <Show when={tickSizeInvalid()}>
             <text content={`  ✗ Tick ${formatCents(orderBook()?.tickSize)}`} fg={theme.error} />
@@ -290,9 +293,9 @@ export function OrderForm() {
 
         <box flexDirection="row" alignItems="center">
           <text
-            content={orderFormFocusField() === "shares" ? "▶ Shares       : " : "  Shares       : "}
+            content={orderFormFocusField() === "shares" ? "▶ Shares (max 2 decimals): " : "  Shares (max 2 decimals): "}
             fg={orderFormFocusField() === "shares" ? sideColor() : theme.textMuted}
-            width={17}
+            width={28}
           />
           <input
             width={12}

@@ -61,10 +61,14 @@ import {
   comparisonSelectMode,
   setComparisonSelectMode,
   setComparisonSelectedMarketId,
+  filterPanelOpen,
+  setFilterPanelOpen,
   watchlistPanelOpen,
   setWatchlistPanelOpen,
   accountStatsOpen,
   setAccountStatsOpen,
+  analyticsPanelOpen,
+  setAnalyticsPanelOpen,
   getSelectedMarket,
   getFilteredMarkets,
   highlightedIndex,
@@ -96,7 +100,7 @@ import {
   cancelSelectedMarketOpenOrders,
 } from "./hooks/useOrders";
 import { fetchUserPositions } from "./hooks/usePositions";
-import { loadAlerts, setAlertsState, alertsState, addAlert, dismissAlert, deleteAlert } from "./hooks/useAlerts";
+import { loadAlerts, setAlertsState, alertsState, addAlert, dismissAlert, deleteAlert, toggleSound } from "./hooks/useAlerts";
 import { loadSentiment as refreshSentiment } from "./components/sentiment-panel";
 import {
   setSelectedIndicator,
@@ -107,6 +111,7 @@ import {
   setRsiPeriod,
 } from "./components/indicators-panel";
 import { loadWatchlist, toggleWatchlist, toggleWatchlistFilter } from "./hooks/useWatchlist";
+import { loadDirectMessages, loadGlobalMessages, initializeMessages } from "./api/messages";
 import { ThemeProvider, useTheme } from "./context/theme";
 import {
   settingsPanelOpen,
@@ -127,17 +132,68 @@ import {
   setChatInputFocused,
   searchInputFocused,
   setSearchInputFocused,
+  initializeFilters,
+  authModalOpen,
+  setAuthModalOpen,
+  authModalMode,
+  setAuthModalMode,
+  authUsernameInput,
+  setAuthUsernameInput,
+  authEmailInput,
+  setAuthEmailInput,
+  authPasswordInput,
+  setAuthPasswordInput,
+  authError,
+  setAuthError,
+  authState,
+  setAuthState,
+  initializeAuth,
+  messagesPanelOpen,
+  setMessagesPanelOpen,
+  messagesTab,
+  setMessagesTab,
+  conversationMode,
+  setConversationMode,
+  selectedConversationId,
+  setSelectedConversationId,
+  conversations,
+  globalChatInputValue,
+  setGlobalChatInputValue,
+  dmInputValue,
+  setDmInputValue,
+  dmNewRecipientId,
+  setDmNewRecipientId,
+  dmNewRecipientName,
+  setDmNewRecipientName,
+  profilePanelOpen,
+  setProfilePanelOpen,
+  profileViewMode,
+  setProfileViewMode,
+  userSearchOpen,
+  setUserSearchOpen,
+  userSearchQuery,
+  setUserSearchQuery,
+  userSearchResults,
+  setUserSearchResults,
+  userSearchLoading,
+  setUserSearchLoading,
 } from "./state";
 import { refreshWalletBalance } from "./hooks/useWallet";
 import { useAssistant } from "./hooks/useAssistant";
+import { initializeWebSocket } from "./api/websocket";
+import { searchUsers } from "./api/users";
 
 function AppContent() {
   initializeState();
+  initializeFilters();
+  initializeAuth();
+  initializeMessages();
   useMarketsFetch();
   useRefreshInterval(30000);
   initializeWallet();
   loadAlerts();
   loadWatchlist();
+  initializeWebSocket();
 
   const themeCtx = useTheme();
   const { toggleMode, setTheme, reloadThemes } = themeCtx;
@@ -205,11 +261,36 @@ function AppContent() {
       } else if (e.name === "p") {
         setOrderFormPostOnly(!orderFormPostOnly());
       } else if (e.name === "return") {
-        const price = parseFloat(orderFormPriceInput());
-        const shares = parseFloat(orderFormSharesInput());
+        const priceInput = orderFormPriceInput();
+        const sharesInput = orderFormSharesInput();
+        const price = parseFloat(priceInput);
+        const shares = parseFloat(sharesInput);
         const isPostOnlyValid = !(orderFormPostOnly() && orderFormType() === "FOK");
 
-        if (!isNaN(price) && price > 0 && price < 1 && !isNaN(shares) && shares > 0 && isPostOnlyValid) {
+        // Validate price: must be between 0.01 and 0.99
+        const priceError = isNaN(price)
+          ? "Price must be a valid number"
+          : price < 0.01
+            ? "Price must be at least 0.01"
+            : price > 0.99
+              ? "Price must be at most 0.99"
+              : null;
+
+        // Validate shares: must be > 0 with max 2 decimal places
+        let sharesError: string | null = null;
+        if (isNaN(shares)) {
+          sharesError = "Shares must be a valid number";
+        } else if (shares <= 0) {
+          sharesError = "Shares must be greater than 0";
+        } else {
+          // Check max 2 decimal places
+          const sharesTimes100 = shares * 100;
+          if (!Number.isInteger(sharesTimes100) && sharesTimes100 % 1 > 0.01) {
+            sharesError = "Shares can have at most 2 decimal places";
+          }
+        }
+
+        if (!priceError && !sharesError && isPostOnlyValid) {
           const market = getSelectedMarket();
           submitOrder({
             tokenId: orderFormTokenId(),
@@ -530,6 +611,11 @@ function AppContent() {
         if (e.name === "d") disconnectWalletHook();
         else if (e.name === "r") void refreshWalletBalance();
         else if (e.name === "w") { setSettingsPanelOpen(false); setWalletModalOpen(true); }
+        else if (e.name === "l" && authState.isAuthenticated) {
+          const auth = require("./auth/auth") as typeof import("./auth/auth");
+          auth.logoutUser();
+          setAuthState({ isAuthenticated: false, user: null, token: null });
+        }
       } else if (settingsPanelTab() === "display") {
         if (e.name === "f") toggleWatchlistFilter();
         else if (e.name === "ctrl+k") {
@@ -537,6 +623,32 @@ function AppContent() {
           const i = sorts.indexOf(appState.sortBy as typeof sorts[number]);
           setSortBy(sorts[(i + 1) % 3]);
         }
+      }
+      return;
+    }
+
+    // Filter panel intercept
+    if (filterPanelOpen()) {
+      if (e.name === "escape" || e.name === "l") {
+        setFilterPanelOpen(false);
+      }
+      return;
+    }
+
+    // Analytics panel intercept
+    if (analyticsPanelOpen()) {
+      if (e.name === "escape") {
+        setAnalyticsPanelOpen(false);
+      } else if (e.name === "1") {
+        // handled in component
+      } else if (e.name === "2") {
+        // handled in component
+      } else if (e.name === "3") {
+        // handled in component
+      } else if (e.name === "4") {
+        // handled in component
+      } else if (e.name === "c") {
+        // handled in component for correlation tab
       }
       return;
     }
@@ -571,7 +683,14 @@ function AppContent() {
           const idx = focusOrder.indexOf(alertsState.addFocus);
           setAlertsState("addFocus", focusOrder[(idx + 1) % focusOrder.length]);
         } else if (e.name === "c" && alertsState.addFocus === "condition") {
-          setAlertsState("addCondition", alertsState.addCondition === "above" ? "below" : "above");
+          const conditions: Array<"above" | "below" | "crossesAbove" | "crossesBelow"> = [
+            "above",
+            "below",
+            "crossesAbove",
+            "crossesBelow",
+          ];
+          const currentIdx = conditions.indexOf(alertsState.addCondition);
+          setAlertsState("addCondition", conditions[(currentIdx + 1) % conditions.length]);
         } else if (e.name === "m") {
           const metrics: Array<"price" | "change24h" | "volume24h" | "liquidity"> = [
             "price",
@@ -666,6 +785,12 @@ function AppContent() {
           setAlertsState("addCooldownMinutes", "5");
           setAlertsState("addDebouncePasses", 1);
           setAlertsState("addError", "");
+        } else if (e.name === "s") {
+          toggleSound();
+        } else if (e.name === "h" && !alertsState.adding) {
+          setAlertsState("showHistory", !alertsState.showHistory);
+          setAlertsState("selectedIdx", 0);
+          setAlertsState("historyIdx", 0);
         } else if (e.name === "d") {
           const visible = alertsState.alerts.filter((a) => a.status !== "dismissed");
           const alert = visible[alertsState.selectedIdx];
@@ -678,11 +803,82 @@ function AppContent() {
           const alert = visible[alertsState.selectedIdx];
           if (alert) dismissAlert(alert.id);
         } else if (e.name === "up" || e.name === "k") {
-          setAlertsState("selectedIdx", Math.max(0, alertsState.selectedIdx - 1));
+          if (alertsState.showHistory) {
+            setAlertsState("historyIdx", Math.max(0, alertsState.historyIdx - 1));
+          } else {
+            setAlertsState("selectedIdx", Math.max(0, alertsState.selectedIdx - 1));
+          }
         } else if (e.name === "down" || e.name === "j") {
-          const visible = alertsState.alerts.filter((a) => a.status !== "dismissed");
-          const maxIdx = Math.max(0, visible.length - 1);
-          setAlertsState("selectedIdx", Math.min(maxIdx, alertsState.selectedIdx + 1));
+          if (alertsState.showHistory) {
+            const maxIdx = Math.max(0, alertsState.alertHistory.length - 1);
+            setAlertsState("historyIdx", Math.min(maxIdx, alertsState.historyIdx + 1));
+          } else {
+            const visible = alertsState.alerts.filter((a) => a.status !== "dismissed");
+            const maxIdx = Math.max(0, visible.length - 1);
+            setAlertsState("selectedIdx", Math.min(maxIdx, alertsState.selectedIdx + 1));
+          }
+        }
+      }
+      return;
+    }
+
+    // Auth modal intercept
+    if (authModalOpen()) {
+      if (e.name === "escape") {
+        setAuthModalOpen(false);
+        setAuthUsernameInput("");
+        setAuthEmailInput("");
+        setAuthPasswordInput("");
+        setAuthError(null);
+      } else if (e.name === "tab") {
+        setAuthModalMode(authModalMode() === "login" ? "register" : "login");
+        setAuthError(null);
+      } else if (e.name === "return") {
+        const username = authUsernameInput().trim();
+        const email = authEmailInput().trim();
+        const password = authPasswordInput();
+
+        if (authModalMode() === "login") {
+          if (!username || !password) {
+            setAuthError("Username and password are required");
+            return;
+          }
+          const auth = require("./auth/auth") as typeof import("./auth/auth");
+          const result = auth.loginUser(username, password);
+          if (result.ok) {
+            setAuthState({
+              isAuthenticated: true,
+              user: {
+                id: result.session.userId,
+                username: result.session.username,
+                email: result.session.email,
+                createdAt: 0,
+              },
+              token: result.session.token,
+            });
+            setAuthModalOpen(false);
+            setAuthUsernameInput("");
+            setAuthEmailInput("");
+            setAuthPasswordInput("");
+            setAuthError(null);
+          } else {
+            setAuthError(result.error);
+          }
+        } else {
+          if (!username || !email || !password) {
+            setAuthError("All fields are required");
+            return;
+          }
+          const auth = require("./auth/auth") as typeof import("./auth/auth");
+          const result = auth.registerUser(username, email, password);
+          if (result.ok) {
+            setAuthModalMode("login");
+            setAuthError("Registration successful! Please login.");
+            setAuthUsernameInput("");
+            setAuthPasswordInput("");
+          } else {
+            setAuthError(result.error);
+          }
         }
       }
       return;
@@ -712,6 +908,102 @@ function AppContent() {
       return;
     }
 
+    // Messages panel intercept
+    if (messagesPanelOpen()) {
+      if (e.name === "escape") {
+        setMessagesPanelOpen(false);
+        setMessagesTab("conversations");
+        setConversationMode("list");
+        setSelectedConversationId(null);
+      } else if (e.name === "tab") {
+        setMessagesTab(messagesTab() === "conversations" ? "global" : "conversations");
+      } else if (e.name === "m" && conversationMode() === "list") {
+        setConversationMode("new");
+      } else if (e.name === "return") {
+        if (messagesTab() === "global") {
+          const content = globalChatInputValue().trim();
+          if (content) {
+            const { sendGlobalMessage } = require("./api/messages") as typeof import("./api/messages");
+            sendGlobalMessage(content);
+            setGlobalChatInputValue("");
+          }
+        } else if (conversationMode() === "new") {
+          const recipient = dmNewRecipientId().trim();
+          if (recipient) {
+            setSelectedConversationId(recipient.toLowerCase());
+            setConversationMode("chat");
+          }
+        } else if (conversationMode() === "chat" && selectedConversationId()) {
+          const content = dmInputValue().trim();
+          if (content) {
+            const { sendDirectMessage } = require("./api/messages") as typeof import("./api/messages");
+            const recipientId = selectedConversationId()!;
+            const conv = conversations().find(c => c.participantId.toLowerCase() === recipientId.toLowerCase());
+            sendDirectMessage(recipientId, conv?.participantName || recipientId, content);
+            setDmInputValue("");
+          }
+        }
+      } else if (e.name === "backspace") {
+        if (messagesTab() === "global") {
+          setGlobalChatInputValue(globalChatInputValue().slice(0, -1));
+        } else if (conversationMode() === "new") {
+          setDmNewRecipientId(dmNewRecipientId().slice(0, -1));
+        } else if (conversationMode() === "chat") {
+          setDmInputValue(dmInputValue().slice(0, -1));
+        }
+      } else if (e.sequence && e.sequence.length === 1 && e.sequence >= " ") {
+        if (messagesTab() === "global") {
+          setGlobalChatInputValue(globalChatInputValue() + e.sequence);
+        } else if (conversationMode() === "new") {
+          setDmNewRecipientId(dmNewRecipientId() + e.sequence);
+        } else if (conversationMode() === "chat") {
+          setDmInputValue(dmInputValue() + e.sequence);
+        }
+      }
+      return;
+    }
+
+    // User profile panel intercept
+    if (profilePanelOpen()) {
+      if (e.name === "escape") {
+        setProfilePanelOpen(false);
+      } else if (e.name === "s" && profileViewMode() === "view") {
+        setProfileViewMode("search");
+      } else if (e.name === "l" && profileViewMode() === "view") {
+        const auth = require("./auth/auth") as typeof import("./auth/auth");
+        auth.logoutUser();
+        setAuthState({
+          isAuthenticated: false,
+          user: null,
+          token: null,
+        });
+        setProfilePanelOpen(false);
+      }
+      return;
+    }
+
+    // User search panel intercept
+    if (userSearchOpen()) {
+      if (e.name === "escape") {
+        setUserSearchOpen(false);
+        setUserSearchQuery("");
+        setUserSearchResults([]);
+      } else if (e.name === "return") {
+        const query = userSearchQuery();
+        if (query.length >= 2) {
+          searchUsers(query).then((results) => {
+            setUserSearchResults(results);
+            setUserSearchLoading(false);
+          });
+          setUserSearchLoading(true);
+        }
+      } else if (e.name === "backspace") {
+        setUserSearchQuery(userSearchQuery().slice(0, -1));
+      } else if (e.sequence && e.sequence.length === 1 && e.sequence >= " ") {
+        setUserSearchQuery(userSearchQuery() + e.sequence);
+      }
+      return;
+    }
 
 
     // Search input intercept: while typing in search, block global shortcuts.
@@ -751,7 +1043,13 @@ function AppContent() {
       || settingsPanelOpen()
       || shortcutsPanelOpen()
       || alertsState.panelOpen
-      || walletModalOpen();
+      || walletModalOpen()
+      || filterPanelOpen()
+      || analyticsPanelOpen()
+      || authModalOpen()
+      || messagesPanelOpen()
+      || profilePanelOpen()
+      || userSearchOpen();
 
     if (anyOverlayOpen) {
       return;
@@ -778,6 +1076,11 @@ function AppContent() {
       case "w":
         // w — wallet modal (same as original)
         setWalletModalOpen(true);
+        break;
+      case "g":
+        // g — open auth modal
+        setAuthModalOpen(true);
+        setAuthModalMode("login");
         break;
       case "p": {
         // p — toggle portfolio panel
@@ -835,6 +1138,10 @@ function AppContent() {
         // z — open price alerts panel
         setAlertsState("panelOpen", true);
         break;
+      case "l":
+        // l — toggle filter panel
+        setFilterPanelOpen(!filterPanelOpen());
+        break;
       case "f":
         // f — toggle watchlist filter
         toggleWatchlistFilter();
@@ -849,6 +1156,14 @@ function AppContent() {
         // d — toggle live order book depth panel
         setOrderBookPanelOpen(!orderBookPanelOpen());
         break;
+      case "M":
+        // Shift+M — toggle messages panel
+        setMessagesPanelOpen(!messagesPanelOpen());
+        if (messagesPanelOpen()) {
+          loadDirectMessages();
+          loadGlobalMessages();
+        }
+        break;
       case "i":
         // i — toggle indicators panel
         setIndicatorsPanelOpen(!indicatorsPanelOpen());
@@ -856,6 +1171,10 @@ function AppContent() {
       case "m":
         // m — toggle sentiment analysis panel
         setSentimentPanelOpen(!sentimentPanelOpen());
+        break;
+      case "M":
+        // Shift+M — toggle messages panel
+        setMessagesPanelOpen(!messagesPanelOpen());
         break;
       case "c":
         // c — open comparison panel in select mode
@@ -876,28 +1195,45 @@ function AppContent() {
         }
         break;
       }
+      case "U":
+        // Shift+U — toggle user profile panel
+        setProfilePanelOpen(!profilePanelOpen());
+        break;
+      case "A":
+      case "a":
+        // A — toggle analytics panel
+        setAnalyticsPanelOpen(!analyticsPanelOpen());
+        break;
       case "k":
         if (e.ctrl) {
-          const nextSort =
-            appState.sortBy === "volume"
-              ? "change"
-              : appState.sortBy === "change"
-                ? "name"
-                : "volume";
-          setSortBy(nextSort);
+          const sorts = ["volume", "change", "liquidity", "volatility", "name"] as const;
+          const i = sorts.indexOf(appState.sortBy as typeof sorts[number]);
+          setSortBy(sorts[(i + 1) % sorts.length]);
         } else {
           // k — toggle shortcuts panel
           setShortcutsPanelOpen(!shortcutsPanelOpen());
         }
         break;
       case "1":
+        setTimeframe("1h");
+        break;
+      case "2":
+        setTimeframe("4h");
+        break;
+      case "3":
         setTimeframe("1d");
         break;
-      case "5":
+      case "4":
         setTimeframe("5d");
         break;
+      case "5":
+        setTimeframe("1w");
+        break;
+      case "6":
+        setTimeframe("1M");
+        break;
       case "7":
-        setTimeframe("7d");
+        setTimeframe("all");
         break;
       case "a":
         setTimeframe("all");

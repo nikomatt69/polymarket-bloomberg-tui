@@ -23,7 +23,7 @@ export const NavigateToMarketSchema = z.object({
 });
 
 export const SetTimeframeSchema = z.object({
-  timeframe: z.enum(["1d", "5d", "7d", "all"]).describe("Timeframe"),
+  timeframe: z.enum(["1h", "4h", "1d", "5d", "1w", "1M", "all"]).describe("Timeframe"),
 });
 
 export const SetSortBySchema = z.object({
@@ -54,7 +54,7 @@ Index is 0-based position in current filtered/sorted list.`,
 - Options: 1d, 5d, 7d, all
 
 Changes the price history chart view.`,
-    example: `set_timeframe({ timeframe: "7d" })`,
+    example: `set_timeframe({ timeframe: "1d" })`,
   },
 
   set_sort_by: {

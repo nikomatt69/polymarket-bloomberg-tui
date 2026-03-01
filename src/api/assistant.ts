@@ -23,6 +23,7 @@ import {
   chatLoading,
   setChatLoading,
 } from "../state";
+import { Timeframe } from "../types/market";
 import {
   searchMarkets,
   getMarketDetails,
@@ -333,7 +334,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
     }
 
     case "set_timeframe": {
-      const timeframe = args.timeframe as "1d" | "5d" | "7d" | "all";
+      const timeframe = args.timeframe as Timeframe;
       setTimeframe(timeframe);
       return { success: true, message: `Timeframe set to ${timeframe}` };
     }
@@ -721,7 +722,7 @@ const navigateToMarketSchema = z.object({
 });
 
 const setTimeframeSchema = z.object({
-  timeframe: z.enum(["1d", "5d", "7d", "all"]).describe("Timeframe"),
+  timeframe: z.enum(["1h", "4h", "1d", "5d", "1w", "1M", "all"]).describe("Timeframe"),
 });
 
 const setSortBySchema = z.object({

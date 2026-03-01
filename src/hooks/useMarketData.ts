@@ -2,12 +2,13 @@
  * Custom hook for fetching market data from Polymarket API
  */
 
-import { createEffect } from "solid-js";
+import { createEffect, onCleanup } from "solid-js";
 import {
   getMarkets,
   getMarketDetails,
   getPriceHistory,
 } from "../api/polymarket";
+import { Timeframe } from "../types/market";
 import {
   setMarkets,
   setLoading,
@@ -73,7 +74,7 @@ export function useSelectedMarketDetails(): Market | undefined {
  */
 export async function usePriceHistory(
   marketId: string | null,
-  timeframe: "1d" | "5d" | "7d" | "all"
+  timeframe: Timeframe
 ): Promise<PriceHistory | null> {
   if (!marketId) return null;
 
@@ -101,7 +102,7 @@ export function useRefreshInterval(intervalMs: number = 30000): void {
       }
     }, intervalMs);
 
-    return () => clearInterval(interval);
+    onCleanup(() => clearInterval(interval));
   });
 }
 

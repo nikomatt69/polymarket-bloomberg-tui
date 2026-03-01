@@ -1,5 +1,5 @@
 import { createMemo } from "solid-js";
-import { appState, highlightedIndex, getFilteredMarkets } from "../state";
+import { appState, highlightedIndex, getFilteredMarkets, wsConnectionStatus, unreadMessagesCount, unreadGlobalCount } from "../state";
 import { useTheme } from "../context/theme";
 import { walletState } from "../state";
 import { watchlistState } from "../hooks/useWatchlist";
@@ -20,8 +20,16 @@ export function StatusBar() {
     const watchFilter = watchlistState.filterActive ? "Watch: FILTER" : "Watch: ALL";
     const activeAlerts = alertsState.alerts.filter((alert) => alert.status === "active").length;
     const triggeredAlerts = alertsState.alerts.filter((alert) => alert.status === "triggered").length;
+    
+    const wsStatus = wsConnectionStatus();
+    const wsLabel = wsStatus === "connected" ? "WS: ✓" : wsStatus === "connecting" ? "WS: ⟳" : wsStatus === "reconnecting" ? "WS: ~" : "WS: ✗";
 
-    return `${status}  |  Sort: ${sortLabel}  |  TF: ${tf}  |  ${idx + 1}/${total}  |  ${wallet}  |  ${watchFilter}  |  Alerts A:${activeAlerts} T:${triggeredAlerts}  |  Last: ${lastRefresh}`;
+    const unreadDms = unreadMessagesCount();
+    const unreadGlobal = unreadGlobalCount();
+    const totalUnread = unreadDms + unreadGlobal;
+    const messagesLabel = totalUnread > 0 ? `Msgs: ${totalUnread}` : "Msgs: 0";
+
+    return `${status}  |  Sort: ${sortLabel}  |  TF: ${tf}  |  ${idx + 1}/${total}  |  ${wsLabel}  |  ${wallet}  |  ${watchFilter}  |  Alerts A:${activeAlerts} T:${triggeredAlerts}  |  ${messagesLabel}  |  Last: ${lastRefresh}`;
   });
 
   return (

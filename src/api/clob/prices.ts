@@ -3,7 +3,7 @@
  * Base: https://clob.polymarket.com
  */
 
-import { PriceHistory, PricePoint } from "../../types/market";
+import { PriceHistory, PricePoint, Timeframe } from "../../types/market";
 
 const CLOB_API_BASE = "https://clob.polymarket.com";
 
@@ -77,7 +77,7 @@ function parseNumeric(value: unknown, fallback: number = 0): number {
 
 export async function getPriceHistory(
   marketId: string,
-  timeframe: "1d" | "5d" | "7d" | "all" = "7d"
+  timeframe: Timeframe = "1d"
 ): Promise<PriceHistory | null> {
   try {
     // Import here to avoid circular dependency
@@ -93,10 +93,13 @@ export async function getPriceHistory(
       return null;
     }
 
-    const intervalMap: Record<string, string> = {
+    const intervalMap: Record<Timeframe, string> = {
+      "1h": "5m",
+      "4h": "15m",
       "1d": "1h",
       "5d": "6h",
-      "7d": "1d",
+      "1w": "1d",
+      "1M": "1d",
       "all": "max",
     };
 

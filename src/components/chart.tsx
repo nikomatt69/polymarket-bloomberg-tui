@@ -9,6 +9,7 @@ import {
   overlaySMAOnChart,
 } from "../utils/chart-utils";
 import { useTheme } from "../context/theme";
+import { calculateBollingerBands, calculateMACD, calculateEMA } from "../utils/indicators";
 
 interface ChartProps {
   market: Market | undefined;
@@ -23,6 +24,9 @@ interface ChartData {
   indicators: string;
   rsiLine: string;
   volumeInfo: string;
+  emaLine: string;
+  macdLine: string;
+  bollingerLine: string;
 }
 
 const CHART_WIDTH = 52;
@@ -100,6 +104,33 @@ export function Chart(props: ChartProps) {
       ? lastRsi >= 70 ? " (OVERBOUGHT)" : lastRsi <= 30 ? " (OVERSOLD)" : ""
       : "";
 
+    // EMA
+    const ema20 = calculateEMA(prices, 20);
+    const ema50 = calculateEMA(prices, 50);
+    const ema20Last = ema20[ema20.length - 1];
+    const ema50Last = ema50[ema50.length - 1];
+    const emaStr = !Number.isNaN(ema20Last) && !Number.isNaN(ema50Last)
+      ? `EMA20: ${formatChartLabel(ema20Last)}  EMA50: ${formatChartLabel(ema50Last)}`
+      : !Number.isNaN(ema20Last) ? `EMA20: ${formatChartLabel(ema20Last)}`
+      : "EMA: N/A";
+
+    // MACD
+    const macd = calculateMACD(prices);
+    const macdLast = macd.histogram[macd.histogram.length - 1];
+    const macdSignalLast = macd.signal[macd.signal.length - 1];
+    const macdStr = !Number.isNaN(macdLast) && !Number.isNaN(macdSignalLast)
+      ? `MACD: ${macdLast.toFixed(4)}  Sig: ${macdSignalLast.toFixed(4)}  Hist: ${macdLast.toFixed(4)}`
+      : "MACD: N/A";
+
+    // Bollinger Bands
+    const bb = calculateBollingerBands(prices, 20);
+    const bbUpperLast = bb.upper[bb.upper.length - 1];
+    const bbMiddleLast = bb.middle[bb.middle.length - 1];
+    const bbLowerLast = bb.lower[bb.lower.length - 1];
+    const bbStr = !Number.isNaN(bbUpperLast) && !Number.isNaN(bbLowerLast)
+      ? `BB(20): Upper ${formatChartLabel(bbUpperLast)}  Mid ${formatChartLabel(bbMiddleLast)}  Low ${formatChartLabel(bbLowerLast)}`
+      : "BB(20): N/A";
+
     // Volume stats
     const volumeStats = calculateVolumeStats(props.priceHistory?.data || []);
     const volumeInfo = `Volume: Avg $${(volumeStats.avg / 1000).toFixed(1)}K  Max $${(volumeStats.max / 1000).toFixed(1)}K  Trend: ${volumeStats.trend}`;
@@ -129,12 +160,15 @@ export function Chart(props: ChartProps) {
       indicators,
       rsiLine: `RSI(14): ${rsiStr}${rsiLevel}`,
       volumeInfo,
+      emaLine: emaStr,
+      macdLine: macdStr,
+      bollingerLine: bbStr,
     };
   });
 
   return (
     <box flexDirection="column" width="100%">
-      <text content={`📊 PRICE HISTORY (${props.priceHistory?.timeframe?.toUpperCase() || "7D"})`} fg={theme.primary} />
+      <text content={`📊 PRICE HISTORY (${props.priceHistory?.timeframe?.toUpperCase() || "1D"})`} fg={theme.primary} />
       <Show
         when={chartOutput()}
         fallback={<text content="No price history available" fg={theme.textMuted} />}
@@ -156,6 +190,9 @@ export function Chart(props: ChartProps) {
                 return theme.textMuted;
               })()
             } />
+            <text content={data().emaLine} fg={theme.warning} />
+            <text content={data().macdLine} fg={theme.primary} />
+            <text content={data().bollingerLine} fg={theme.textMuted} />
           </>
         )}
       </Show>

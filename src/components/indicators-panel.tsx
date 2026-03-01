@@ -7,15 +7,28 @@ import {
   calculateRSI,
   calculateMACD,
   calculateBollingerBands,
+  calculateEMA,
 } from "../utils/indicators";
 import { usePriceHistory } from "../hooks/useMarketData";
 import { PriceHistory } from "../types/market";
 
-type IndicatorType = "sma" | "rsi" | "macd" | "bollinger";
+type IndicatorType = "sma" | "ema" | "rsi" | "macd" | "bollinger";
 
 const [selectedIndicator, setSelectedIndicator] = createSignal<IndicatorType>("sma");
 const [smaPeriod, setSmaPeriod] = createSignal(20);
 const [rsiPeriod, setRsiPeriod] = createSignal(14);
+const [emaPeriod, setEmaPeriod] = createSignal(20);
+const [bbPeriod, setBbPeriod] = createSignal(20);
+const [bbStdDev, setBbStdDev] = createSignal(2);
+const [macdFast, setMacdFast] = createSignal(12);
+const [macdSlow, setMacdSlow] = createSignal(26);
+const [macdSignal, setMacdSignal] = createSignal(9);
+
+const [showSMA, setShowSMA] = createSignal(true);
+const [showEMA, setShowEMA] = createSignal(true);
+const [showRSI, setShowRSI] = createSignal(true);
+const [showMACD, setShowMACD] = createSignal(true);
+const [showBB, setShowBB] = createSignal(true);
 
 export function IndicatorsPanel() {
   const { theme } = useTheme();
@@ -83,6 +96,15 @@ export function IndicatorsPanel() {
           prev: sma[sma.length - 2],
         };
       }
+      case "ema": {
+        const ema = calculateEMA(data, emaPeriod());
+        return {
+          name: `EMA(${emaPeriod()})`,
+          values: takeLast(ema),
+          current: ema[ema.length - 1],
+          prev: ema[ema.length - 2],
+        };
+      }
       case "rsi": {
         const rsi = calculateRSI(data, rsiPeriod());
         return {
@@ -93,18 +115,18 @@ export function IndicatorsPanel() {
         };
       }
       case "macd": {
-        const macd = calculateMACD(data);
+        const macd = calculateMACD(data, macdFast(), macdSlow(), macdSignal());
         return {
-          name: "MACD HIST",
+          name: `MACD(${macdFast()},${macdSlow()})`,
           values: takeLast(macd.histogram),
           current: macd.histogram[macd.histogram.length - 1],
           prev: macd.histogram[macd.histogram.length - 2],
         };
       }
       case "bollinger": {
-        const bb = calculateBollingerBands(data, smaPeriod());
+        const bb = calculateBollingerBands(data, bbPeriod(), bbStdDev());
         return {
-          name: `BB MID(${smaPeriod()})`,
+          name: `BB(${bbPeriod()})`,
           values: takeLast(bb.middle),
           current: bb.middle[bb.middle.length - 1],
           prev: bb.middle[bb.middle.length - 2],
@@ -125,7 +147,8 @@ export function IndicatorsPanel() {
   type IndicatorOption = { id: IndicatorType; label: string; color: RGBA };
   const indicatorOptions: IndicatorOption[] = [
     { id: "sma",      label: "SMA",  color: theme.success },
-    { id: "rsi",      label: "RSI",  color: theme.warning },
+    { id: "ema",      label: "EMA",  color: theme.warning },
+    { id: "rsi",      label: "RSI",  color: theme.error },
     { id: "macd",     label: "MACD", color: theme.accent  },
     { id: "bollinger",label: "BB",   color: theme.primary },
   ];
@@ -213,4 +236,33 @@ export function IndicatorsPanel() {
   );
 }
 
-export { selectedIndicator, setSelectedIndicator, smaPeriod, setSmaPeriod, rsiPeriod, setRsiPeriod };
+export { 
+  selectedIndicator, 
+  setSelectedIndicator, 
+  smaPeriod, 
+  setSmaPeriod, 
+  rsiPeriod, 
+  setRsiPeriod,
+  emaPeriod,
+  setEmaPeriod,
+  bbPeriod,
+  setBbPeriod,
+  bbStdDev,
+  setBbStdDev,
+  macdFast,
+  setMacdFast,
+  macdSlow,
+  setMacdSlow,
+  macdSignal,
+  setMacdSignal,
+  showSMA,
+  setShowSMA,
+  showEMA,
+  setShowEMA,
+  showRSI,
+  setShowRSI,
+  showMACD,
+  setShowMACD,
+  showBB,
+  setShowBB,
+};

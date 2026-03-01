@@ -4,15 +4,243 @@
 
 import { createSignal, createEffect } from "solid-js";
 import { createStore } from "solid-js/store";
-import { AppState, PersistentState, Market, WalletState } from "./types/market";
+import { AppState, PersistentState, Market, WalletState, Timeframe } from "./types/market";
+import { UserProfile, UserContact, ProfileState } from "./types/user";
 import { homedir } from "os";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
+
+export type ConnectionStatus = "connected" | "disconnected" | "connecting" | "reconnecting" | "error";
+
+const [wsConnectionStatus, setConnectionStatusInternal] = createSignal<ConnectionStatus>("disconnected");
+const [lastMarketUpdates, setLastMarketUpdates] = createSignal<Record<string, { price: number; timestamp: number }>>({});
+
+export function setConnectionStatus(status: ConnectionStatus): void {
+  setConnectionStatusInternal(status);
+}
+
+export { wsConnectionStatus };
+
+export interface MarketUpdate {
+  tokenId: string;
+  marketId?: string;
+  price?: number;
+  bid?: number;
+  ask?: number;
+  timestamp: number;
+}
+
+export function addMarketUpdate(update: MarketUpdate): void {
+  const { tokenId, price } = update;
+  if (tokenId && price !== undefined) {
+    setLastMarketUpdates((prev) => {
+      const newUpdates = { ...prev };
+      newUpdates[tokenId] = { price, timestamp: update.timestamp };
+      return newUpdates;
+    });
+  }
+}
+
+function getLastPrice(tokenId: string): number | undefined {
+  return lastMarketUpdates()[tokenId]?.price;
+}
 
 type PersistedThemeMode = "dark" | "light";
 type PersistedActiveView = "market" | "portfolio";
 
 export type AIProviderKind = "anthropic" | "openrouter" | "custom";
+
+export interface FilterPreset {
+  id: string;
+  name: string;
+  volumeMin?: number;
+  volumeMax?: number;
+  priceMin?: number;
+  priceMax?: number;
+  liquidityMin?: number;
+  category?: string;
+  sortBy: "volume" | "change" | "name" | "liquidity" | "volatility";
+  sortBy2?: "volume" | "change" | "name" | "liquidity" | "volatility";
+}
+
+export interface FilterState {
+  volumeMin?: number;
+  volumeMax?: number;
+  priceMin?: number;
+  priceMax?: number;
+  liquidityMin?: number;
+  category?: string;
+  sortBy: "volume" | "change" | "name" | "liquidity" | "volatility";
+  sortBy2?: "volume" | "change" | "name" | "liquidity" | "volatility";
+  activePresetId?: string;
+}
+
+const initialFilterState: FilterState = {
+  sortBy: "volume",
+};
+
+export const [filterState, setFilterState] = createStore<FilterState>(initialFilterState);
+export const [filterPanelOpen, setFilterPanelOpen] = createSignal(false);
+export const [savedPresets, setSavedPresets] = createStore<FilterPreset[]>([]);
+
+function getFiltersPath(): string {
+  const configDir = join(homedir(), ".polymarket-tui");
+  try {
+    mkdirSync(configDir, { recursive: true });
+  } catch (e) {
+    // Directory might already exist
+  }
+  return join(configDir, "filters.json");
+}
+
+function loadSavedPresets(): FilterPreset[] {
+  try {
+    const path = getFiltersPath();
+    const data = readFileSync(path, "utf-8");
+    const parsed = JSON.parse(data);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((p): p is FilterPreset =>
+        p && typeof p === "object" && typeof p.id === "string" && typeof p.name === "string"
+      );
+    }
+  } catch {
+    // File doesn't exist or is invalid
+  }
+  return [];
+}
+
+export function initializeFilters(): void {
+  const presets = loadSavedPresets();
+  setSavedPresets(presets);
+}
+
+function saveSavedPresets(presets: FilterPreset[]): void {
+  try {
+    const path = getFiltersPath();
+    writeFileSync(path, JSON.stringify(presets, null, 2), { mode: 0o600 });
+  } catch (error) {
+    console.error("Failed to save filter presets:", error);
+  }
+}
+
+export function saveFilterPreset(name: string): FilterPreset {
+  const preset: FilterPreset = {
+    id: `preset-${Date.now()}`,
+    name,
+    volumeMin: filterState.volumeMin,
+    volumeMax: filterState.volumeMax,
+    priceMin: filterState.priceMin,
+    priceMax: filterState.priceMax,
+    liquidityMin: filterState.liquidityMin,
+    category: filterState.category,
+    sortBy: filterState.sortBy,
+    sortBy2: filterState.sortBy2,
+  };
+  const updated = [...savedPresets, preset];
+  setSavedPresets(updated);
+  saveSavedPresets(updated);
+  return preset;
+}
+
+export function applyFilterPreset(presetId: string): void {
+  const preset = savedPresets.find((p) => p.id === presetId);
+  if (!preset) return;
+  
+  setFilterState({
+    volumeMin: preset.volumeMin,
+    volumeMax: preset.volumeMax,
+    priceMin: preset.priceMin,
+    priceMax: preset.priceMax,
+    liquidityMin: preset.liquidityMin,
+    category: preset.category,
+    sortBy: preset.sortBy,
+    sortBy2: preset.sortBy2,
+    activePresetId: presetId,
+  });
+}
+
+export function deleteFilterPreset(presetId: string): void {
+  const updated = savedPresets.filter((p) => p.id !== presetId);
+  setSavedPresets(updated);
+  saveSavedPresets(updated);
+  if (filterState.activePresetId === presetId) {
+    setFilterState("activePresetId", undefined);
+  }
+}
+
+export function clearFilters(): void {
+  setFilterState({
+    volumeMin: undefined,
+    volumeMax: undefined,
+    priceMin: undefined,
+    priceMax: undefined,
+    liquidityMin: undefined,
+    category: undefined,
+    sortBy: filterState.sortBy,
+    sortBy2: filterState.sortBy2,
+    activePresetId: undefined,
+  });
+}
+
+function parseSearchOperators(query: string): { textQuery: string; operators: Partial<FilterState> } {
+  const operators: Partial<FilterState> = {};
+  let textQuery = query;
+  
+  const volMatch = query.match(/vol:(>=?|>?|<=?|=)?(\d+(?:\.\d+)?[KkMm]?)/);
+  if (volMatch) {
+    const value = parseVolumeValue(volMatch[2]);
+    const op = volMatch[1] || ">=";
+    if (op === ">" || op === ">=") {
+      operators.volumeMin = value;
+    } else if (op === "<" || op === "<=") {
+      operators.volumeMax = value;
+    } else if (op === "=") {
+      operators.volumeMin = value;
+      operators.volumeMax = value;
+    }
+    textQuery = textQuery.replace(volMatch[0], "").trim();
+  }
+  
+  const priceMatch = query.match(/price:(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)/);
+  if (priceMatch) {
+    operators.priceMin = parseFloat(priceMatch[1]);
+    operators.priceMax = parseFloat(priceMatch[2]);
+    textQuery = textQuery.replace(priceMatch[0], "").trim();
+  }
+  
+  const catMatch = query.match(/cat:(\w+)/);
+  if (catMatch) {
+    operators.category = catMatch[1].toLowerCase();
+    textQuery = textQuery.replace(catMatch[0], "").trim();
+  }
+  
+  const liqMatch = query.match(/liq:(>=?|>?|<=?)?(\d+(?:\.\d+)?[KkMm]?)/);
+  if (liqMatch) {
+    const value = parseVolumeValue(liqMatch[2]);
+    const op = liqMatch[1] || ">=";
+    if (op === ">" || op === ">=") {
+      operators.liquidityMin = value;
+    }
+    textQuery = textQuery.replace(liqMatch[0], "").trim();
+  }
+  
+  return { textQuery, operators };
+}
+
+function parseVolumeValue(value: string): number {
+  let num = parseFloat(value);
+  if (value.toLowerCase().endsWith("k")) {
+    num *= 1000;
+  } else if (value.toLowerCase().endsWith("m")) {
+    num *= 1000000;
+  }
+  return num;
+}
+
+function getOperatorFilters(query: string): Partial<FilterState> {
+  const { operators } = parseSearchOperators(query);
+  return operators;
+}
 
 export interface AIProviderConfig {
   id: string;
@@ -61,7 +289,7 @@ const initialState: AppState = {
   selectedMarketId: null,
   searchQuery: "",
   sortBy: "volume",
-  timeframe: "7d",
+  timeframe: "1d",
   loading: false,
   error: null,
   lastRefresh: new Date(),
@@ -137,6 +365,7 @@ export const [comparisonSelectMode, setComparisonSelectMode] = createSignal(fals
 export const [comparisonSelectedMarketId, setComparisonSelectedMarketId] = createSignal<string | null>(null);
 export const [watchlistPanelOpen, setWatchlistPanelOpen] = createSignal(false);
 export const [accountStatsOpen, setAccountStatsOpen] = createSignal(false);
+export const [analyticsPanelOpen, setAnalyticsPanelOpen] = createSignal(false);
 
 // Settings panel visibility and active tab signals
 export const [settingsPanelOpen, setSettingsPanelOpen] = createSignal(false);
@@ -319,6 +548,102 @@ export const [chatInputValue, setChatInputValue] = createSignal("");
 export const [chatMessages, setChatMessages] = createSignal<ChatMessage[]>([]);
 export const [chatLoading, setChatLoading] = createSignal(false);
 
+// Auth state signals
+export const [authModalOpen, setAuthModalOpen] = createSignal(false);
+export const [authModalMode, setAuthModalMode] = createSignal<"login" | "register">("login");
+export const [authUsernameInput, setAuthUsernameInput] = createSignal("");
+export const [authEmailInput, setAuthEmailInput] = createSignal("");
+export const [authPasswordInput, setAuthPasswordInput] = createSignal("");
+export const [authError, setAuthError] = createSignal<string | null>(null);
+export const [authLoading, setAuthLoading] = createSignal(false);
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  email: string;
+  createdAt: number;
+}
+
+export interface AuthSessionState {
+  isAuthenticated: boolean;
+  user: AuthUser | null;
+  token: string | null;
+}
+
+const initialAuthState: AuthSessionState = {
+  isAuthenticated: false,
+  user: null,
+  token: null,
+};
+
+export const [authState, setAuthState] = createStore<AuthSessionState>(initialAuthState);
+
+export function initializeAuth(): void {
+  const auth = require("./auth/auth") as typeof import("./auth/auth");
+  const session = auth.getCurrentSession();
+  if (session) {
+    setAuthState({
+      isAuthenticated: true,
+      user: {
+        id: session.userId,
+        username: session.username,
+        email: session.email,
+        createdAt: 0,
+      },
+      token: session.token,
+    });
+  }
+}
+
+// Messaging state signals
+export const [messagesPanelOpen, setMessagesPanelOpen] = createSignal(false);
+export const [messagesTab, setMessagesTab] = createSignal<"conversations" | "global">("conversations");
+export const [conversationMode, setConversationMode] = createSignal<"list" | "chat" | "new">("list");
+export const [messages, setMessages] = createSignal<DirectMessage[]>([]);
+export const [messagesLoading, setMessagesLoading] = createSignal(false);
+export const [unreadMessagesCount, setUnreadMessagesCount] = createSignal(0);
+export const [selectedConversationId, setSelectedConversationId] = createSignal<string | null>(null);
+export const [conversations, setConversations] = createSignal<Conversation[]>([]);
+export const [globalChatMessages, setGlobalChatMessages] = createSignal<GlobalMessage[]>([]);
+export const [globalChatInputFocused, setGlobalChatInputFocused] = createSignal(false);
+export const [globalChatInputValue, setGlobalChatInputValue] = createSignal("");
+export const [unreadGlobalCount, setUnreadGlobalCount] = createSignal(0);
+
+// DM input state
+export const [dmInputValue, setDmInputValue] = createSignal("");
+export const [dmNewRecipientId, setDmNewRecipientId] = createSignal("");
+export const [dmNewRecipientName, setDmNewRecipientName] = createSignal("");
+
+// User profile panel state
+export const [userProfileOpen, setUserProfileOpen] = createSignal(false);
+
+export interface DirectMessage {
+  id: string;
+  senderId: string;
+  senderName?: string;
+  recipientId: string;
+  recipientName?: string;
+  content: string;
+  timestamp: Date;
+  read: boolean;
+}
+
+export interface GlobalMessage {
+  id: string;
+  senderId: string;
+  senderName: string;
+  content: string;
+  timestamp: Date;
+}
+
+export interface Conversation {
+  participantId: string;
+  participantName: string;
+  lastMessage: string;
+  lastMessageTime: Date;
+  unreadCount: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -351,8 +676,8 @@ function isSortBy(value: unknown): value is AppState["sortBy"] {
   return value === "volume" || value === "change" || value === "name";
 }
 
-function isTimeframe(value: unknown): value is AppState["timeframe"] {
-  return value === "1d" || value === "5d" || value === "7d" || value === "all";
+function isTimeframe(value: unknown): value is Timeframe {
+  return value === "1h" || value === "4h" || value === "1d" || value === "5d" || value === "1w" || value === "1M" || value === "all";
 }
 
 function isThemeMode(value: unknown): value is PersistedThemeMode {
@@ -623,9 +948,17 @@ export function getFilteredMarkets(): Market[] {
     filtered = filtered.filter((m) => watchlistState.marketIds.includes(m.id));
   }
 
-  // Apply search filter
-  if (appState.searchQuery) {
-    const query = appState.searchQuery.toLowerCase();
+  // Parse search operators from query and apply filters
+  const operatorFilters = getOperatorFilters(appState.searchQuery);
+  const activeFilters: FilterState = {
+    ...filterState,
+    ...operatorFilters,
+  };
+
+  // Apply search text filter
+  const { textQuery } = parseSearchOperators(appState.searchQuery);
+  if (textQuery) {
+    const query = textQuery.toLowerCase();
     filtered = filtered.filter(
       (m) =>
         m.title.toLowerCase().includes(query) ||
@@ -633,18 +966,72 @@ export function getFilteredMarkets(): Market[] {
     );
   }
 
-  // Apply sorting
-  switch (appState.sortBy) {
-    case "volume":
-      filtered.sort((a, b) => b.volume24h - a.volume24h);
-      break;
-    case "change":
-      filtered.sort((a, b) => b.change24h - a.change24h);
-      break;
-    case "name":
-      filtered.sort((a, b) => a.title.localeCompare(b.title));
-      break;
+  // Apply volume filter
+  if (activeFilters.volumeMin !== undefined) {
+    filtered = filtered.filter((m) => m.volume24h >= activeFilters.volumeMin!);
   }
+  if (activeFilters.volumeMax !== undefined) {
+    filtered = filtered.filter((m) => m.volume24h <= activeFilters.volumeMax!);
+  }
+
+  // Apply price filter (based on leading outcome)
+  if (activeFilters.priceMin !== undefined || activeFilters.priceMax !== undefined) {
+    filtered = filtered.filter((m) => {
+      const lead = m.outcomes.length > 0
+        ? m.outcomes.reduce((b, o) => (o.price > b.price ? o : b))
+        : null;
+      if (!lead) return false;
+      if (activeFilters.priceMin !== undefined && lead.price < activeFilters.priceMin) return false;
+      if (activeFilters.priceMax !== undefined && lead.price > activeFilters.priceMax) return false;
+      return true;
+    });
+  }
+
+  // Apply liquidity filter
+  if (activeFilters.liquidityMin !== undefined) {
+    filtered = filtered.filter((m) => m.liquidity >= activeFilters.liquidityMin!);
+  }
+
+  // Apply category filter
+  if (activeFilters.category) {
+    const cat = activeFilters.category.toLowerCase();
+    filtered = filtered.filter((m) => 
+      (m.category && m.category.toLowerCase().includes(cat)) ||
+      cat.includes("politics") && (m.category?.toLowerCase().includes("polit") || false) ||
+      cat.includes("sports") && (m.category?.toLowerCase().includes("sport") || false) ||
+      cat.includes("crypto") && (m.category?.toLowerCase().includes("crypto") || false)
+    );
+  }
+
+  // Apply multi-sort
+  const sortBy = activeFilters.sortBy || "volume";
+  const sortBy2 = activeFilters.sortBy2;
+
+  filtered.sort((a, b) => {
+    let cmp = 0;
+    switch (sortBy) {
+      case "volume":
+        cmp = b.volume24h - a.volume24h;
+        break;
+      case "change":
+        cmp = b.change24h - a.change24h;
+        break;
+      case "name":
+        cmp = a.title.localeCompare(b.title);
+        break;
+    }
+    if (cmp !== 0 || !sortBy2) return cmp;
+    switch (sortBy2) {
+      case "volume":
+        return b.volume24h - a.volume24h;
+      case "change":
+        return b.change24h - a.change24h;
+      case "name":
+        return a.title.localeCompare(b.title);
+      default:
+        return 0;
+    }
+  });
 
   return filtered;
 }
@@ -668,7 +1055,7 @@ export function updateSearchQuery(query: string): void {
 /**
  * Update sort method
  */
-export function setSortBy(sortBy: "volume" | "change" | "name"): void {
+export function setSortBy(sortBy: "volume" | "change" | "name" | "liquidity" | "volatility"): void {
   setAppState("sortBy", sortBy);
   savePersistedState();
 }
@@ -676,7 +1063,7 @@ export function setSortBy(sortBy: "volume" | "change" | "name"): void {
 /**
  * Update chart timeframe
  */
-export function setTimeframe(timeframe: "1d" | "5d" | "7d" | "all"): void {
+export function setTimeframe(timeframe: Timeframe): void {
   setAppState("timeframe", timeframe);
   savePersistedState();
 }
@@ -756,3 +1143,16 @@ export function navigatePrev(): void {
   setHighlightedIndex(prevIdx);
   selectMarket(filtered[prevIdx].id);
 }
+
+// Profile panel state
+export const [profilePanelOpen, setProfilePanelOpen] = createSignal(false);
+export const [profileViewMode, setProfileViewMode] = createSignal<"view" | "edit" | "search">("view");
+export const [userSearchOpen, setUserSearchOpen] = createSignal(false);
+export const [userSearchQuery, setUserSearchQuery] = createSignal("");
+export const [userSearchResults, setUserSearchResults] = createSignal<UserProfile[]>([]);
+export const [userSearchLoading, setUserSearchLoading] = createSignal(false);
+export const [selectedProfileId, setSelectedProfileId] = createSignal<string | null>(null);
+export const [contactsList, setContactsList] = createSignal<UserContact[]>([]);
+export const [currentUserProfile, setCurrentUserProfile] = createSignal<UserProfile | null>(null);
+export const [editingField, setEditingField] = createSignal<"username" | "bio" | "avatar" | null>(null);
+export const [editValue, setEditValue] = createSignal("");

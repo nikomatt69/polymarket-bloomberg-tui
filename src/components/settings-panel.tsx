@@ -553,10 +553,16 @@ export function SettingsPanel() {
           <text content="" />
           <box flexDirection="row" gap={1}>
             <text content="Timeframe: " fg={theme.textMuted} />
-            <box onMouseDown={() => setTimeframe("all")}>
+            <box onMouseDown={() => setTimeframe("1h")}>
               <text
-                content={appState.timeframe === "all" ? "[ALL] " : " ALL  "}
-                fg={appState.timeframe === "all" ? theme.primary : theme.textMuted}
+                content={appState.timeframe === "1h" ? "[1H] " : " 1H  "}
+                fg={appState.timeframe === "1h" ? theme.primary : theme.textMuted}
+              />
+            </box>
+            <box onMouseDown={() => setTimeframe("4h")}>
+              <text
+                content={appState.timeframe === "4h" ? "[4H] " : " 4H  "}
+                fg={appState.timeframe === "4h" ? theme.primary : theme.textMuted}
               />
             </box>
             <box onMouseDown={() => setTimeframe("1d")}>
@@ -571,10 +577,22 @@ export function SettingsPanel() {
                 fg={appState.timeframe === "5d" ? theme.primary : theme.textMuted}
               />
             </box>
-            <box onMouseDown={() => setTimeframe("7d")}>
+            <box onMouseDown={() => setTimeframe("1w")}>
               <text
-                content={appState.timeframe === "7d" ? "[7D] " : " 7D  "}
-                fg={appState.timeframe === "7d" ? theme.primary : theme.textMuted}
+                content={appState.timeframe === "1w" ? "[1W] " : " 1W  "}
+                fg={appState.timeframe === "1w" ? theme.primary : theme.textMuted}
+              />
+            </box>
+            <box onMouseDown={() => setTimeframe("1M")}>
+              <text
+                content={appState.timeframe === "1M" ? "[1M] " : " 1M  "}
+                fg={appState.timeframe === "1M" ? theme.primary : theme.textMuted}
+              />
+            </box>
+            <box onMouseDown={() => setTimeframe("all")}>
+              <text
+                content={appState.timeframe === "all" ? "[ALL] " : " ALL  "}
+                fg={appState.timeframe === "all" ? theme.primary : theme.textMuted}
               />
             </box>
           </box>

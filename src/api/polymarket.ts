@@ -3,7 +3,7 @@
  * Uses Gamma API for markets and CLOB API for price history and trading
  */
 
-import { Market, Outcome, PriceHistory, PricePoint, Event, Series, Tag, Category } from "../types/market";
+import { Market, Outcome, PriceHistory, PricePoint, Event, Series, Tag, Category, Timeframe } from "../types/market";
 
 const GAMMA_API_BASE = "https://gamma-api.polymarket.com";
 const CLOB_API_BASE = "https://clob.polymarket.com";
@@ -288,7 +288,7 @@ export async function getTrendingMarkets(limit: number = 20): Promise<Market[]> 
 
 export async function getPriceHistory(
   marketId: string,
-  timeframe: "1d" | "5d" | "7d" | "all" = "7d"
+  timeframe: Timeframe = "1d"
 ): Promise<PriceHistory | null> {
   try {
     const marketDetails = await getMarketDetails(marketId);
@@ -301,10 +301,13 @@ export async function getPriceHistory(
       return null;
     }
 
-    const intervalMap: Record<string, string> = {
+    const intervalMap: Record<Timeframe, string> = {
+      "1h": "5m",
+      "4h": "15m",
       "1d": "1h",
       "5d": "6h",
-      "7d": "1d",
+      "1w": "1d",
+      "1M": "1d",
       "all": "max",
     };
 

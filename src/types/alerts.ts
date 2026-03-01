@@ -2,7 +2,7 @@
  * Price alert types
  */
 
-export type AlertCondition = "above" | "below";
+export type AlertCondition = "above" | "below" | "crossesAbove" | "crossesBelow";
 export type AlertStatus = "active" | "triggered" | "dismissed";
 export type AlertMetric = "price" | "change24h" | "volume24h" | "liquidity";
 

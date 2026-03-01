@@ -5,7 +5,7 @@
 
 import { For, Show } from "solid-js";
 import { useTheme } from "../context/theme";
-import { alertsState, setAlertsState, deleteAlert, dismissAlert } from "../hooks/useAlerts";
+import { alertsState, setAlertsState, deleteAlert, dismissAlert, toggleSound, AlertHistoryEntry } from "../hooks/useAlerts";
 import { PriceAlert, AlertMetric } from "../types/alerts";
 
 function fmtTime(ts: number): string {
@@ -57,6 +57,16 @@ function formatAlertConfig(alert: Pick<PriceAlert, "cooldownMinutes" | "debounce
   return `CD:${alert.cooldownMinutes}m DB:${alert.debouncePasses}x`;
 }
 
+function conditionLabel(condition: string): string {
+  switch (condition) {
+    case "crossesAbove": return "X> ";
+    case "crossesBelow": return "X< ";
+    case "above":        return ">= ";
+    case "below":        return "<= ";
+    default:            return condition;
+  }
+}
+
 export function AlertsPanel() {
   const { theme } = useTheme();
 
@@ -88,6 +98,12 @@ export function AlertsPanel() {
       <box height={1} width="100%" backgroundColor={theme.warning} flexDirection="row">
         <text content=" ◈ PRICE ALERTS " fg={theme.highlightText} />
         <box flexGrow={1} />
+        <box onMouseDown={() => toggleSound()}>
+          <text content={alertsState.soundEnabled ? " [SOUND ON] " : " [SOUND OFF] "} fg={alertsState.soundEnabled ? theme.success : theme.error} />
+        </box>
+        <box onMouseDown={() => setAlertsState("showHistory", !alertsState.showHistory)}>
+          <text content={alertsState.showHistory ? " [HISTORY] " : " [ALERTS] "} fg={theme.highlightText} />
+        </box>
         <text content={` ${visibleAlerts().length} active `} fg={theme.highlightText} />
         <box onMouseDown={handleClose}>
           <text content=" [ESC] ✕ " fg={theme.highlightText} />
@@ -134,8 +150,8 @@ export function AlertsPanel() {
                       width={8}
                     />
                     <text
-                      content={(alert.condition + " ").padEnd(6, " ")}
-                      fg={alert.condition === "above" ? theme.success : theme.error}
+                      content={(conditionLabel(alert.condition)).padEnd(6, " ")}
+                      fg={alert.condition === "above" || alert.condition === "crossesAbove" ? theme.success : theme.error}
                       width={7}
                     />
                     <text
@@ -162,6 +178,48 @@ export function AlertsPanel() {
           </scrollbox>
         </Show>
 
+        <Show when={alertsState.showHistory}>
+          <box flexDirection="column" width="100%">
+            <text content="" />
+            <text content="ALERT HISTORY" fg={theme.primary} />
+            <text content="" />
+            <Show
+              when={alertsState.alertHistory.length > 0}
+              fallback={<text content="No alert history yet" fg={theme.textMuted} />}
+            >
+              <scrollbox height={8} width="100%">
+                <For each={alertsState.alertHistory}>
+                  {(entry, i) => {
+                    const isSelected = () => alertsState.historyIdx === i();
+                    const triggeredVal = entry.metric === "price" 
+                      ? `${(entry.triggeredValue * 100).toFixed(1)}¢`
+                      : entry.metric === "change24h"
+                        ? `${entry.triggeredValue.toFixed(2)}%`
+                        : `$${entry.triggeredValue.toFixed(2)}`;
+                    return (
+                      <box
+                        flexDirection="row"
+                        width="100%"
+                        backgroundColor={isSelected() ? theme.highlight : undefined}
+                        onMouseDown={() => setAlertsState("historyIdx", i())}
+                      >
+                        <text content={fmtTime(entry.triggeredAt).padEnd(14, " ")} fg={isSelected() ? theme.highlightText : theme.textMuted} width={15} />
+                        <text content={metricLabel(entry.metric).padEnd(8, " ")} fg={theme.accent} width={9} />
+                        <text content={conditionLabel(entry.condition).padEnd(6, " ")} fg={theme.text} width={7} />
+                        <text content={formatThreshold(entry).padStart(11, " ")} fg={theme.text} width={12} />
+                        <text content={`→ ${triggeredVal}`} fg={theme.success} />
+                        <text content="  " />
+                        <text content={truncate(entry.marketTitle, 18)} fg={theme.textMuted} width={19} />
+                        <text content={truncate(entry.outcomeTitle, 8)} fg={theme.accent} />
+                      </box>
+                    );
+                  }}
+                </For>
+              </scrollbox>
+            </Show>
+          </box>
+        </Show>
+
         <text content="" />
 
         {/* Add form */}
@@ -180,7 +238,12 @@ export function AlertsPanel() {
                 width={14}
               />
               <text
-                content={alertsState.addCondition === "above" ? "[ABOVE]  below " : " above  [BELOW]"}
+                content={
+                  alertsState.addCondition === "above"        ? "[ABOVE]   crosses>  crosses<  below " :
+                  alertsState.addCondition === "below"        ? " above   crosses>  crosses<  [BELOW]":
+                  alertsState.addCondition === "crossesAbove" ? " above   [XABOVE] crosses<  below " :
+                  " above   crosses>  [XBELOW] below "
+                }
                 fg={theme.textBright}
               />
               <text content="  (C to toggle)" fg={theme.textMuted} />
@@ -243,6 +306,16 @@ export function AlertsPanel() {
               setAlertsState("addError", "");
             }}>
               <text content="[A] Add" fg={theme.success} />
+            </box>
+            <box onMouseDown={() => toggleSound()}>
+              <text content={alertsState.soundEnabled ? "[S] Sound ON" : "[S] Sound OFF"} fg={alertsState.soundEnabled ? theme.success : theme.error} />
+            </box>
+            <box onMouseDown={() => {
+              setAlertsState("showHistory", !alertsState.showHistory);
+              setAlertsState("selectedIdx", 0);
+              setAlertsState("historyIdx", 0);
+            }}>
+              <text content={alertsState.showHistory ? "[H] Alerts" : "[H] History"} fg={theme.accent} />
             </box>
             <box onMouseDown={() => {
               const alert = visibleAlerts()[alertsState.selectedIdx];

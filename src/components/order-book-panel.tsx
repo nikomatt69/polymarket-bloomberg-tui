@@ -75,8 +75,46 @@ export function OrderBookPanel() {
     return null;
   });
 
+  // Spread as percentage
+  const spreadPercent = createMemo(() => {
+    const s = spread();
+    const mid = midMarket();
+    if (s === null || mid === null || mid === 0) return null;
+    return (s / mid) * 100;
+  });
+
+  // Mid-market price
+  const midMarket = createMemo(() => {
+    const bestAsk = book.asks?.[0]?.price ?? 0;
+    const bestBid = book.bids?.[0]?.price ?? 0;
+    if (bestAsk > 0 && bestBid > 0) return (bestAsk + bestBid) / 2;
+    return null;
+  });
+
+  // Cumulative sizes
+  const cumulativeBids = createMemo(() => {
+    let cum = 0;
+    return (book.bids ?? []).map((b) => {
+      cum += b.size;
+      return { price: b.price, size: b.size, cumulative: cum };
+    });
+  });
+
+  const cumulativeAsks = createMemo(() => {
+    let cum = 0;
+    return (book.asks ?? []).map((a) => {
+      cum += a.size;
+      return { price: a.price, size: a.size, cumulative: cum };
+    });
+  });
+
+  // Total cumulative at best bid/ask
+  const totalBidDepth = createMemo(() => cumulativeBids()[0]?.cumulative ?? 0);
+  const totalAskDepth = createMemo(() => cumulativeAsks()[0]?.cumulative ?? 0);
+
   const maxBidSize = createMemo(() => Math.max(...(book.bids ?? []).map((b) => b.size), 1));
   const maxAskSize = createMemo(() => Math.max(...(book.asks ?? []).map((a) => a.size), 1));
+  const maxCumulative = createMemo(() => Math.max(totalBidDepth(), totalAskDepth(), 1));
 
   // Bootstrap REST snapshot, then switch to live WebSocket deltas
   createEffect(() => {
@@ -195,7 +233,7 @@ export function OrderBookPanel() {
         </box>
       </box>
 
-      {/* ── Sub-header: outcome selector + spread + last trade ── */}
+      {/* ── Sub-header: outcome selector + mid-price + spread ── */}
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
         <Show when={selectedMarket() && selectedMarket()!.outcomes.length > 1}>
           <box onMouseDown={handleTabOutcome}>
@@ -206,26 +244,39 @@ export function OrderBookPanel() {
           </box>
           <text content=" | " fg={theme.borderSubtle} />
         </Show>
-        <Show when={spread() !== null && spread() !== undefined}>
-          <text content={` Spread: ${((spread() ?? 0) * 100).toFixed(2)}¢ `} fg={theme.textMuted} />
+        {/* Mid-market price display */}
+        <Show when={midMarket() !== null}>
+          <text content={` Mid: ${((midMarket() ?? 0) * 100).toFixed(2)}¢ `} fg={theme.textBright} />
           <text content=" | " fg={theme.borderSubtle} />
         </Show>
+        <Show when={spread() !== null && spread() !== undefined}>
+          <text content={` Spread: ${((spread() ?? 0) * 100).toFixed(2)}¢ `} fg={theme.textMuted} />
+          <Show when={spreadPercent() !== null}>
+            <text content={`(${spreadPercent()!.toFixed(2)}%)`} fg={spreadPercent()! > 2 ? theme.warning : theme.textMuted} />
+          </Show>
+          <text content=" | " fg={theme.borderSubtle} />
+        </Show>
+        <Show when={totalBidDepth() > 0 || totalAskDepth() > 0}>
+          <text content={` Vol: ${formatSize(totalBidDepth())}/${formatSize(totalAskDepth())} `} fg={theme.textMuted} />
+        </Show>
+        <box flexGrow={1} />
         <Show when={lastTrade()}>
           {(trade: LastTrade) => (
             <text
-              content={` Last: ${((trade.price ?? 0) * 100).toFixed(2)}¢  ${formatSize(trade.size)} shares `}
+              content={` Last: ${((trade.price ?? 0) * 100).toFixed(2)}¢  ${formatSize(trade.size)} `}
               fg={trade.side === "BUY" ? theme.success : theme.error}
             />
           )}
         </Show>
         <Show when={loadingSnapshot()}>
-          <text content=" Loading snapshot… " fg={theme.textMuted} />
+          <text content=" Loading… " fg={theme.textMuted} />
         </Show>
       </box>
 
       {/* ── Column headers ── */}
       <box height={1} width="100%" flexDirection="row">
         <box width="50%" flexDirection="row" justifyContent="flex-end">
+          <text content={"CUM".padStart(8)} fg={theme.textMuted} />
           <text content={"DEPTH".padEnd(BAR_WIDTH + 1)} fg={theme.textMuted} />
           <text content={"SIZE".padStart(8)} fg={theme.textMuted} />
           <text content={"BID".padStart(8)} fg={theme.success} />
@@ -235,6 +286,7 @@ export function OrderBookPanel() {
           <text content={"ASK".padEnd(8)} fg={theme.error} />
           <text content={"SIZE".padStart(8)} fg={theme.textMuted} />
           <text content={"DEPTH".padStart(BAR_WIDTH + 1)} fg={theme.textMuted} />
+          <text content={"CUM".padStart(8)} fg={theme.textMuted} />
         </box>
       </box>
 
@@ -244,11 +296,21 @@ export function OrderBookPanel() {
           {(rowIdx) => {
             const bid = () => book.bids?.[rowIdx];
             const ask = () => book.asks?.[rowIdx];
+            const cumBid = () => cumulativeBids()[rowIdx];
+            const cumAsk = () => cumulativeAsks()[rowIdx];
 
             return (
               <box height={1} width="100%" flexDirection="row">
                 {/* Bid side */}
                 <box width="50%" flexDirection="row" justifyContent="flex-end">
+                  <Show when={cumBid()}>
+                    {(cb: { price: number; size: number; cumulative: number }) => (
+                      <text
+                        content={formatSize(cb.cumulative).padStart(8)}
+                        fg={theme.primary}
+                      />
+                    )}
+                  </Show>
                   <Show when={bid()}>
                     {(b: { price: number; size: number; total: number }) => (
                       <>
@@ -290,6 +352,14 @@ export function OrderBookPanel() {
                           fg={theme.errorMuted}
                         />
                       </>
+                    )}
+                  </Show>
+                  <Show when={cumAsk()}>
+                    {(ca: { price: number; size: number; cumulative: number }) => (
+                      <text
+                        content={formatSize(ca.cumulative).padStart(8)}
+                        fg={theme.primary}
+                      />
                     )}
                   </Show>
                 </box>

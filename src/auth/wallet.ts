@@ -9,6 +9,36 @@ import { join } from "path";
 const CLOB_API_BASE = "https://clob.polymarket.com";
 const USDC_CONTRACT = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
 const CLOB_AUTH_MESSAGE = "This message attests that I control the given wallet";
+const DEFAULT_TIMEOUT = 15000;
+
+// Custom error classes for better error handling
+export class WalletError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WalletError";
+  }
+}
+
+export class InvalidPrivateKeyError extends WalletError {
+  constructor(message: string = "Invalid private key format") {
+    super(message);
+    this.name = "InvalidPrivateKeyError";
+  }
+}
+
+export class NetworkError extends WalletError {
+  constructor(message: string, public statusCode?: number) {
+    super(message);
+    this.name = "NetworkError";
+  }
+}
+
+export class ConnectionTimeoutError extends WalletError {
+  constructor(message: string = "Connection timed out") {
+    super(message);
+    this.name = "ConnectionTimeoutError";
+  }
+}
 
 export interface ApiCredentials {
   apiKey: string;
@@ -82,16 +112,95 @@ export function persistApiCredentials(creds: ApiCredentials): void {
   });
 }
 
+/**
+ * Validates and normalizes a private key
+ * @throws InvalidPrivateKeyError if the key is invalid
+ */
+function validatePrivateKey(privateKey: string): `0x${string}` {
+  // Check for empty or whitespace
+  if (!privateKey || privateKey.trim().length === 0) {
+    throw new InvalidPrivateKeyError("Private key cannot be empty");
+  }
+
+  // Remove whitespace
+  const cleaned = privateKey.trim();
+
+  // Check for valid hex length (64 chars without 0x, 66 with 0x)
+  const hexPart = cleaned.startsWith("0x") ? cleaned.slice(2) : cleaned;
+  
+  if (!/^[0-9a-fA-F]+$/.test(hexPart)) {
+    throw new InvalidPrivateKeyError("Private key must be a valid hexadecimal string");
+  }
+
+  if (hexPart.length !== 64) {
+    throw new InvalidPrivateKeyError(
+      `Private key must be 64 characters (${hexPart.length} provided). Did you paste the correct key?`
+    );
+  }
+
+  // Check for all zeros (technically valid but unlikely to be intentional)
+  if (hexPart === "0".repeat(64)) {
+    throw new InvalidPrivateKeyError("Private key appears to be all zeros - please provide a valid key");
+  }
+
+  return (`0x${hexPart}`) as `0x${string}`;
+}
+
+/**
+ * Wraps a fetch call with timeout
+ */
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs: number = DEFAULT_TIMEOUT
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    return response;
+  } catch (err) {
+    if (err instanceof Error) {
+      if (err.name === "AbortError") {
+        throw new ConnectionTimeoutError(`Connection timed out after ${timeoutMs / 1000}s to ${url}`);
+      }
+      // Network errors (DNS, connection refused, etc.)
+      throw new NetworkError(`Network error: ${err.message}. Please check your internet connection.`);
+    }
+    throw new NetworkError("Unknown network error occurred");
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Connect wallet from a private key string
+ * @throws InvalidPrivateKeyError if the key is invalid
+ */
 export function connectFromPrivateKey(privateKey: string): WalletConfig {
-  const normalized = (privateKey.startsWith("0x") ? privateKey : `0x${privateKey}`) as `0x${string}`;
-  const account = privateKeyToAccount(normalized);
-  const config: WalletConfig = {
-    address: account.address,
-    privateKey: normalized,
-    connectedAt: Date.now(),
-  };
-  saveWalletConfig(config);
-  return config;
+  const normalized = validatePrivateKey(privateKey);
+  
+  try {
+    const account = privateKeyToAccount(normalized);
+    const config: WalletConfig = {
+      address: account.address,
+      privateKey: normalized,
+      connectedAt: Date.now(),
+    };
+    saveWalletConfig(config);
+    return config;
+  } catch (err) {
+    if (err instanceof InvalidPrivateKeyError) {
+      throw err;
+    }
+    // Viem throws various errors for invalid keys
+    const message = err instanceof Error ? err.message : "Unknown error";
+    throw new InvalidPrivateKeyError(`Failed to derive wallet address: ${message}`);
+  }
 }
 
 function getStoredApiCredentials(): ApiCredentials | null {
@@ -211,7 +320,9 @@ export async function fetchUsdcBalance(address: string): Promise<number> {
   try {
     const client = createPublicClient({
       chain: polygon,
-      transport: http("https://polygon-rpc.com"),
+      transport: http("https://polygon-rpc.com", {
+        timeout: DEFAULT_TIMEOUT,
+      }),
     });
 
     const balance = await client.readContract({
@@ -230,19 +341,31 @@ export async function fetchUsdcBalance(address: string): Promise<number> {
     });
 
     return parseFloat(formatUnits(balance, 6));
-  } catch {
+  } catch (err) {
+    if (err instanceof ConnectionTimeoutError || err instanceof NetworkError) {
+      throw err;
+    }
+    console.warn("Failed to fetch USDC balance from Polygon, falling back to CLOB:", err);
     return fetchClobBalance(address);
   }
 }
 
 async function fetchClobBalance(address: string): Promise<number> {
   try {
-    const response = await fetch(`${CLOB_API_BASE}/balance?address=${address}`);
-    if (!response.ok) return 0;
+    const response = await fetchWithTimeout(`${CLOB_API_BASE}/balance?address=${address}`);
+    if (!response.ok) {
+      throw new NetworkError(
+        `Failed to fetch balance: HTTP ${response.status} ${response.statusText}`,
+        response.status
+      );
+    }
     const data = (await response.json()) as { balance?: string | number };
     return parseFloat(String(data.balance ?? "0"));
-  } catch {
-    return 0;
+  } catch (err) {
+    if (err instanceof ConnectionTimeoutError || err instanceof NetworkError) {
+      throw err;
+    }
+    throw new NetworkError("Failed to fetch balance from CLOB API");
   }
 }
 
@@ -253,7 +376,7 @@ export async function fetchOrCreateApiCredentials(privateKey: `0x${string}`): Pr
   try {
     const l1Headers = await getClobAuthHeaders(privateKey, 0);
 
-    const deriveResponse = await fetch(`${CLOB_API_BASE}/auth/derive-api-key`, {
+    const deriveResponse = await fetchWithTimeout(`${CLOB_API_BASE}/auth/derive-api-key`, {
       method: "GET",
       headers: {
         ...l1Headers,
@@ -270,7 +393,7 @@ export async function fetchOrCreateApiCredentials(privateKey: `0x${string}`): Pr
       }
     }
 
-    const createResponse = await fetch(`${CLOB_API_BASE}/auth/api-key`, {
+    const createResponse = await fetchWithTimeout(`${CLOB_API_BASE}/auth/api-key`, {
       method: "POST",
       headers: {
         ...l1Headers,
@@ -280,17 +403,25 @@ export async function fetchOrCreateApiCredentials(privateKey: `0x${string}`): Pr
     });
 
     if (!createResponse.ok) {
-      return null;
+      throw new NetworkError(
+        `Failed to create API key: HTTP ${createResponse.status} ${createResponse.statusText}`,
+        createResponse.status
+      );
     }
 
     const createdPayload = await createResponse.json();
     const created = parseApiCredentials(createdPayload);
-    if (!created) return null;
+    if (!created) {
+      throw new WalletError("Invalid API credentials response from server");
+    }
 
     persistApiCredentials(created);
     return created;
-  } catch {
-    return null;
+  } catch (err) {
+    if (err instanceof ConnectionTimeoutError || err instanceof NetworkError || err instanceof WalletError) {
+      throw err;
+    }
+    throw new NetworkError("Failed to fetch or create API credentials");
   }
 }
 

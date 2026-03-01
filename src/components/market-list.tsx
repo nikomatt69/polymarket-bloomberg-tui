@@ -28,6 +28,31 @@ import {
   getLiveSportsMarkets,
 } from "../api/polymarket";
 
+function generateMiniSparkline(change24h: number, width: number = 6): string {
+  const chars = "▁▂▃▄▅▆▇█";
+  if (change24h === 0) return "──────";
+  
+  const normalized = Math.min(1, Math.max(-1, change24h / 20));
+  const charIdx = Math.floor((normalized + 1) / 2 * (chars.length - 1));
+  const char = chars[charIdx] || "─";
+  
+  if (change24h > 0) {
+    return "▲" + char.repeat(width - 1);
+  } else {
+    return "▼" + char.repeat(width - 1);
+  }
+}
+
+function getLiquidityIndicator(liquidity: number, volume24h: number): string {
+  if (volume24h <= 0) return "·";
+  const ratio = liquidity / volume24h;
+  if (ratio > 5) return "●●●";
+  if (ratio > 3) return "●●○";
+  if (ratio > 2) return "●○○";
+  if (ratio > 1) return "○○○";
+  return "···";
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
@@ -208,10 +233,12 @@ export function MarketList() {
       {/* ── Column headers ────────────────────────────────────────────────── */}
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
         <text content="   #" fg={theme.textMuted} width={4} />
-        <text content="  Market" fg={theme.textMuted} width={27} />
+        <text content="  Market" fg={theme.textMuted} width={22} />
         <text content="Prob  " fg={theme.textMuted} width={7} />
+        <text content=" Trend" fg={theme.textMuted} width={7} />
         <text content=" Volume" fg={theme.textMuted} width={9} />
         <text content="  24h%" fg={theme.textMuted} width={7} />
+        <text content=" Liq" fg={theme.textMuted} width={5} />
       </box>
 
       {/* ── Separator ─────────────────────────────────────────────────────── */}
@@ -301,15 +328,22 @@ export function MarketList() {
 
                     {/* Title */}
                     <text
-                      content={truncateString(market.title, 23)}
+                      content={truncateString(market.title, 19)}
                       fg={isHighlighted() ? theme.highlightText : theme.text}
-                      width={24}
+                      width={20}
                     />
 
                     {/* Probability */}
                     <text
                       content={probStr.padStart(7)}
                       fg={probFg()}
+                      width={7}
+                    />
+
+                    {/* Trend sparkline */}
+                    <text
+                      content={generateMiniSparkline(market.change24h)}
+                      fg={isHighlighted() ? theme.highlightText : market.change24h > 0 ? theme.success : market.change24h < 0 ? theme.error : theme.textMuted}
                       width={7}
                     />
 
@@ -331,6 +365,21 @@ export function MarketList() {
                             : theme.error
                       }
                       width={7}
+                    />
+
+                    {/* Liquidity indicator */}
+                    <text
+                      content={getLiquidityIndicator(market.liquidity, market.volume24h)}
+                      fg={
+                        isHighlighted()
+                          ? theme.highlightText
+                          : market.liquidity / (market.volume24h || 1) > 2
+                            ? theme.success
+                            : market.liquidity / (market.volume24h || 1) > 1
+                              ? theme.warning
+                              : theme.error
+                      }
+                      width={5}
                     />
                   </box>
                 );

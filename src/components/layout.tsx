@@ -21,6 +21,12 @@ import { AccountStatsPanel } from "./account-stats";
 import { SettingsPanel } from "./settings-panel";
 import { ShortcutsPanel } from "./shortcuts-panel";
 import { OrderBookPanel } from "./order-book-panel";
+import { FilterPanel } from "./filter-panel";
+import { AnalyticsPanel } from "./analytics-panel";
+import { MessagesPanel } from "./messages-panel";
+import { AuthModal } from "./auth-modal";
+import { ProfilePanel } from "./profile-panel";
+import { UserSearch } from "./user-search";
 import { useTheme } from "../context/theme";
 import {
   walletModalOpen,
@@ -36,6 +42,12 @@ import {
   settingsPanelOpen,
   shortcutsPanelOpen,
   orderBookPanelOpen,
+  filterPanelOpen,
+  analyticsPanelOpen,
+  messagesPanelOpen,
+  authModalOpen,
+  profilePanelOpen,
+  userSearchOpen,
 } from "../state";
 import { alertsState } from "../hooks/useAlerts";
 
@@ -114,7 +126,8 @@ export function Layout() {
         walletModalOpen() || orderFormOpen() || orderHistoryOpen() ||
         alertsState.panelOpen || indicatorsPanelOpen() || sentimentPanelOpen() ||
         comparisonPanelOpen() || watchlistPanelOpen() || settingsPanelOpen() || shortcutsPanelOpen() ||
-        orderBookPanelOpen()
+        orderBookPanelOpen() || filterPanelOpen() || analyticsPanelOpen() || messagesPanelOpen() || authModalOpen() ||
+        profilePanelOpen() || userSearchOpen()
       }>
         <box
           position="absolute"
@@ -130,6 +143,11 @@ export function Layout() {
       {/* Wallet Modal Overlay */}
       <Show when={walletModalOpen()}>
         <WalletConnect />
+      </Show>
+
+      {/* Auth Modal Overlay */}
+      <Show when={authModalOpen()}>
+        <AuthModal />
       </Show>
 
       {/* Order Form Modal */}
@@ -185,6 +203,31 @@ export function Layout() {
       {/* Live Order Book Panel Modal */}
       <Show when={orderBookPanelOpen()}>
         <OrderBookPanel />
+      </Show>
+
+      {/* Filter Panel Modal */}
+      <Show when={filterPanelOpen()}>
+        <FilterPanel />
+      </Show>
+
+      {/* Analytics Panel Modal */}
+      <Show when={analyticsPanelOpen()}>
+        <AnalyticsPanel />
+      </Show>
+
+      {/* Messages Panel Modal */}
+      <Show when={messagesPanelOpen()}>
+        <MessagesPanel />
+      </Show>
+
+      {/* Profile Panel Modal */}
+      <Show when={profilePanelOpen()}>
+        <ProfilePanel />
+      </Show>
+
+      {/* User Search Modal */}
+      <Show when={userSearchOpen()}>
+        <UserSearch />
       </Show>
     </box>
   );

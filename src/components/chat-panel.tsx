@@ -4,7 +4,7 @@
 
 import { For, Show, createSignal } from "solid-js";
 import { useTheme } from "../context/theme";
-import { chatMessages, chatLoading, setChatInputFocused } from "../state";
+import { chatMessages, chatLoading, setChatInputFocused, authState, setAuthModalOpen, setAuthModalMode } from "../state";
 
 interface ToolCallDisplay {
   id: string;
@@ -18,6 +18,14 @@ interface ToolCallDisplay {
 export function ChatPanel() {
   const { theme } = useTheme();
   const [activeToolCalls, setActiveToolCalls] = createSignal<ToolCallDisplay[]>([]);
+
+  const isAuthenticated = () => authState.isAuthenticated;
+  const currentUser = () => authState.user;
+
+  const handleLoginClick = () => {
+    setAuthModalOpen(true);
+    setAuthModalMode("login");
+  };
 
   return (
     <box
@@ -33,6 +41,15 @@ export function ChatPanel() {
         <text content=" AI Assistant" fg={theme.text} />
         <Show when={chatLoading()}>
           <text content=" ●" fg={theme.accent} />
+        </Show>
+        <box flexGrow={1} />
+        {/* User avatar or login prompt */}
+        <Show when={isAuthenticated() && currentUser()} fallback={
+          <box onMouseDown={handleLoginClick}>
+            <text content="[G] Login to message" fg={theme.textMuted} />
+          </box>
+        }>
+          <text content={`👤 ${currentUser()?.username}`} fg={theme.accent} />
         </Show>
       </box>
 
