@@ -48,6 +48,7 @@ import {
   authModalOpen,
   profilePanelOpen,
   userSearchOpen,
+  assistantPanelOpen,
 } from "../state";
 import { alertsState } from "../hooks/useAlerts";
 
@@ -106,7 +107,9 @@ export function Layout() {
 
         {/* Lower chat workspace */}
         <box flexGrow={1} width="100%" backgroundColor={theme.backgroundPanel}>
-          <ChatPanel />
+          <Show when={assistantPanelOpen()}>
+            <ChatPanel />
+          </Show>
         </box>
       </box>
 

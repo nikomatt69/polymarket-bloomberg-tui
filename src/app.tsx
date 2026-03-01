@@ -69,6 +69,8 @@ import {
   setAccountStatsOpen,
   analyticsPanelOpen,
   setAnalyticsPanelOpen,
+  assistantPanelOpen,
+  setAssistantPanelOpen,
   getSelectedMarket,
   getFilteredMarkets,
   highlightedIndex,
@@ -1203,6 +1205,11 @@ function AppContent() {
       case "a":
         // A — toggle analytics panel
         setAnalyticsPanelOpen(!analyticsPanelOpen());
+        break;
+      case "i":
+      case "I":
+        // I — toggle AI assistant panel
+        setAssistantPanelOpen(!assistantPanelOpen());
         break;
       case "k":
         if (e.ctrl) {

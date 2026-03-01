@@ -366,6 +366,7 @@ export const [comparisonSelectedMarketId, setComparisonSelectedMarketId] = creat
 export const [watchlistPanelOpen, setWatchlistPanelOpen] = createSignal(false);
 export const [accountStatsOpen, setAccountStatsOpen] = createSignal(false);
 export const [analyticsPanelOpen, setAnalyticsPanelOpen] = createSignal(false);
+export const [assistantPanelOpen, setAssistantPanelOpen] = createSignal(true);
 
 // Settings panel visibility and active tab signals
 export const [settingsPanelOpen, setSettingsPanelOpen] = createSignal(false);
