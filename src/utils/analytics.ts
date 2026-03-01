@@ -319,3 +319,85 @@ export function formatNumber(value: number, decimals: number = 2): string {
   }
   return value.toFixed(decimals);
 }
+
+export interface PnLTimeSeriesEntry {
+  date: string;
+  value: number;
+  pnl: number;
+}
+
+export function calculatePnLTimeSeries(orders: PlacedOrder[], positions: Position[]): PnLTimeSeriesEntry[] {
+  const dailyMap = new Map<string, { value: number; pnl: number }>();
+
+  const filledOrders = orders
+    .filter((o) => o.status === "FILLED" || o.status === "MATCHED")
+    .sort((a, b) => a.createdAt - b.createdAt);
+
+  for (const order of filledOrders) {
+    const date = new Date(order.createdAt).toISOString().split("T")[0]!;
+    const existing = dailyMap.get(date) || { value: 0, pnl: 0 };
+    const tradeValue = order.price * (order.sizeMatched > 0 ? order.sizeMatched : order.originalSize);
+
+    if (order.side === "BUY") {
+      existing.value += tradeValue;
+    } else {
+      existing.value -= tradeValue;
+      const position = positions.find((p) => p.asset === order.tokenId);
+      existing.pnl += position ? position.cashPnl : 0;
+    }
+
+    dailyMap.set(date, existing);
+  }
+
+  return Array.from(dailyMap.entries())
+    .map(([date, data]) => ({ date, ...data }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+export interface PositionRiskScore {
+  positionId: string;
+  outcome: string;
+  score: number;
+  factors: {
+    concentrationRisk: number;
+    volatilityRisk: number;
+    liquidityRisk: number;
+    pnlRisk: number;
+  };
+  recommendation: "hold" | "reduce" | "close";
+}
+
+export function calculatePositionRisk(positions: Position[], markets: { id: string; volume: number; prices: number[] }[]): PositionRiskScore[] {
+  const totalValue = positions.reduce((sum, p) => sum + p.currentValue, 0);
+  if (totalValue === 0) return [];
+
+  return positions.map((position) => {
+    const market = markets.find((m) => m.id === position.marketId || m.id === position.asset);
+    const currentPrice = position.currentPrice || 0.5;
+    const volume = market?.volume || 0;
+
+    const concentrationRisk = (position.currentValue / totalValue) * 100;
+    const volatilityRisk = Math.abs(position.currentPrice - 0.5) * 100 * 2;
+    const liquidityRisk = volume < 10000 ? 50 : volume < 50000 ? 25 : 0;
+    const pnlRisk = position.cashPnl < 0 ? Math.min(50, Math.abs(position.cashPnl) / position.initialValue * 100) : 0;
+
+    const score = Math.min(100, concentrationRisk * 0.4 + volatilityRisk * 0.3 + liquidityRisk * 0.2 + pnlRisk * 0.1);
+
+    let recommendation: "hold" | "reduce" | "close" = "hold";
+    if (score >= 70 || concentrationRisk >= 50) recommendation = "close";
+    else if (score >= 40) recommendation = "reduce";
+
+    return {
+      positionId: position.asset || position.id,
+      outcome: position.outcome,
+      score: Math.round(score),
+      factors: {
+        concentrationRisk: Math.round(concentrationRisk),
+        volatilityRisk: Math.round(volatilityRisk),
+        liquidityRisk,
+        pnlRisk: Math.round(pnlRisk),
+      },
+      recommendation,
+    };
+  }).sort((a, b) => b.score - a.score);
+}
