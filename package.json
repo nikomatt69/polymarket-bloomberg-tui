@@ -13,7 +13,8 @@
     "type-check": "tsc --noEmit",
     "mcp": "bun run src/mcp/server.ts",
     "mcp:http": "bun run src/mcp/server.ts --port 3000",
-    "telegram": "bun run src/telegram/bot.ts"
+    "telegram": "bun run src/telegram/bot.ts",
+    "scheduler": "bun run src/automation/scheduler.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",

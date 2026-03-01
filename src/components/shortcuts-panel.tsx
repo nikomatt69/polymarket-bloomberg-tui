@@ -139,6 +139,14 @@ export function ShortcutsPanel() {
             <text content="  D      " fg={theme.textMuted} width={10} />
             <text content="Live order book" fg={theme.text} />
           </box>
+          <box flexDirection="row">
+            <text content="  a      " fg={theme.textMuted} width={10} />
+            <text content="Analytics" fg={theme.text} />
+          </box>
+          <box flexDirection="row">
+            <text content="  i      " fg={theme.textMuted} width={10} />
+            <text content="AI Assistant" fg={theme.text} />
+          </box>
         </box>
 
         {/* Spacer */}
