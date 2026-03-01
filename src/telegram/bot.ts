@@ -8,6 +8,16 @@ export interface TelegramConfig {
   enabled: boolean;
 }
 
+export interface TelegramUpdate {
+  update_id: number;
+  message?: {
+    message_id: number;
+    chat: { id: number; type: string };
+    from?: { id: number; username?: string; first_name?: string };
+    text?: string;
+  };
+}
+
 export interface TelegramMessage {
   chat_id: string | number;
   text: string;
@@ -133,6 +143,52 @@ export class TelegramBot {
     return this.sendMessage(`${emoji} *Alert*\n\n${message}`);
   }
 
+  startPolling(onCommand: (command: string, args: string[], chatId: number) => Promise<string | null>): void {
+    let offset = 0;
+    let active = true;
+
+    const poll = async () => {
+      if (!active) return;
+      try {
+        const res = await fetch(
+          `${this.apiUrl}/getUpdates?timeout=30&offset=${offset}`,
+          { signal: AbortSignal.timeout(35000) }
+        );
+        if (res.ok) {
+          const data = await res.json() as { ok: boolean; result: TelegramUpdate[] };
+          if (data.ok) {
+            for (const update of data.result) {
+              offset = update.update_id + 1;
+              const text = update.message?.text;
+              const chatId = update.message?.chat.id;
+              if (text && chatId && text.startsWith("/")) {
+                const parts = text.split(/\s+/);
+                const command = parts[0];
+                const args = parts.slice(1);
+                const reply = await onCommand(command, args, chatId);
+                if (reply) {
+                  await fetch(`${this.apiUrl}/sendMessage`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ chat_id: chatId, text: reply, parse_mode: "Markdown" }),
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // Network error, retry after delay
+      }
+      if (active) setTimeout(poll, 1000);
+    };
+
+    setTimeout(poll, 0);
+
+    // Expose stop function via closure
+    (this as unknown as Record<string, unknown>)._stopPolling = () => { active = false; };
+  }
+
   async handleCommand(command: string, args: string[]): Promise<string | null> {
     switch (command) {
       case "/markets":
@@ -165,15 +221,19 @@ export class TelegramBot {
   }
 }
 
-export async function runTelegramBot(config?: Partial<TelegramConfig>): Promise<void> {
-  const bot = new TelegramBot(config);
+export async function runTelegramBot(config?: Partial<TelegramConfig>): Promise<TelegramBot> {
   const telegramConfig = loadTelegramConfig();
   const finalConfig = { ...telegramConfig, ...config };
 
-  if (!finalConfig.botToken) {
-    console.error("Telegram bot token not configured. Set it in telegram.json or pass it as argument.");
-    process.exit(1);
+  if (!finalConfig.enabled || !finalConfig.botToken) {
+    return new TelegramBot(finalConfig);
   }
 
-  console.log("Telegram bot started (polling mode)");
+  const bot = new TelegramBot(finalConfig);
+  bot.startPolling(async (command, args, chatId) => {
+    const response = await bot.handleCommand(command, args);
+    return response;
+  });
+
+  return bot;
 }

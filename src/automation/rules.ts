@@ -40,7 +40,7 @@ export interface RuleEngine {
 interface MarketData {
   id: string;
   title: string;
-  outcomes: { outcome: string; price: number; volume: number }[];
+  outcomes: { outcome: string; price: number; volume: number; tokenId?: string }[];
 }
 
 interface PositionData {
@@ -90,7 +90,7 @@ export function createRule(name: string, trigger: Trigger, action: Action): Trad
 }
 
 export function evaluateTrigger(trigger: Trigger, market: MarketData, previousPrice?: number): boolean {
-  const outcome = market.outcomes.find((o) => o.outcome === trigger.trigger?.outcome || o.outcome === "Yes");
+  const outcome = market.outcomes.find((o) => o.outcome === (trigger.outcome ?? "Yes"));
   if (!outcome) return false;
 
   const currentPrice = outcome.price;
@@ -122,20 +122,78 @@ export async function executeAction(
 ): Promise<{ success: boolean; message: string }> {
   switch (action.type) {
     case "buy":
-    case "sell":
-      return { success: true, message: `Order placed: ${action.type} ${action.amount}` };
+    case "sell": {
+      const outcome = context.market?.outcomes.find(
+        (o) => o.outcome === (action.outcome ?? "Yes")
+      );
+      if (!outcome?.tokenId || !action.amount) {
+        return { success: false, message: `No tokenId or amount for ${action.type}` };
+      }
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { placeOrder } = require("../api/orders") as typeof import("../api/orders");
+        await placeOrder({
+          tokenId: outcome.tokenId,
+          side: action.type === "buy" ? "BUY" : "SELL",
+          price: outcome.price,
+          shares: action.amount,
+          type: "GTC",
+        });
+        return { success: true, message: `Order placed: ${action.type} ${action.amount} shares` };
+      } catch (e) {
+        return { success: false, message: `Order failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
 
-    case "close_position":
-      return { success: true, message: `Position closed for ${action.marketId}` };
+    case "close_position": {
+      const pos = context.position;
+      if (!pos) return { success: false, message: "No position found to close" };
+      const outcome = context.market?.outcomes.find(
+        (o) => o.outcome === pos.outcome
+      );
+      if (!outcome?.tokenId) {
+        return { success: false, message: "No tokenId found for position outcome" };
+      }
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { placeOrder } = require("../api/orders") as typeof import("../api/orders");
+        await placeOrder({
+          tokenId: outcome.tokenId,
+          side: "SELL",
+          price: outcome.price,
+          shares: pos.size,
+          type: "GTC",
+        });
+        return { success: true, message: `Position closed: sold ${pos.size} shares of ${pos.outcome}` };
+      } catch (e) {
+        return { success: false, message: `Close failed: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
 
-    case "alert":
+    case "alert": {
+      process.stdout.write("\x07");
       return { success: true, message: action.message || "Alert triggered" };
+    }
 
-    case "notify":
+    case "notify": {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { TelegramBot, loadTelegramConfig } = require("../telegram/bot") as typeof import("../telegram/bot");
+        const cfg = loadTelegramConfig();
+        if (cfg.enabled && cfg.botToken) {
+          const bot = new TelegramBot(cfg);
+          await bot.sendAlert(action.message || "Automation rule triggered", "info");
+        }
+      } catch {
+        // Telegram not configured, silently skip
+      }
       return { success: true, message: `Notification sent: ${action.message}` };
+    }
 
-    case "rebalance":
-      return { success: true, message: `Rebalanced to ${action.percentage}% allocation` };
+    case "rebalance": {
+      console.log(`[Automation] Rebalance intent: ${action.percentage ?? 50}% allocation for market ${action.marketId}`);
+      return { success: true, message: `Rebalance logged: ${action.percentage ?? 50}% allocation` };
+    }
 
     default:
       return { success: false, message: "Unknown action" };

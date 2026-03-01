@@ -1,31 +1,20 @@
 /**
- * Chat Panel — displays AI assistant conversation with real-time tool call tracking
+ * ChatPanel — read-only preview of the last 3 AI agent messages.
+ * Press Enter globally to open the full EnterpriseChat overlay.
  */
 
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createMemo } from "solid-js";
 import { useTheme } from "../context/theme";
-import { chatMessages, chatLoading, setChatInputFocused, authState, setAuthModalOpen, setAuthModalMode } from "../state";
-
-interface ToolCallDisplay {
-  id: string;
-  name: string;
-  arguments: Record<string, unknown>;
-  status: "executing" | "success" | "error";
-  result?: string;
-  error?: string;
-}
+import { chatMessages, chatLoading } from "../state";
 
 export function ChatPanel() {
   const { theme } = useTheme();
-  const [activeToolCalls, setActiveToolCalls] = createSignal<ToolCallDisplay[]>([]);
 
-  const isAuthenticated = () => authState.isAuthenticated;
-  const currentUser = () => authState.user;
-
-  const handleLoginClick = () => {
-    setAuthModalOpen(true);
-    setAuthModalMode("login");
-  };
+  // Show only the last 3 messages as a preview
+  const previewMessages = createMemo(() => {
+    const msgs = chatMessages();
+    return msgs.slice(-3);
+  });
 
   return (
     <box
@@ -33,141 +22,59 @@ export function ChatPanel() {
       height="100%"
       flexDirection="column"
       backgroundColor={theme.backgroundPanel}
-      onMouseDown={() => setChatInputFocused(true)}
     >
       {/* Header */}
       <box height={1} width="100%" paddingLeft={1} backgroundColor={theme.background} flexDirection="row">
-        <text content="🤖" fg={theme.accent} />
-        <text content=" AI Assistant" fg={theme.text} />
+        <text content="◈ AI AGENT" fg={theme.accent} />
         <Show when={chatLoading()}>
-          <text content=" ●" fg={theme.accent} />
+          <text content=" ●" fg={theme.primary} />
         </Show>
         <box flexGrow={1} />
-        {/* User avatar or login prompt */}
-        <Show when={isAuthenticated() && currentUser()} fallback={
-          <box onMouseDown={handleLoginClick}>
-            <text content="[G] Login to message" fg={theme.textMuted} />
-          </box>
-        }>
-          <text content={`👤 ${currentUser()?.username}`} fg={theme.accent} />
-        </Show>
+        <text content=" [Enter] open " fg={theme.textMuted} />
       </box>
 
       {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.borderSubtle}>
-        <text content="────────────────────────────────────────────────────────────────" fg={theme.border} />
-      </box>
+      <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
 
-      {/* Messages */}
-      <scrollbox flexGrow={1} width="100%">
-        <box width="100%" flexDirection="column" paddingLeft={1} paddingRight={1}>
-          <Show when={chatMessages().length === 0 && !chatLoading()}>
-            <text content="💬 Chat with the AI about Polymarket markets" fg={theme.textMuted} />
-            <text content="" fg={theme.textMuted} />
-            <text content="Examples:" fg={theme.textMuted} />
-            <text content="  • Find trending crypto markets" fg={theme.textMuted} />
-            <text content="  • Show me NBA markets" fg={theme.textMuted} />
-            <text content="  • What's my portfolio worth?" fg={theme.textMuted} />
-            <text content="" fg={theme.textMuted} />
-          </Show>
-
-          <For each={chatMessages()}>
+      {/* Preview area */}
+      <box flexGrow={1} width="100%" flexDirection="column" paddingLeft={1} paddingRight={1}>
+        <Show
+          when={previewMessages().length > 0}
+          fallback={
+            <box flexDirection="column" paddingTop={1}>
+              <text content="Press Enter to open the AI Agent" fg={theme.textMuted} />
+              <text content="" fg={theme.textMuted} />
+              <text content="Ask about markets, get trading insights," fg={theme.textMuted} />
+              <text content="execute trades, and more." fg={theme.textMuted} />
+            </box>
+          }
+        >
+          <For each={previewMessages()}>
             {(message) => (
-              <box width="100%" flexDirection="column">
-                {/* Role label with icon */}
+              <box width="100%" flexDirection="column" paddingTop={1}>
                 <text
-                  content={message.role === "user" ? "👤 You:" : "🤖 AI:"}
+                  content={message.role === "user" ? "👤 You:" : "🤖 Agent:"}
                   fg={message.role === "user" ? theme.accent : theme.textMuted}
                 />
-
-                {/* Content - wrap long lines */}
-                <box width="100%" flexDirection="column">
-                  <MessageContent content={message.content} />
+                <box width="100%" paddingLeft={1}>
+                  <text
+                    content={message.content.slice(0, 80) + (message.content.length > 80 ? "…" : "")}
+                    fg={theme.text}
+                  />
                 </box>
-
-                {/* Tool calls with detailed display */}
-                <Show when={message.toolCalls && message.toolCalls.length > 0}>
-                  <box flexDirection="column" paddingTop={1}>
-                    <text content="🔧 Tools executed:" fg={theme.textMuted} />
-                    <For each={message.toolCalls}>
-                      {(toolCall) => (
-                        <box flexDirection="column" paddingLeft={2}>
-                          <text
-                            content={`nikcli ${toolCall.name}`}
-                            fg={theme.textMuted}
-                          />
-                          <Show when={toolCall.arguments && Object.keys(toolCall.arguments).length > 0}>
-                            <text
-                              content={`   Args: ${JSON.stringify(toolCall.arguments).slice(0, 100)}`}
-                              fg={theme.textMuted}
-                            />
-                          </Show>
-                          <Show when={toolCall.result}>
-                            <text
-                              content={`   Result: ${JSON.stringify(toolCall.result).slice(0, 200)}`}
-                              fg={theme.textMuted}
-                            />
-                          </Show>
-                        </box>
-                      )}
-                    </For>
-                  </box>
-                </Show>
-
-                <text content="" fg={theme.textMuted} />
               </box>
             )}
           </For>
-
-          {/* Active tool calls during streaming - shows as message content includes tool calls */}
-          <Show when={chatLoading() && chatMessages().length > 0}>
-            <box flexDirection="column" paddingTop={1}>
-              <text content="⚡ AI is processing..." fg={theme.accent} />
-              <text content="   Tool calls will appear in the response above" fg={theme.textMuted} />
+          <Show when={chatMessages().length > 3}>
+            <box paddingTop={1}>
+              <text
+                content={`  … and ${chatMessages().length - 3} more messages — [Enter] to view all`}
+                fg={theme.textMuted}
+              />
             </box>
           </Show>
-
-          {/* Loading indicator */}
-          <Show when={chatLoading()}>
-            <text content="🤔 Thinking..." fg={theme.accent} />
-          </Show>
-        </box>
-      </scrollbox>
-    </box>
-  );
-}
-
-function MessageContent(props: { content: string }) {
-  const { theme } = useTheme();
-
-  // Enhanced word wrap with better formatting
-  const lines = () => {
-    const content = props.content;
-    const maxWidth = 58;
-    const words = content.split(" ");
-    const result: string[] = [];
-    let currentLine = "";
-
-    for (const word of words) {
-      if ((currentLine + " " + word).trim().length <= maxWidth) {
-        currentLine = (currentLine + " " + word).trim();
-      } else {
-        if (currentLine) result.push(currentLine);
-        currentLine = word;
-      }
-    }
-    if (currentLine) result.push(currentLine);
-
-    return result;
-  };
-
-  return (
-    <box flexDirection="column">
-      <For each={lines()}>
-        {(line) => (
-          <text content={line} fg={theme.text} />
-        )}
-      </For>
+        </Show>
+      </box>
     </box>
   );
 }

@@ -12,6 +12,34 @@ import { join } from "path";
 
 export type ConnectionStatus = "connected" | "disconnected" | "connecting" | "reconnecting" | "error";
 
+// ─── Bloomberg Feature Interfaces ────────────────────────────────────────────
+
+export interface NewsItem {
+  id: string;
+  title: string;
+  source: string;
+  url: string;
+  publishedAt: number;
+  category: string;
+  summary: string;
+}
+
+export interface SocialItem {
+  id: string;
+  text: string;
+  source: "nitter" | "cryptopanic";
+  sentiment: "bullish" | "bearish" | "neutral";
+  timestamp: number;
+  url?: string;
+}
+
+export interface SocialSentiment {
+  bullish: number;
+  bearish: number;
+  neutral: number;
+  total: number;
+}
+
 const [wsConnectionStatus, setConnectionStatusInternal] = createSignal<ConnectionStatus>("disconnected");
 const [lastMarketUpdates, setLastMarketUpdates] = createSignal<Record<string, { price: number; timestamp: number }>>({});
 
@@ -1156,3 +1184,46 @@ export const [contactsList, setContactsList] = createSignal<UserContact[]>([]);
 export const [currentUserProfile, setCurrentUserProfile] = createSignal<UserProfile | null>(null);
 export const [editingField, setEditingField] = createSignal<"username" | "bio" | "avatar" | null>(null);
 export const [editValue, setEditValue] = createSignal("");
+
+// ─── News Panel Signals ───────────────────────────────────────────────────────
+export const [newsPanelOpen, setNewsPanelOpen] = createSignal(false);
+export const [selectedNewsIndex, setSelectedNewsIndex] = createSignal(0);
+export const [newsItems, setNewsItems] = createSignal<NewsItem[]>([]);
+export const [loadingNews, setLoadingNews] = createSignal(false);
+
+// ─── Social Panel Signals ─────────────────────────────────────────────────────
+export const [socialPanelOpen, setSocialPanelOpen] = createSignal(false);
+export const [socialItems, setSocialItems] = createSignal<SocialItem[]>([]);
+export const [socialSentiment, setSocialSentiment] = createSignal<SocialSentiment>({ bullish: 0, bearish: 0, neutral: 0, total: 0 });
+
+// ─── Automation Panel Signals ─────────────────────────────────────────────────
+export const [automationPanelOpen, setAutomationPanelOpen] = createSignal(false);
+export const [automationRules, setAutomationRules] = createSignal<import("./automation/rules").TradingRule[]>([]);
+export const [scannerAlerts, setScannerAlerts] = createSignal<import("./automation/scanner").ScanResult[]>([]);
+export const [automationTab, setAutomationTab] = createSignal<"rules" | "alerts">("rules");
+export const [automationSelectedIdx, setAutomationSelectedIdx] = createSignal(0);
+
+// ─── Skills Panel Signals ─────────────────────────────────────────────────────
+export const [skillsPanelOpen, setSkillsPanelOpen] = createSignal(false);
+export const [skills, setSkills] = createSignal<import("./api/skills").Skill[]>([]);
+export const [skillsSelectedIdx, setSkillsSelectedIdx] = createSignal(0);
+export const [skillsPanelMode, setSkillsPanelMode] = createSignal<"list" | "add">("list");
+export const [skillsAddInput, setSkillsAddInput] = createSignal<{ name: string; description: string; systemPrompt: string }>({ name: "", description: "", systemPrompt: "" });
+export const [skillsAddField, setSkillsAddField] = createSignal<"name" | "description" | "systemPrompt">("name");
+
+// ─── Enterprise Chat Signals ──────────────────────────────────────────────────
+
+export interface StreamingTool {
+  name: string;
+  args: unknown;
+  result?: unknown;
+  status: "calling" | "done" | "error";
+}
+
+export const [enterpriseChatOpen, setEnterpriseChatOpen] = createSignal(false);
+export const [streamingMessage, setStreamingMessage] = createSignal("");
+export const [streamingTools, setStreamingTools] = createSignal<StreamingTool[]>([]);
+export const [inputHistory, setInputHistory] = createSignal<string[]>([]);
+export const [inputHistoryIdx, setInputHistoryIdx] = createSignal(-1);
+export const [currentSessionId, setCurrentSessionId] = createSignal<string>("");
+export const [sessionTokens, setSessionTokens] = createSignal(0);

@@ -933,8 +933,10 @@ export interface AssistantMessage {
 }
 
 export async function sendMessageToAssistantStream(
-  onChunk?: (text: string) => void
-): Promise<{ response: string; toolCalls?: ToolCall[] }> {
+  onChunk?: (chunk: string) => void,
+  onToolCall?: (tool: { name: string; args: unknown }) => void,
+  onToolResult?: (tool: { name: string; result: unknown }) => void,
+): Promise<{ response: string; toolCalls: ToolCall[]; tokensUsed: number }> {
   const resolved = resolveAssistantModel();
   if ("error" in resolved) {
     return {
@@ -1053,6 +1055,18 @@ This helps the user understand what you're doing.
 
 Respond in the same language as the user. Be concise but thorough on trading matters.`;
 
+  // Append enabled skills to system prompt
+  const skillsAppend = (() => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getEnabledSkillsSystemPrompt } = require("./skills") as typeof import("./skills");
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { skills } = require("../state") as typeof import("../state");
+      return getEnabledSkillsSystemPrompt(skills());
+    } catch { return ""; }
+  })();
+  const fullSystemPrompt = systemPrompt + skillsAppend;
+
   const messages = chatMessages();
   const aiMessages: { role: "user" | "assistant"; content: string }[] = messages.map((m) => ({
     role: m.role,
@@ -1062,13 +1076,38 @@ Respond in the same language as the user. Be concise but thorough on trading mat
   // Get TUI context for session
   const tuiContext = getTUIContext();
 
+  // Wrap tools to fire onToolCall/onToolResult callbacks in real time
+  const trackedToolCalls: ToolCall[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const wrappedTools: Record<string, any> = {};
+  for (const [name, toolDef] of Object.entries(tools)) {
+    wrappedTools[name] = {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...(toolDef as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      execute: async (args: any) => {
+        onToolCall?.({ name, args });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await (toolDef as any).execute(args);
+        onToolResult?.({ name, result });
+        trackedToolCalls.push({
+          id: `tc-${Math.random().toString(36).slice(2, 10)}`,
+          name,
+          arguments: args as Record<string, unknown>,
+          result,
+        });
+        return result;
+      },
+    };
+  }
+
   try {
     const result = streamText({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       model: resolved.model as any,
-      system: systemPrompt,
+      system: fullSystemPrompt,
       messages: aiMessages,
-      tools,
+      tools: wrappedTools,
       maxSteps: 15,
       temperature: 0.7,
       onError: (error) => {
@@ -1077,24 +1116,28 @@ Respond in the same language as the user. Be concise but thorough on trading mat
     });
 
     let fullText = "";
-    const toolCalls: ToolCall[] = [];
 
-    // Process the stream and track tool calls
     for await (const chunk of result.textStream) {
       fullText += chunk;
       onChunk?.(chunk);
     }
 
-    // Get tool calls from the result if available
-    // The AI SDK executes tools automatically, but we can track them
-    // by looking at tool call messages in the result
+    // Resolve total token usage after stream completes
+    let tokensUsed = 0;
+    try {
+      const usage = await result.usage;
+      tokensUsed = usage.totalTokens ?? 0;
+    } catch {
+      // usage may not be available on all providers
+    }
 
-    return { response: fullText, toolCalls };
+    return { response: fullText, toolCalls: trackedToolCalls, tokensUsed };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     return {
       response: `Error: ${errorMessage}`,
       toolCalls: [],
+      tokensUsed: 0,
     };
   }
 }

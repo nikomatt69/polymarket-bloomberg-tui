@@ -2,10 +2,9 @@
  * TopBar — branding, live clock, aggregate market stats
  */
 
-import { createSignal, onCleanup, onMount, createMemo } from "solid-js";
+import { createSignal, onCleanup, onMount, createMemo, Show } from "solid-js";
 import { useTheme } from "../context/theme";
-import { appState } from "../state";
-import { walletState } from "../state";
+import { appState, walletState, newsItems } from "../state";
 
 function fmtClock(d: Date): string {
   return d.toLocaleTimeString("en-US", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -25,10 +24,14 @@ function fmtVol(n: number): string {
 export function TopBar() {
   const { theme } = useTheme();
   const [now, setNow] = createSignal(new Date());
+  const [tickerIdx, setTickerIdx] = createSignal(0);
 
   onMount(() => {
-    const id = setInterval(() => setNow(new Date()), 1000);
-    onCleanup(() => clearInterval(id));
+    const clockId = setInterval(() => setNow(new Date()), 1000);
+    const tickerId = setInterval(() => {
+      setTickerIdx((i) => (i + 1) % Math.max(1, Math.min(newsItems().length, 5)));
+    }, 5000);
+    onCleanup(() => { clearInterval(clockId); clearInterval(tickerId); });
   });
 
   const totalVol = createMemo(() =>
@@ -36,6 +39,8 @@ export function TopBar() {
   );
 
   const marketCount = createMemo(() => appState.markets.length);
+
+  const tickerItem = createMemo(() => newsItems().slice(0, 5)[tickerIdx()] ?? null);
 
   return (
     <box
@@ -66,8 +71,17 @@ export function TopBar() {
         width={16}
       />
 
-      {/* Spacer */}
-      <box flexGrow={1} />
+      {/* News ticker */}
+      <box flexGrow={1} overflow="hidden">
+        <Show when={tickerItem()}>
+          {(item: () => import("../state").NewsItem) => (
+            <text
+              content={`  ◈ ${item().source}: ${item().title.slice(0, 65)}…`}
+              fg={theme.primaryMuted}
+            />
+          )}
+        </Show>
+      </box>
 
       {/* Clock */}
       <text content={fmtDate(now())} fg={theme.highlightText} width={20} />

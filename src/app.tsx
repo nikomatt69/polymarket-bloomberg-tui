@@ -177,11 +177,46 @@ import {
   setUserSearchResults,
   userSearchLoading,
   setUserSearchLoading,
+  newsPanelOpen,
+  setNewsPanelOpen,
+  selectedNewsIndex,
+  setSelectedNewsIndex,
+  newsItems,
+  socialPanelOpen,
+  setSocialPanelOpen,
+  automationPanelOpen,
+  setAutomationPanelOpen,
+  automationRules,
+  setAutomationRules,
+  scannerAlerts,
+  setScannerAlerts,
+  automationTab,
+  setAutomationTab,
+  automationSelectedIdx,
+  setAutomationSelectedIdx,
+  skillsPanelOpen,
+  setSkillsPanelOpen,
+  skills,
+  setSkills,
+  skillsSelectedIdx,
+  setSkillsSelectedIdx,
+  skillsPanelMode,
+  setSkillsPanelMode,
+  skillsAddInput,
+  setSkillsAddInput,
+  skillsAddField,
+  setSkillsAddField,
+  enterpriseChatOpen,
+  setEnterpriseChatOpen,
 } from "./state";
 import { refreshWalletBalance } from "./hooks/useWallet";
 import { useAssistant } from "./hooks/useAssistant";
 import { initializeWebSocket } from "./api/websocket";
 import { searchUsers } from "./api/users";
+import { loadRules, saveRules } from "./automation/rules";
+import { MCPServer, registerPolymarketTools } from "./mcp/server";
+import { loadTelegramConfig, runTelegramBot } from "./telegram/bot";
+import { loadSkills, saveSkills, createCustomSkill } from "./api/skills";
 
 function AppContent() {
   initializeState();
@@ -194,6 +229,29 @@ function AppContent() {
   loadAlerts();
   loadWatchlist();
   initializeWebSocket();
+
+  // Load initial automation rules
+  setAutomationRules(loadRules());
+
+  // Load skills
+  setSkills(loadSkills());
+
+  // Start MCP server if env var set
+  {
+    const server = new MCPServer("polymarket-tui");
+    registerPolymarketTools(server);
+    if (process.env.MCP_HTTP === "1") {
+      void server.runHttp(parseInt(process.env.MCP_PORT ?? "3001", 10));
+    }
+  }
+
+  // Start Telegram bot if configured
+  {
+    const telegramCfg = loadTelegramConfig();
+    if (telegramCfg.enabled && telegramCfg.botToken) {
+      void runTelegramBot(telegramCfg);
+    }
+  }
 
   const themeCtx = useTheme();
   const { toggleMode, setTheme, reloadThemes } = themeCtx;
@@ -245,6 +303,24 @@ function AppContent() {
   };
 
   useKeyboard((e: KeyEvent) => {
+    // Enterprise chat — highest priority intercept
+    if (enterpriseChatOpen()) {
+      const { focused, input, setInput, submitPrompt, blurInput, clearChat, navigateHistoryUp, navigateHistoryDown } = useAssistant();
+      if (focused()) {
+        if (e.name === "escape") { blurInput(); return; }
+        if (e.name === "return") { void submitPrompt(); return; }
+        if (e.name === "up" && !input()) { navigateHistoryUp(); return; }
+        if (e.name === "down" && !input()) { navigateHistoryDown(); return; }
+        if (e.ctrl && e.name === "l") { clearChat(); return; }
+        if (e.name === "backspace") { setInput(input().slice(0, -1)); return; }
+        if (e.sequence && e.sequence.length === 1 && e.sequence >= " ") { setInput(input() + e.sequence); return; }
+      } else {
+        if (e.name === "escape") { setEnterpriseChatOpen(false); return; }
+        if (e.name === "return" || e.name === "i") { const { focusInput } = useAssistant(); focusInput(); return; }
+      }
+      return; // block all global keys while enterprise chat is open
+    }
+
     // Order form modal intercept
     if (orderFormOpen()) {
       if (e.name === "escape") {
@@ -1006,6 +1082,130 @@ function AppContent() {
     }
 
 
+    // News panel intercept
+    if (newsPanelOpen()) {
+      if (e.name === "escape" || e.name === "n") { setNewsPanelOpen(false); setSelectedNewsIndex(0); }
+      else if (e.name === "up") setSelectedNewsIndex((i) => Math.max(0, i - 1));
+      else if (e.name === "down") setSelectedNewsIndex((i) => Math.min(newsItems().length - 1, i + 1));
+      return;
+    }
+
+    // Social panel intercept
+    if (socialPanelOpen()) {
+      if (e.name === "escape" || e.name === "t") setSocialPanelOpen(false);
+      return;
+    }
+
+    // Automation panel intercept
+    if (automationPanelOpen()) {
+      if (e.name === "escape" || e.name === "b") {
+        setAutomationPanelOpen(false);
+      } else if (e.name === "tab") {
+        setAutomationTab(automationTab() === "rules" ? "alerts" : "rules");
+        setAutomationSelectedIdx(0);
+      } else if (e.name === "1") {
+        setAutomationTab("rules");
+        setAutomationSelectedIdx(0);
+      } else if (e.name === "2") {
+        setAutomationTab("alerts");
+        setAutomationSelectedIdx(0);
+      } else if (e.name === "up") {
+        setAutomationSelectedIdx((i) => Math.max(0, i - 1));
+      } else if (e.name === "down") {
+        const max = automationTab() === "rules" ? automationRules().length - 1 : scannerAlerts().length - 1;
+        setAutomationSelectedIdx((i) => Math.min(max, i + 1));
+      } else if ((e.name === "space" || e.name === "return") && automationTab() === "rules") {
+        const idx = automationSelectedIdx();
+        const updated = automationRules().map((r, i) =>
+          i === idx ? { ...r, enabled: !r.enabled } : r
+        );
+        setAutomationRules(updated);
+        saveRules(updated);
+      } else if (e.name === "d") {
+        const idx = automationSelectedIdx();
+        if (automationTab() === "rules") {
+          const updated = automationRules().filter((_, i) => i !== idx);
+          setAutomationRules(updated);
+          saveRules(updated);
+          if (automationSelectedIdx() >= updated.length && updated.length > 0) {
+            setAutomationSelectedIdx(updated.length - 1);
+          }
+        } else {
+          const updated = scannerAlerts().filter((_, i) => i !== idx);
+          setScannerAlerts(updated);
+          if (automationSelectedIdx() >= updated.length && updated.length > 0) {
+            setAutomationSelectedIdx(updated.length - 1);
+          }
+        }
+      } else if (e.name === "c" && automationTab() === "alerts") {
+        setScannerAlerts([]);
+        setAutomationSelectedIdx(0);
+      }
+      return;
+    }
+
+    // Skills panel intercept
+    if (skillsPanelOpen()) {
+      if (skillsPanelMode() === "add") {
+        if (e.name === "escape") {
+          setSkillsPanelMode("list");
+        } else if (e.name === "tab") {
+          const fields: Array<"name" | "description" | "systemPrompt"> = ["name", "description", "systemPrompt"];
+          const idx = fields.indexOf(skillsAddField());
+          setSkillsAddField(fields[(idx + 1) % fields.length]);
+        } else if (e.name === "return") {
+          const input = skillsAddInput();
+          if (input.name && input.description && input.systemPrompt) {
+            const newSkill = createCustomSkill(input.name, input.description, input.systemPrompt);
+            const updated = [...skills(), newSkill];
+            setSkills(updated);
+            saveSkills(updated);
+            setSkillsPanelMode("list");
+            setSkillsSelectedIdx(updated.length - 1);
+          }
+        } else if (e.name === "backspace") {
+          const field = skillsAddField();
+          setSkillsAddInput({ ...skillsAddInput(), [field]: skillsAddInput()[field].slice(0, -1) });
+        } else if (e.sequence && e.sequence.length === 1 && e.sequence >= " ") {
+          const field = skillsAddField();
+          setSkillsAddInput({ ...skillsAddInput(), [field]: skillsAddInput()[field] + e.sequence });
+        }
+      } else {
+        if (e.name === "escape" || e.name === "v") {
+          setSkillsPanelOpen(false);
+        } else if (e.name === "1") {
+          setSkillsPanelMode("list");
+        } else if (e.name === "+" || (e.sequence === "+")) {
+          setSkillsPanelMode("add");
+          setSkillsAddInput({ name: "", description: "", systemPrompt: "" });
+          setSkillsAddField("name");
+        } else if (e.name === "up") {
+          setSkillsSelectedIdx((i) => Math.max(0, i - 1));
+        } else if (e.name === "down") {
+          setSkillsSelectedIdx((i) => Math.min(skills().length - 1, i + 1));
+        } else if (e.name === "space" || e.name === "return") {
+          const idx = skillsSelectedIdx();
+          const updated = skills().map((s, i) =>
+            i === idx ? { ...s, enabled: !s.enabled } : s
+          );
+          setSkills(updated);
+          saveSkills(updated);
+        } else if (e.name === "d") {
+          const idx = skillsSelectedIdx();
+          const skill = skills()[idx];
+          if (skill && skill.author !== "built-in") {
+            const updated = skills().filter((_, i) => i !== idx);
+            setSkills(updated);
+            saveSkills(updated);
+            if (skillsSelectedIdx() >= updated.length && updated.length > 0) {
+              setSkillsSelectedIdx(updated.length - 1);
+            }
+          }
+        }
+      }
+      return;
+    }
+
     // Search input intercept: while typing in search, block global shortcuts.
     if (searchInputFocused()) {
       if (e.name === "escape" || e.name === "return") {
@@ -1049,7 +1249,11 @@ function AppContent() {
       || authModalOpen()
       || messagesPanelOpen()
       || profilePanelOpen()
-      || userSearchOpen();
+      || userSearchOpen()
+      || newsPanelOpen()
+      || socialPanelOpen()
+      || automationPanelOpen()
+      || skillsPanelOpen();
 
     if (anyOverlayOpen) {
       return;
@@ -1061,8 +1265,8 @@ function AppContent() {
         setSearchInputFocused(true);
         break;
       case "return":
-        // Enter to focus chat input
-        setChatInputFocused(true);
+        // Enter to open enterprise chat
+        setEnterpriseChatOpen(true);
         break;
       case "up":
         navigatePrev();
@@ -1167,6 +1371,32 @@ function AppContent() {
       case "i":
         // i — toggle indicators panel
         setIndicatorsPanelOpen(!indicatorsPanelOpen());
+        break;
+      case "n":
+        // n — toggle news panel
+        setNewsPanelOpen(!newsPanelOpen());
+        if (newsPanelOpen()) setSelectedNewsIndex(0);
+        break;
+      case "t":
+        // t — toggle social sentiment panel
+        setSocialPanelOpen(!socialPanelOpen());
+        break;
+      case "b":
+        // b — toggle automation panel
+        setAutomationPanelOpen(!automationPanelOpen());
+        if (automationPanelOpen()) {
+          setAutomationRules(loadRules());
+          setAutomationSelectedIdx(0);
+        }
+        break;
+      case "v":
+        // v — toggle skills panel
+        setSkillsPanelOpen(!skillsPanelOpen());
+        if (skillsPanelOpen()) {
+          setSkills(loadSkills());
+          setSkillsSelectedIdx(0);
+          setSkillsPanelMode("list");
+        }
         break;
       case "m":
         // m — toggle sentiment analysis panel
