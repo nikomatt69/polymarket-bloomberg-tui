@@ -4,8 +4,9 @@
  * Tabs: THEME · PROVIDERS · ACCOUNT · DISPLAY · KEYS
  */
 
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, onMount } from "solid-js";
 import { useTheme } from "../context/theme";
+import { PanelHeader, SectionTitle, DataRow, Separator, TabBar } from "./ui/panel-components";
 import {
   walletState,
   appState,
@@ -29,6 +30,12 @@ import {
 import { disconnectWalletHook, refreshWalletBalance } from "../hooks/useWallet";
 import { watchlistState, toggleWatchlistFilter } from "../hooks/useWatchlist";
 import { truncateAddress } from "../auth/wallet";
+import {
+  settingsFunderEditing,
+  settingsFunderInput,
+  setSettingsFunderInput,
+  setSettingsFunderEditing,
+} from "../state";
 
 export function SettingsPanel() {
   const ctx = useTheme();
@@ -211,62 +218,76 @@ export function SettingsPanel() {
     setProviderError("");
   };
 
+  const [apiLatency, setApiLatency] = createSignal<number | null>(null);
+  onMount(() => {
+    const t = Date.now();
+    void fetch("https://gamma-api.polymarket.com/markets?limit=1")
+      .then(() => setApiLatency(Date.now() - t))
+      .catch(() => setApiLatency(-1));
+  });
+  const latencyColor = () => {
+    const lat = apiLatency();
+    if (lat === null) return theme.textMuted;
+    if (lat < 0) return theme.error;
+    if (lat < 300) return theme.success;
+    if (lat < 800) return theme.warning;
+    return theme.error;
+  };
+
   return (
     <box
       position="absolute"
       top={2}
       left="6%"
       width="88%"
-      height={26}
+      height={36}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={170}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
-        <text content=" ◈ SETTINGS " fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <box onMouseDown={() => setSettingsPanelOpen(false)}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
-        </box>
-      </box>
+      <PanelHeader
+        title="SETTINGS"
+        icon="◈"
+        onClose={() => setSettingsPanelOpen(false)}
+      />
 
       {/* Tab bar */}
       <box height={1} backgroundColor={theme.backgroundPanel} flexDirection="row" paddingLeft={2}>
         <box onMouseDown={() => setSettingsPanelTab("theme")}>
           <text
-            content={settingsPanelTab() === "theme" ? " [THEME] " : "  THEME  "}
-            fg={settingsPanelTab() === "theme" ? theme.primary : theme.textMuted}
+            content={settingsPanelTab() === "theme" ? "> THEME <" : "  THEME  "}
+            fg={settingsPanelTab() === "theme" ? theme.accent : theme.textMuted}
           />
         </box>
         <box onMouseDown={() => setSettingsPanelTab("account")}>
           <text
-            content={settingsPanelTab() === "account" ? " [ACCOUNT] " : "  ACCOUNT  "}
-            fg={settingsPanelTab() === "account" ? theme.primary : theme.textMuted}
+            content={settingsPanelTab() === "account" ? "> ACCOUNT <" : "  ACCOUNT  "}
+            fg={settingsPanelTab() === "account" ? theme.accent : theme.textMuted}
           />
         </box>
         <box onMouseDown={() => setSettingsPanelTab("providers")}>
           <text
-            content={settingsPanelTab() === "providers" ? " [PROVIDERS] " : "  PROVIDERS  "}
-            fg={settingsPanelTab() === "providers" ? theme.primary : theme.textMuted}
+            content={settingsPanelTab() === "providers" ? "> PROVIDERS <" : "  PROVIDERS  "}
+            fg={settingsPanelTab() === "providers" ? theme.accent : theme.textMuted}
           />
         </box>
         <box onMouseDown={() => setSettingsPanelTab("display")}>
           <text
-            content={settingsPanelTab() === "display" ? " [DISPLAY] " : "  DISPLAY  "}
-            fg={settingsPanelTab() === "display" ? theme.primary : theme.textMuted}
+            content={settingsPanelTab() === "display" ? "> DISPLAY <" : "  DISPLAY  "}
+            fg={settingsPanelTab() === "display" ? theme.accent : theme.textMuted}
           />
         </box>
         <box onMouseDown={() => setSettingsPanelTab("keys")}>
           <text
-            content={settingsPanelTab() === "keys" ? " [KEYS] " : "  KEYS  "}
-            fg={settingsPanelTab() === "keys" ? theme.primary : theme.textMuted}
+            content={settingsPanelTab() === "keys" ? "> KEYS <" : "  KEYS  "}
+            fg={settingsPanelTab() === "keys" ? theme.accent : theme.textMuted}
           />
         </box>
       </box>
 
       {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.primaryMuted} />
+      <Separator type="heavy" />
 
       {/* Body */}
       <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
@@ -510,7 +531,47 @@ export function SettingsPanel() {
                 fg={walletState.apiKey ? theme.success : theme.textMuted}
               />
             </box>
+            <box flexDirection="row" gap={1}>
+              <text content="Proxy Wlt:" fg={theme.textMuted} />
+              <Show
+                when={settingsFunderEditing()}
+                fallback={
+                  <box flexDirection="row" gap={1}>
+                    <text
+                      content={walletState.funderAddress ? truncateAddress(walletState.funderAddress) : "Not set — [F] to configure"}
+                      fg={walletState.funderAddress ? theme.accent : theme.textMuted}
+                    />
+                  </box>
+                }
+              >
+                <input
+                  width={44}
+                  value={settingsFunderInput()}
+                  focused
+                  onInput={(v: string) => setSettingsFunderInput(v)}
+                />
+                <text content=" [ENTER] save  [ESC] cancel" fg={theme.textMuted} />
+              </Show>
+            </box>
           </Show>
+          <text content="" />
+
+          {/* Connection Health */}
+          <text content="── Connection Health ──" fg={theme.textMuted} />
+          <box flexDirection="row" gap={2}>
+            <text content="Gamma API:" fg={theme.textMuted} />
+            <text
+              content={apiLatency() === null ? "pinging…" : apiLatency()! < 0 ? "ERROR" : `${apiLatency()}ms`}
+              fg={latencyColor()}
+            />
+          </box>
+          <box flexDirection="row" gap={2}>
+            <text content="Markets loaded:" fg={theme.textMuted} />
+            <text content={`${appState.markets.length}`} fg={theme.text} />
+            <text content="Last refresh:" fg={theme.textMuted} />
+            <text content={appState.lastRefresh ? appState.lastRefresh.toLocaleTimeString() : "never"} fg={theme.text} />
+          </box>
+
           <text content="" />
           <box flexDirection="row" gap={3}>
             <box onMouseDown={() => { setSettingsPanelOpen(false); setWalletModalOpen(true); }}>
@@ -518,7 +579,10 @@ export function SettingsPanel() {
             </box>
             <Show when={walletState.connected}>
               <box onMouseDown={() => void refreshWalletBalance()}>
-                <text content="[R] Refresh Balance" fg={theme.textMuted} />
+                <text content="[R] Refresh Bal" fg={theme.textMuted} />
+              </box>
+              <box onMouseDown={() => { setSettingsFunderEditing(true); setSettingsFunderInput(walletState.funderAddress ?? ""); }}>
+                <text content="[F] Set Proxy" fg={theme.accent} />
               </box>
               <box onMouseDown={() => disconnectWalletHook()}>
                 <text content="[D] Disconnect" fg={theme.error} />
@@ -622,98 +686,79 @@ export function SettingsPanel() {
         {/* KEYS tab */}
         <Show when={settingsPanelTab() === "keys"}>
           <box flexDirection="row" width="100%">
-            {/* Left column */}
-            <box flexDirection="column" width={36}>
-              <text content="NAVIGATION" fg={theme.primary} />
-              <box flexDirection="row">
-                <text content="  ↑ / ↓  " fg={theme.textMuted} width={9} />
-                <text content="Navigate markets" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  Enter  " fg={theme.textMuted} width={9} />
-                <text content="Select market" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  Ctrl+K " fg={theme.textMuted} width={9} />
-                <text content="Cycle sort" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  R      " fg={theme.textMuted} width={9} />
-                <text content="Refresh data" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  1/5/7/A" fg={theme.textMuted} width={9} />
-                <text content="Timeframe" fg={theme.text} />
-              </box>
+
+            {/* Column 1 — Navigation + Market */}
+            <box flexDirection="column" width={30}>
+              <text content="NAVIGATION" fg={theme.accent} />
+              <box flexDirection="row"><text content=" ↑ / ↓    " fg={theme.textMuted} width={11} /><text content="Navigate markets" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" Enter    " fg={theme.textMuted} width={11} /><text content="Open AI chat" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" /        " fg={theme.textMuted} width={11} /><text content="Search markets" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" R        " fg={theme.textMuted} width={11} /><text content="Refresh data" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" Ctrl+K   " fg={theme.textMuted} width={11} /><text content="Cycle sort" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" ←/→      " fg={theme.textMuted} width={11} /><text content="Toggle portfolio" fg={theme.text} /></box>
               <text content="" />
-              <text content="MARKET" fg={theme.primary} />
-              <box flexDirection="row">
-                <text content="  X      " fg={theme.textMuted} width={9} />
-                <text content="Toggle watchlist" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  F      " fg={theme.textMuted} width={9} />
-                <text content="Toggle filter" fg={theme.text} />
-              </box>
+              <text content="TIMEFRAME" fg={theme.accent} />
+              <box flexDirection="row"><text content=" 1        " fg={theme.textMuted} width={11} /><text content="1 hour" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" 2        " fg={theme.textMuted} width={11} /><text content="4 hours" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" 3        " fg={theme.textMuted} width={11} /><text content="1 day" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" 4        " fg={theme.textMuted} width={11} /><text content="5 days" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" 5        " fg={theme.textMuted} width={11} /><text content="1 week" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" 6        " fg={theme.textMuted} width={11} /><text content="1 month" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" 7 / A    " fg={theme.textMuted} width={11} /><text content="All time" fg={theme.text} /></box>
               <text content="" />
-              <text content="SYSTEM" fg={theme.primary} />
-              <box flexDirection="row">
-                <text content="  E      " fg={theme.textMuted} width={9} />
-                <text content="Settings" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  Q      " fg={theme.textMuted} width={9} />
-                <text content="Quit" fg={theme.text} />
-              </box>
+              <text content="MARKET" fg={theme.accent} />
+              <box flexDirection="row"><text content=" X        " fg={theme.textMuted} width={11} /><text content="Toggle watchlist" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" F        " fg={theme.textMuted} width={11} /><text content="Watchlist filter" fg={theme.text} /></box>
             </box>
-            {/* Right column */}
-            <box flexDirection="column" width={36}>
-              <text content="PANELS" fg={theme.primary} />
-              <box flexDirection="row">
-                <text content="  W      " fg={theme.textMuted} width={9} />
-                <text content="Wallet" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  O      " fg={theme.textMuted} width={9} />
-                <text content="Buy order" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  S      " fg={theme.textMuted} width={9} />
-                <text content="Sell order" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  H      " fg={theme.textMuted} width={9} />
-                <text content="Order history" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  P      " fg={theme.textMuted} width={9} />
-                <text content="Portfolio" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  Z      " fg={theme.textMuted} width={9} />
-                <text content="Alerts" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  I      " fg={theme.textMuted} width={9} />
-                <text content="Indicators" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  M      " fg={theme.textMuted} width={9} />
-                <text content="Sentiment" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  C      " fg={theme.textMuted} width={9} />
-                <text content="Compare" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  L      " fg={theme.textMuted} width={9} />
-                <text content="Watchlist" fg={theme.text} />
-              </box>
-              <box flexDirection="row">
-                <text content="  U      " fg={theme.textMuted} width={9} />
-                <text content="Account stats" fg={theme.text} />
-              </box>
+
+            {/* Column 2 — Panels */}
+            <box flexDirection="column" width={30}>
+              <text content="PANELS" fg={theme.accent} />
+              <box flexDirection="row"><text content=" W        " fg={theme.textMuted} width={11} /><text content="Wallet" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" O        " fg={theme.textMuted} width={11} /><text content="Buy order" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" S        " fg={theme.textMuted} width={11} /><text content="Sell order" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" H        " fg={theme.textMuted} width={11} /><text content="Order history" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" P        " fg={theme.textMuted} width={11} /><text content="Portfolio" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" Z        " fg={theme.textMuted} width={11} /><text content="Price alerts" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" D        " fg={theme.textMuted} width={11} /><text content="Order book" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" I        " fg={theme.textMuted} width={11} /><text content="Indicators" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" N        " fg={theme.textMuted} width={11} /><text content="News" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" T        " fg={theme.textMuted} width={11} /><text content="Social sentiment" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" B        " fg={theme.textMuted} width={11} /><text content="Automation" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" V        " fg={theme.textMuted} width={11} /><text content="AI Skills" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" M        " fg={theme.textMuted} width={11} /><text content="Sentiment panel" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" Shift+M  " fg={theme.textMuted} width={11} /><text content="Messages" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" C        " fg={theme.textMuted} width={11} /><text content="Compare markets" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" L        " fg={theme.textMuted} width={11} /><text content="Filter panel" fg={theme.text} /></box>
             </box>
+
+            {/* Column 3 — More panels + System */}
+            <box flexDirection="column" width={30}>
+              <text content="MORE PANELS" fg={theme.accent} />
+              <box flexDirection="row"><text content=" U        " fg={theme.textMuted} width={11} /><text content="Account stats" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" Shift+U  " fg={theme.textMuted} width={11} /><text content="User profile" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" A        " fg={theme.textMuted} width={11} /><text content="Analytics" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" G        " fg={theme.textMuted} width={11} /><text content="Auth / Login" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" K        " fg={theme.textMuted} width={11} /><text content="Shortcuts panel" fg={theme.text} /></box>
+              <text content="" />
+              <text content="IN ORDER FORM" fg={theme.accent} />
+              <box flexDirection="row"><text content=" Tab      " fg={theme.textMuted} width={11} /><text content="Switch field" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" T        " fg={theme.textMuted} width={11} /><text content="Order type" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" P        " fg={theme.textMuted} width={11} /><text content="Post-only toggle" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" Enter    " fg={theme.textMuted} width={11} /><text content="Confirm order" fg={theme.text} /></box>
+              <text content="" />
+              <text content="IN ALERTS" fg={theme.accent} />
+              <box flexDirection="row"><text content=" A        " fg={theme.textMuted} width={11} /><text content="Add alert" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" D        " fg={theme.textMuted} width={11} /><text content="Delete alert" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" X        " fg={theme.textMuted} width={11} /><text content="Dismiss alert" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" H        " fg={theme.textMuted} width={11} /><text content="Toggle history" fg={theme.text} /></box>
+              <text content="" />
+              <text content="SYSTEM" fg={theme.accent} />
+              <box flexDirection="row"><text content=" E        " fg={theme.textMuted} width={11} /><text content="Settings" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" Q        " fg={theme.textMuted} width={11} /><text content="Quit" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" Esc      " fg={theme.textMuted} width={11} /><text content="Close panel" fg={theme.text} /></box>
+            </box>
+
           </box>
         </Show>
 

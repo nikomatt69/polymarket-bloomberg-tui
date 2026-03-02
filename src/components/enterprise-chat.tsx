@@ -1,6 +1,6 @@
 /**
  * EnterpriseChat — full-screen OpenCode-style AI agent overlay.
- * Activated by Enter globally, closed by double-Escape.
+ * Activated by Enter globally, closed by Escape.
  * Left pane: message history + streaming.
  * Right pane: live tool inspector + context.
  * Bottom: input bar with history hints.
@@ -8,6 +8,7 @@
 
 import { For, Show, createMemo } from "solid-js";
 import { useTheme } from "../context/theme";
+import { PanelHeader, SectionTitle, DataRow, Separator, LoadingState, PriceChange, PriceDisplay } from "./ui/panel-components";
 import {
   chatMessages,
   chatLoading,
@@ -23,6 +24,8 @@ import {
 import { getSelectedMarket, getActiveAIProvider } from "../state";
 import { ChatMessage, ToolCall } from "../state";
 import { Market } from "../types/market";
+import { positionsState } from "../hooks/usePositions";
+import { calculatePortfolioSummary } from "../api/positions";
 
 function fmtTime(d: Date): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -192,23 +195,16 @@ export function EnterpriseChat() {
       zIndex={200}
       flexDirection="column"
     >
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
-        <text content=" ◈ POLYMARKET AGENT " fg={theme.highlightText} />
-        <text content="│ " fg={theme.primaryMuted} />
-        <text content={resolvedModel()} fg={theme.highlightText} />
-        <text content=" │ " fg={theme.primaryMuted} />
-        <text content={sessionLabel()} fg={theme.primaryMuted} />
-        <text content=" │ " fg={theme.primaryMuted} />
-        <text content={tokLabel()} fg={theme.primaryMuted} />
-        <box flexGrow={1} />
-        <text content=" [ESC] close " fg={theme.primaryMuted} />
-      </box>
+      {/* Header */}
+      <PanelHeader
+        title="POLYMARKET AGENT"
+        icon="◈"
+        subtitle={`${resolvedModel()} │ ${sessionLabel()} │ ${tokLabel()}`}
+      />
 
-      {/* ── Separator ──────────────────────────────────────────── */}
-      <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
+      <Separator />
 
-      {/* ── Main two-pane area ─────────────────────────────────── */}
+      {/* Main two-pane area */}
       <box flexGrow={1} width="100%" flexDirection="row">
 
         {/* Left pane — Messages (65%) */}
@@ -219,15 +215,20 @@ export function EnterpriseChat() {
                 <box flexDirection="column" paddingLeft={2} paddingTop={2}>
                   <text content="◈ POLYMARKET AI AGENT" fg={theme.primary} />
                   <text content="" fg={theme.textMuted} />
-                  <text content="Type a message to begin. Available commands:" fg={theme.textMuted} />
-                  <text content="  /help    — show commands" fg={theme.textMuted} />
-                  <text content="  /clear   — new session" fg={theme.textMuted} />
-                  <text content="  /sessions — list history" fg={theme.textMuted} />
+                  <text content="Available commands:" fg={theme.textMuted} />
+                  <text content="  /help     show commands" fg={theme.textMuted} />
+                  <text content="  /clear    new session" fg={theme.textMuted} />
+                  <text content="  /sessions list history" fg={theme.textMuted} />
                   <text content="" fg={theme.textMuted} />
                   <text content="Example queries:" fg={theme.textMuted} />
-                  <text content="  What are the trending markets right now?" fg={theme.textMuted} />
-                  <text content="  Show me live sports markets" fg={theme.textMuted} />
-                  <text content="  Analyze the current market and suggest a trade" fg={theme.textMuted} />
+                  <text content="  What are the trending markets?" fg={theme.primary} />
+                  <text content="  Show me live sports markets" fg={theme.primary} />
+                  <text content="  Analyze current market and suggest trade" fg={theme.primary} />
+                  <text content="" fg={theme.textMuted} />
+                  <text content="Suggested quick commands:" fg={theme.textMuted} />
+                  <text content="  Summarize my portfolio risk exposure" fg={theme.accent} />
+                  <text content="  Which open positions should I close today?" fg={theme.accent} />
+                  <text content="  Find high-volume markets with big 24h moves" fg={theme.accent} />
                 </box>
               </Show>
 
@@ -239,22 +240,20 @@ export function EnterpriseChat() {
               <Show when={streamingMessage()}>
                 <box width="100%" flexDirection="column" paddingTop={1} paddingBottom={1}>
                   <box flexDirection="row" paddingLeft={1}>
-                    <text content="🤖 Agent" fg={theme.primary} />
+                    <text content="◈ Agent" fg={theme.primary} />
                     <text content="  streaming…" fg={theme.textMuted} />
                   </box>
                   <box flexDirection="column" paddingLeft={2} paddingRight={1}>
                     <For each={wrapText(streamingMessage(), 70)}>
                       {(line) => <text content={line} fg={theme.text} />}
                     </For>
-                    <text content="▋" fg={theme.primary} />
+                    <text content="▌" fg={theme.primary} />
                   </box>
                 </box>
               </Show>
 
               <Show when={chatLoading() && !streamingMessage()}>
-                <box paddingLeft={2} paddingTop={1}>
-                  <text content="🤔 Thinking…" fg={theme.textMuted} />
-                </box>
+                <LoadingState message="Thinking..." />
               </Show>
             </box>
           </scrollbox>
@@ -266,21 +265,17 @@ export function EnterpriseChat() {
         {/* Right pane — Tool Inspector + Context (35%) */}
         <box flexGrow={1} flexDirection="column">
 
-          {/* Tool Inspector header */}
-          <box height={1} backgroundColor={theme.backgroundPanel} paddingLeft={1}>
-            <text content="◈ TOOL INSPECTOR" fg={theme.accent} />
-          </box>
-
-          {/* Live streaming tools */}
-          <scrollbox height={10} width="100%">
+          {/* Tool Inspector */}
+          <SectionTitle title="Tool Inspector" icon="◈" />
+          
+          <scrollbox height={14} width="100%">
             <box width="100%" flexDirection="column" paddingTop={1}>
               <Show when={streamingTools().length === 0 && lastAssistantToolCalls().length === 0}>
                 <box paddingLeft={2}>
-                  <text content="No tools called yet" fg={theme.textMuted} />
+                  <text content="○ No tools called yet" fg={theme.textMuted} />
                 </box>
               </Show>
 
-              {/* Live streaming tool calls */}
               <For each={streamingTools()}>
                 {(t) => (
                   <ToolEntry
@@ -292,7 +287,6 @@ export function EnterpriseChat() {
                 )}
               </For>
 
-              {/* Historical completed tool calls from last assistant message */}
               <Show when={streamingTools().length === 0}>
                 <For each={lastAssistantToolCalls()}>
                   {(tc: ToolCall) => (
@@ -308,15 +302,11 @@ export function EnterpriseChat() {
             </box>
           </scrollbox>
 
-          {/* Context separator */}
-          <box height={1} backgroundColor={theme.borderSubtle} />
+          <Separator />
 
-          {/* Context panel header */}
-          <box height={1} backgroundColor={theme.backgroundPanel} paddingLeft={1}>
-            <text content="◈ CONTEXT" fg={theme.accent} />
-          </box>
+          {/* Context panel */}
+          <SectionTitle title="Context" icon="◈" />
 
-          {/* Context data */}
           <box flexGrow={1} flexDirection="column" paddingLeft={1} paddingTop={1}>
             <Show
               when={selectedMarket()}
@@ -324,75 +314,90 @@ export function EnterpriseChat() {
             >
               {(market: () => Market) => (
                 <>
-                  <box flexDirection="row">
-                    <text content="Market: " fg={theme.textMuted} />
-                    <text content={truncate(market().title, 28)} fg={theme.text} />
-                  </box>
-                  <box flexDirection="row">
+                  <DataRow label="Market" value={truncate(market().title, 32)} valueColor="text" />
+                  <box flexDirection="row" paddingLeft={1}>
                     <text content="Price:  " fg={theme.textMuted} />
-                    <text
-                      content={`${market().outcomes[0]?.price.toFixed(2) ?? "N/A"}¢`}
-                      fg={theme.accent}
-                    />
-                    <Show when={market().change24h !== 0}>
-                      <text
-                        content={`  Δ ${market().change24h >= 0 ? "+" : ""}${market().change24h.toFixed(1)}%`}
-                        fg={market().change24h >= 0 ? theme.success : theme.error}
-                      />
-                    </Show>
+                    <PriceDisplay price={market().outcomes[0]?.price || 0} showCents />
+                    <box paddingLeft={1}>
+                      <PriceChange value={market().change24h} showSign />
+                    </box>
                   </box>
-                  <box flexDirection="row">
-                    <text content="Vol 24h:" fg={theme.textMuted} />
-                    <text
-                      content={` $${(market().volume24h / 1000).toFixed(1)}k`}
-                      fg={theme.text}
-                    />
-                  </box>
+                  <DataRow label="Volume" value={`$${(market().volume24h / 1000).toFixed(1)}K`} valueColor="muted" />
+                  <DataRow label="Liquidity" value={`$${(market().liquidity / 1000).toFixed(1)}K`} valueColor="muted" />
                 </>
               )}
             </Show>
 
+            <Separator type="light" />
             <box height={1} />
 
             <box flexDirection="row">
               <text content="Wallet: " fg={theme.textMuted} />
               <Show
                 when={walletState.connected}
-                fallback={<text content="not connected" fg={theme.textMuted} />}
+                fallback={<text content="not connected" fg={theme.error} />}
               >
                 <text
                   content={walletState.address ? `${walletState.address.slice(0, 8)}…${walletState.address.slice(-4)}` : "connected"}
-                  fg={theme.accent}
+                  fg={theme.success}
                 />
               </Show>
             </box>
 
             <Show when={walletState.connected}>
-              <box flexDirection="row">
-                <text content="Balance:" fg={theme.textMuted} />
-                <text content={` $${walletState.balance?.toFixed(2) ?? "0.00"}`} fg={theme.success} />
-              </box>
+              <DataRow
+                label="Balance"
+                value={`$${walletState.balance?.toFixed(2) ?? "0.00"}`}
+                valueColor="success"
+              />
             </Show>
 
             <box height={1} />
 
-            <box flexDirection="row">
-              <text content="Markets:" fg={theme.textMuted} />
-              <text content={` ${appState.markets.length} loaded`} fg={theme.textMuted} />
-            </box>
+            <DataRow
+              label="Markets"
+              value={`${appState.markets.length} loaded`}
+              valueColor="muted"
+            />
+
+            <Show when={positionsState.positions.length > 0}>
+              <box height={1} />
+              <text content="── Portfolio ──" fg={theme.textMuted} />
+              {(() => {
+                const ps = calculatePortfolioSummary(positionsState.positions);
+                const topPos = [...positionsState.positions].sort((a, b) => Math.abs(b.cashPnl) - Math.abs(a.cashPnl))[0] ?? null;
+                return (
+                  <>
+                    <DataRow label="Value" value={`$${ps.totalValue.toFixed(2)}`} />
+                    <box flexDirection="row" gap={1}>
+                      <text content="P&L: " fg={theme.textMuted} />
+                      <text content={`${ps.totalCashPnl >= 0 ? "+" : ""}$${ps.totalCashPnl.toFixed(2)}`} fg={ps.totalCashPnl >= 0 ? theme.success : theme.error} />
+                    </box>
+                    <DataRow label="Positions" value={`${ps.positionCount}`} valueColor="muted" />
+                    <Show when={topPos !== null}>
+                      <box flexDirection="row" gap={1}>
+                        <text content="Top: " fg={theme.textMuted} />
+                        <text content={topPos!.title.slice(0, 16)} fg={theme.text} />
+                        <text content={`${topPos!.cashPnl >= 0 ? "+" : ""}$${topPos!.cashPnl.toFixed(2)}`} fg={topPos!.cashPnl >= 0 ? theme.success : theme.error} />
+                      </box>
+                    </Show>
+                  </>
+                );
+              })()}
+            </Show>
           </box>
         </box>
       </box>
 
-      {/* ── Input bar ──────────────────────────────────────────── */}
+      {/* Input bar */}
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
-        <text content=" [INPUT] > " fg={theme.accent} />
-        <text content={chatInputValue() || (chatInputFocused() ? "" : "(Enter to type)")} fg={theme.text} />
+        <text content=" > " fg={theme.accent} />
+        <text content={chatInputValue() || (chatInputFocused() ? "" : "(type message...)")} fg={theme.text} />
         <Show when={chatInputFocused() && !chatLoading()}>
-          <text content="▋" fg={theme.primary} />
+          <text content="▌" fg={theme.primary} />
         </Show>
         <box flexGrow={1} />
-        <text content=" ↑↓:history  Ctrl+L:clear  Esc:close " fg={theme.textMuted} />
+        <text content=" [↑↓]:history [Ctrl+L]:clear [Esc]:close" fg={theme.textMuted} />
       </box>
     </box>
   );

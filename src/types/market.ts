@@ -27,6 +27,7 @@ export interface Market {
   category?: string; // "politics", "economics", "crypto", etc.
   closed?: boolean;
   resolved?: boolean;
+  negRisk?: boolean; // true = NegRisk CTF Exchange
 }
 
 export interface PricePoint {
@@ -73,6 +74,7 @@ export interface WalletState {
   apiKey?: string;
   apiSecret?: string;
   apiPassphrase?: string;
+  funderAddress?: string; // Polymarket proxy wallet address (maker for orders)
   loading: boolean;
   error: string | null;
 }

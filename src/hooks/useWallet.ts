@@ -8,7 +8,10 @@ import {
   disconnectWallet,
   fetchUsdcBalance,
   fetchOrCreateApiCredentials,
+  persistFunderAddress,
   truncateAddress,
+  derivePolymarketProxyWallet,
+  derivePolymarketSafeWallet,
   InvalidPrivateKeyError,
   NetworkError,
   ConnectionTimeoutError,
@@ -49,6 +52,25 @@ function formatWalletError(err: unknown): string {
 }
 
 /**
+ * Auto-derive and set funder address using CREATE2 proxy wallet derivation.
+ * Picks the address (proxy or safe) that holds USDC; defaults to proxy if both are empty.
+ */
+async function autoSetFunderAddress(eoaAddress: string): Promise<string> {
+  const proxyAddr = derivePolymarketProxyWallet(eoaAddress);
+  const safeAddr  = derivePolymarketSafeWallet(eoaAddress);
+
+  const [proxyBal, safeBal] = await Promise.all([
+    fetchUsdcBalance(proxyAddr).catch(() => 0),
+    fetchUsdcBalance(safeAddr).catch(() => 0),
+  ]);
+
+  const resolved = safeBal > 0 && safeBal >= proxyBal ? safeAddr : proxyAddr;
+  persistFunderAddress(resolved);
+  setWalletState("funderAddress", resolved);
+  return resolved;
+}
+
+/**
  * Initialize wallet from persisted config on startup
  */
 export async function initializeWallet(): Promise<void> {
@@ -59,26 +81,38 @@ export async function initializeWallet(): Promise<void> {
   setWalletState("connected", true);
   setWalletState("loading", true);
   setWalletState("error", null);
+  if (config.funderAddress) setWalletState("funderAddress", config.funderAddress);
+
+  // Auto-derive funder address if not already set
+  if (!config.funderAddress) {
+    try {
+      await autoSetFunderAddress(config.address);
+    } catch (err) {
+      console.warn("Funder address auto-derivation failed (non-fatal):", err);
+    }
+  }
+
+  const balanceAddress = walletState.funderAddress ?? config.address;
+  try {
+    const balance = await fetchUsdcBalance(balanceAddress);
+    setWalletState("balance", balance);
+  } catch (err) {
+    console.warn("Balance fetch failed on init (non-fatal):", err);
+    setWalletState("balance", 0);
+  }
 
   try {
-    const [balance, creds] = await Promise.all([
-      fetchUsdcBalance(config.address),
-      fetchOrCreateApiCredentials(config.privateKey as `0x${string}`),
-    ]);
-
-    setWalletState("balance", balance);
+    const creds = await fetchOrCreateApiCredentials(config.privateKey as `0x${string}`);
     if (creds) {
       setWalletState("apiKey", creds.apiKey);
       setWalletState("apiSecret", creds.apiSecret);
       setWalletState("apiPassphrase", creds.apiPassphrase);
     }
   } catch (err) {
-    const errorMessage = formatWalletError(err);
-    setWalletState("error", errorMessage);
-    console.error("Wallet initialization error:", err);
-  } finally {
-    setWalletState("loading", false);
+    console.warn("API credentials fetch failed on init (non-fatal):", err);
   }
+
+  setWalletState("loading", false);
 
   fetchUserPositions();
 }
@@ -90,32 +124,56 @@ export async function connectWallet(privateKey: string): Promise<void> {
   setWalletState("loading", true);
   setWalletState("error", null);
 
+  let config;
   try {
-    const config = connectFromPrivateKey(privateKey);
-    setWalletState("address", config.address);
-    setWalletState("connected", true);
+    config = connectFromPrivateKey(privateKey);
+  } catch (err) {
+    setWalletState("error", formatWalletError(err));
+    setWalletState("connected", false);
+    setWalletState("address", null);
+    setWalletState("loading", false);
+    console.error("Wallet connection error:", err);
+    return;
+  }
 
-    const [balance, creds] = await Promise.all([
-      fetchUsdcBalance(config.address),
-      fetchOrCreateApiCredentials(config.privateKey as `0x${string}`),
-    ]);
+  // Key is valid — mark as connected immediately
+  setWalletState("address", config.address);
+  setWalletState("connected", true);
+  setWalletState("loading", false);
+  if (config.funderAddress) setWalletState("funderAddress", config.funderAddress);
 
+  // Auto-derive funder address if not already set
+  if (!config.funderAddress) {
+    try {
+      await autoSetFunderAddress(config.address);
+    } catch (err) {
+      console.warn("Funder address auto-derivation failed (non-fatal):", err);
+    }
+  }
+
+  // Balance and API creds are best-effort: failures don't disconnect the wallet
+  // Use funder/proxy address for balance (funds live there, not in EOA)
+  const balanceAddress = walletState.funderAddress ?? config.address;
+  try {
+    const balance = await fetchUsdcBalance(balanceAddress);
     setWalletState("balance", balance);
+  } catch (err) {
+    console.warn("Balance fetch failed (non-fatal):", err);
+    setWalletState("balance", 0);
+  }
+
+  try {
+    const creds = await fetchOrCreateApiCredentials(config.privateKey as `0x${string}`);
     if (creds) {
       setWalletState("apiKey", creds.apiKey);
       setWalletState("apiSecret", creds.apiSecret);
       setWalletState("apiPassphrase", creds.apiPassphrase);
     }
-    fetchUserPositions();
   } catch (err) {
-    const errorMessage = formatWalletError(err);
-    setWalletState("error", errorMessage);
-    setWalletState("connected", false);
-    setWalletState("address", null);
-    console.error("Wallet connection error:", err);
-  } finally {
-    setWalletState("loading", false);
+    console.warn("API credentials fetch failed (non-fatal):", err);
   }
+
+  fetchUserPositions();
 }
 
 /**
@@ -129,6 +187,7 @@ export function disconnectWalletHook(): void {
   setWalletState("apiKey", undefined);
   setWalletState("apiSecret", undefined);
   setWalletState("apiPassphrase", undefined);
+  setWalletState("funderAddress", undefined);
   setWalletState("error", null);
 }
 
@@ -137,14 +196,35 @@ export function disconnectWalletHook(): void {
  */
 export async function refreshWalletBalance(): Promise<void> {
   if (!walletState.address) return;
+  const balanceAddress = walletState.funderAddress ?? walletState.address;
   try {
-    const balance = await fetchUsdcBalance(walletState.address);
+    const balance = await fetchUsdcBalance(balanceAddress);
     setWalletState("balance", balance);
   } catch (err) {
     const errorMessage = formatWalletError(err);
     setWalletState("error", `Failed to refresh balance: ${errorMessage}`);
     console.error("Balance refresh error:", err);
   }
+}
+
+/**
+ * Save and apply a Polymarket proxy wallet (funder) address
+ */
+export function saveFunderAddress(address: string): void {
+  const trimmed = address.trim();
+  if (!trimmed) {
+    persistFunderAddress("");
+    setWalletState("funderAddress", undefined);
+    return;
+  }
+  // Validate basic format before saving
+  if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
+    setWalletState("error", `Invalid address format: must be 0x + 40 hex chars`);
+    return;
+  }
+  persistFunderAddress(trimmed);
+  setWalletState("funderAddress", trimmed);
+  setWalletState("error", null);
 }
 
 /**

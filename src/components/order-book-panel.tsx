@@ -8,7 +8,9 @@
 
 import { createSignal, createEffect, onCleanup, createMemo, For, Show } from "solid-js";
 import { createStore, produce } from "solid-js/store";
+import { RGBA } from "@opentui/core";
 import { useTheme } from "../context/theme";
+import { PanelHeader, SectionTitle, DataRow, Separator, StatusBadge, PriceChange, PriceDisplay } from "./ui/panel-components";
 import { appState, setOrderBookPanelOpen } from "../state";
 import { createClobWebSocket, WsStatus } from "../api/ws";
 import type { WsBookSnapshot, WsPriceChange, WsTrade } from "../api/ws";
@@ -35,6 +37,12 @@ function buildBar(fraction: number | undefined | null, width: number): string {
   if (fraction == null || isNaN(fraction)) return " ".repeat(width);
   const filled = Math.max(0, Math.round(fraction * width));
   return "█".repeat(filled);
+}
+
+function depthBarFg(fraction: number, isAsk: boolean, theme: ReturnType<typeof import("../context/theme").useTheme>["theme"]): RGBA {
+  if (fraction > 0.66) return isAsk ? theme.error : theme.success;
+  if (fraction > 0.33) return isAsk ? theme.errorMuted : theme.successMuted;
+  return theme.textMuted;
 }
 
 
@@ -115,6 +123,20 @@ export function OrderBookPanel() {
   const maxBidSize = createMemo(() => Math.max(...(book.bids ?? []).map((b) => b.size), 1));
   const maxAskSize = createMemo(() => Math.max(...(book.asks ?? []).map((a) => a.size), 1));
   const maxCumulative = createMemo(() => Math.max(totalBidDepth(), totalAskDepth(), 1));
+
+  const imbalanceRatio = createMemo(() => {
+    const bidVol = (book.bids ?? []).reduce((s, b) => s + b.size, 0);
+    const askVol = (book.asks ?? []).reduce((s, a) => s + a.size, 0);
+    const total = bidVol + askVol;
+    return total > 0 ? bidVol / total : 0.5;
+  });
+
+  const vwap = createMemo(() => {
+    const levels = [...(book.bids ?? []), ...(book.asks ?? [])];
+    const sumPV = levels.reduce((s, l) => s + l.price * l.size, 0);
+    const sumV = levels.reduce((s, l) => s + l.size, 0);
+    return sumV > 0 ? sumPV / sumV : null;
+  });
 
   // Bootstrap REST snapshot, then switch to live WebSocket deltas
   createEffect(() => {
@@ -258,6 +280,15 @@ export function OrderBookPanel() {
         </Show>
         <Show when={totalBidDepth() > 0 || totalAskDepth() > 0}>
           <text content={` Vol: ${formatSize(totalBidDepth())}/${formatSize(totalAskDepth())} `} fg={theme.textMuted} />
+          <text content=" | " fg={theme.borderSubtle} />
+        </Show>
+        <text
+          content={` Imb: ${(imbalanceRatio() * 100).toFixed(0)}% `}
+          fg={imbalanceRatio() > 0.6 ? theme.success : imbalanceRatio() < 0.4 ? theme.error : theme.textMuted}
+        />
+        <Show when={vwap() !== null}>
+          <text content=" | " fg={theme.borderSubtle} />
+          <text content={` VWAP: ${((vwap() ?? 0) * 100).toFixed(2)}¢ `} fg={theme.accent} />
         </Show>
         <box flexGrow={1} />
         <Show when={lastTrade()}>
@@ -312,22 +343,25 @@ export function OrderBookPanel() {
                     )}
                   </Show>
                   <Show when={bid()}>
-                    {(b: { price: number; size: number; total: number }) => (
-                      <>
-                        <text
-                          content={buildBar((b.size ?? 0) / maxBidSize(), BAR_WIDTH).padEnd(BAR_WIDTH + 1)}
-                          fg={theme.successMuted}
-                        />
-                        <text
-                          content={formatSize(b.size).padStart(8)}
-                          fg={theme.textMuted}
-                        />
-                        <text
-                          content={fmtPct(b.price).padStart(8)}
-                          fg={theme.success}
-                        />
-                      </>
-                    )}
+                    {(b: { price: number; size: number; total: number }) => {
+                      const frac = () => (b.size ?? 0) / maxBidSize();
+                      return (
+                        <>
+                          <text
+                            content={buildBar(frac(), BAR_WIDTH).padEnd(BAR_WIDTH + 1)}
+                            fg={depthBarFg(frac(), false, theme)}
+                          />
+                          <text
+                            content={formatSize(b.size).padStart(8)}
+                            fg={theme.textMuted}
+                          />
+                          <text
+                            content={fmtPct(b.price).padStart(8)}
+                            fg={theme.success}
+                          />
+                        </>
+                      );
+                    }}
                   </Show>
                 </box>
 
@@ -337,22 +371,25 @@ export function OrderBookPanel() {
                 {/* Ask side */}
                 <box width="50%" flexDirection="row">
                   <Show when={ask()}>
-                    {(a: { price: number; size: number; total: number }) => (
-                      <>
-                        <text
-                          content={fmtPct(a.price).padEnd(8)}
-                          fg={theme.error}
-                        />
-                        <text
-                          content={formatSize(a.size).padStart(8)}
-                          fg={theme.textMuted}
-                        />
-                        <text
-                          content={(" " + buildBar((a.size ?? 0) / maxAskSize(), BAR_WIDTH)).padEnd(BAR_WIDTH + 1)}
-                          fg={theme.errorMuted}
-                        />
-                      </>
-                    )}
+                    {(a: { price: number; size: number; total: number }) => {
+                      const frac = () => (a.size ?? 0) / maxAskSize();
+                      return (
+                        <>
+                          <text
+                            content={fmtPct(a.price).padEnd(8)}
+                            fg={theme.error}
+                          />
+                          <text
+                            content={formatSize(a.size).padStart(8)}
+                            fg={theme.textMuted}
+                          />
+                          <text
+                            content={(" " + buildBar(frac(), BAR_WIDTH)).padEnd(BAR_WIDTH + 1)}
+                            fg={depthBarFg(frac(), true, theme)}
+                          />
+                        </>
+                      );
+                    }}
                   </Show>
                   <Show when={cumAsk()}>
                     {(ca: { price: number; size: number; cumulative: number }) => (

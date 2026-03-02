@@ -36,6 +36,7 @@ import {
   setOrderFormSharesInput,
   orderFormPostOnly,
   setOrderFormPostOnly,
+  orderFormNegRisk,
   orderFormPriceInput,
   orderFormSharesInput,
   orderFormType,
@@ -73,10 +74,10 @@ import {
   getFilteredMarkets,
   highlightedIndex,
   navigateToIndex,
-
+  walletState,
 } from "./state";
 import { useMarketsFetch, useRefreshInterval, manualRefresh } from "./hooks/useMarketData";
-import { initializeWallet, connectWallet, disconnectWalletHook } from "./hooks/useWallet";
+import { initializeWallet, connectWallet, disconnectWalletHook, saveFunderAddress } from "./hooks/useWallet";
 import {
   submitOrder,
   cancelOrderById,
@@ -124,6 +125,10 @@ import {
   setSettingsThemeQuery,
   settingsThemeSearchEditing,
   setSettingsThemeSearchEditing,
+  settingsFunderEditing,
+  setSettingsFunderEditing,
+  settingsFunderInput,
+  setSettingsFunderInput,
   setSettingsPanelTab,
   setActiveAIProvider,
   removeAIProvider,
@@ -217,6 +222,7 @@ import { loadRules, saveRules } from "./automation/rules";
 import { MCPServer, registerPolymarketTools } from "./mcp/server";
 import { loadTelegramConfig, runTelegramBot } from "./telegram/bot";
 import { loadSkills, saveSkills, createCustomSkill } from "./api/skills";
+import { useRealtimeData } from "./hooks/useRealtime";
 
 function AppContent() {
   initializeState();
@@ -229,6 +235,7 @@ function AppContent() {
   loadAlerts();
   loadWatchlist();
   initializeWebSocket();
+  useRealtimeData();
 
   // Load initial automation rules
   setAutomationRules(loadRules());
@@ -375,6 +382,7 @@ function AppContent() {
             shares,
             type: orderFormType(),
             postOnly: orderFormPostOnly(),
+            negRisk: orderFormNegRisk(),
             marketTitle: market?.title,
             outcomeTitle: market?.outcomes[0]?.title,
           }).then((result) => {
@@ -433,13 +441,13 @@ function AppContent() {
       } else if (e.name === "tab") {
         const nextSection = activeSection === "open" ? "trades" : "open";
         setOrderHistorySection(nextSection);
-      } else if (e.name === "up" || e.name === "k") {
+      } else if (e.name === "up") {
         if (activeSection === "open") {
           setOrderHistorySelectedIdx((i) => Math.max(0, i - 1));
         } else {
           setOrderHistoryTradeSelectedIdx((i) => Math.max(0, i - 1));
         }
-      } else if (e.name === "down" || e.name === "j") {
+      } else if (e.name === "down") {
         if (activeSection === "open") {
           setOrderHistorySelectedIdx((i) => Math.min(Math.max(0, activeCount - 1), i + 1));
         } else {
@@ -527,7 +535,7 @@ function AppContent() {
 
     // Order book panel intercept
     if (orderBookPanelOpen()) {
-      if (e.name === "escape") {
+      if (e.name === "escape" || e.name === "d") {
         setOrderBookPanelOpen(false);
       }
       return;
@@ -535,7 +543,7 @@ function AppContent() {
 
     // Indicators panel intercept
     if (indicatorsPanelOpen()) {
-      if (e.name === "escape") {
+      if (e.name === "escape" || e.name === "i") {
         setIndicatorsPanelOpen(false);
       } else if (e.name === "1") {
         setSelectedIndicator("sma");
@@ -563,7 +571,7 @@ function AppContent() {
 
     // Sentiment panel intercept
     if (sentimentPanelOpen()) {
-      if (e.name === "escape") {
+      if (e.name === "escape" || e.name === "m") {
         setSentimentPanelOpen(false);
       } else if (e.name === "r") {
         const market = getSelectedMarket();
@@ -578,9 +586,9 @@ function AppContent() {
         if (e.name === "escape") {
           setComparisonSelectMode(false);
           setComparisonPanelOpen(false);
-        } else if (e.name === "up" || e.name === "k") {
+        } else if (e.name === "up") {
           navigatePrev();
-        } else if (e.name === "down" || e.name === "j") {
+        } else if (e.name === "down") {
           navigateNext();
         } else if (e.name === "return") {
           const markets = getFilteredMarkets();
@@ -603,7 +611,7 @@ function AppContent() {
 
     // Watchlist panel intercept
     if (watchlistPanelOpen()) {
-      if (e.name === "escape") {
+      if (e.name === "escape" || e.name === "L") {
         setWatchlistPanelOpen(false);
       }
       return;
@@ -619,7 +627,7 @@ function AppContent() {
 
     // Account stats panel intercept
     if (accountStatsOpen()) {
-      if (e.name === "escape") {
+      if (e.name === "escape" || e.name === "u") {
         setAccountStatsOpen(false);
       }
       return;
@@ -628,7 +636,7 @@ function AppContent() {
     // Settings panel intercept
     if (settingsPanelOpen()) {
       const TABS = ["theme", "providers", "account", "display", "keys"] as const;
-      if (e.name === "escape") {
+      if (e.name === "escape" || e.name === "e") {
         setSettingsPanelOpen(false);
         setSettingsThemeSearchEditing(false);
       } else if (e.name === "tab" || e.name === "right") {
@@ -659,14 +667,14 @@ function AppContent() {
 
         if (e.name === "return" || e.name === "t") {
           toggleMode();
-        } else if (e.name === "n" || e.name === "j" || e.name === "down") {
+        } else if (e.name === "n" || e.name === "down") {
           const names = getThemeCycleList();
           if (names.length > 0) {
             const idx = names.indexOf(themeCtx.themeName);
             const currentIdx = idx >= 0 ? idx : 0;
             setTheme(names[(currentIdx + 1) % names.length]!);
           }
-        } else if (e.name === "p" || e.name === "k" || e.name === "up") {
+        } else if (e.name === "p" || e.name === "up") {
           const names = getThemeCycleList();
           if (names.length > 0) {
             const idx = names.indexOf(themeCtx.themeName);
@@ -684,9 +692,20 @@ function AppContent() {
         // Providers tab uses direct input fields and mouse actions.
         // Keep key handling neutral here so typing API keys/model ids never triggers shortcuts.
       } else if (settingsPanelTab() === "account") {
+        if (settingsFunderEditing()) {
+          if (e.name === "escape") {
+            setSettingsFunderEditing(false);
+          } else if (e.name === "return") {
+            saveFunderAddress(settingsFunderInput());
+            setSettingsFunderEditing(false);
+          }
+          // chars + backspace handled by <input onInput> natively
+          return;
+        }
         if (e.name === "d") disconnectWalletHook();
         else if (e.name === "r") void refreshWalletBalance();
         else if (e.name === "w") { setSettingsPanelOpen(false); setWalletModalOpen(true); }
+        else if (e.name === "f") { setSettingsFunderEditing(true); setSettingsFunderInput(walletState.funderAddress ?? ""); }
         else if (e.name === "l" && authState.isAuthenticated) {
           const auth = require("./auth/auth") as typeof import("./auth/auth");
           auth.logoutUser();
@@ -713,7 +732,7 @@ function AppContent() {
 
     // Analytics panel intercept
     if (analyticsPanelOpen()) {
-      if (e.name === "escape") {
+      if (e.name === "escape" || e.name === "a" || e.name === "A") {
         setAnalyticsPanelOpen(false);
       } else if (e.name === "1") {
         // handled in component
@@ -878,13 +897,13 @@ function AppContent() {
           const visible = alertsState.alerts.filter((a) => a.status !== "dismissed");
           const alert = visible[alertsState.selectedIdx];
           if (alert) dismissAlert(alert.id);
-        } else if (e.name === "up" || e.name === "k") {
+        } else if (e.name === "up") {
           if (alertsState.showHistory) {
             setAlertsState("historyIdx", Math.max(0, alertsState.historyIdx - 1));
           } else {
             setAlertsState("selectedIdx", Math.max(0, alertsState.selectedIdx - 1));
           }
-        } else if (e.name === "down" || e.name === "j") {
+        } else if (e.name === "down") {
           if (alertsState.showHistory) {
             const maxIdx = Math.max(0, alertsState.alertHistory.length - 1);
             setAlertsState("historyIdx", Math.min(maxIdx, alertsState.historyIdx + 1));
@@ -1274,6 +1293,12 @@ function AppContent() {
       case "down":
         navigateNext();
         break;
+      case "left":
+        setPortfolioOpen(false);
+        break;
+      case "right":
+        setPortfolioOpen(true);
+        break;
       case "r":
         manualRefresh();
         break;
@@ -1290,7 +1315,10 @@ function AppContent() {
         // p — toggle portfolio panel
         const nextOpen = !portfolioOpen();
         setPortfolioOpen(nextOpen);
-        if (nextOpen) fetchUserPositions();
+        if (nextOpen) {
+          fetchUserPositions();
+          refreshOrders();
+        }
         break;
       }
       case "o": {
@@ -1402,17 +1430,13 @@ function AppContent() {
         // m — toggle sentiment analysis panel
         setSentimentPanelOpen(!sentimentPanelOpen());
         break;
-      case "M":
-        // Shift+M — toggle messages panel
-        setMessagesPanelOpen(!messagesPanelOpen());
-        break;
       case "c":
         // c — open comparison panel in select mode
         setComparisonPanelOpen(true);
         setComparisonSelectMode(true);
         break;
-      case "l":
-        // l — toggle watchlist panel
+      case "L":
+        // Shift+L — toggle watchlist panel
         setWatchlistPanelOpen(!watchlistPanelOpen());
         break;
       case "u": {
@@ -1463,9 +1487,6 @@ function AppContent() {
         setTimeframe("1M");
         break;
       case "7":
-        setTimeframe("all");
-        break;
-      case "a":
         setTimeframe("all");
         break;
       case "e":

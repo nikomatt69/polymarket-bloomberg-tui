@@ -4,7 +4,7 @@
  * Base: https://clob.polymarket.com
  */
 
-import { createWalletClient, http } from "viem";
+import { createWalletClient, http, getAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
 import {
@@ -310,6 +310,15 @@ async function createL2Headers(
   };
 }
 
+const CTF_EXCHANGE = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E";
+const NEG_RISK_CTF_EXCHANGE = "0xC5d563A36AE78145C45a50134d48A1215220f80a";
+
+// signatureType: 0 = EOA, 1 = POLY_PROXY, 2 = POLY_GNOSIS_SAFE
+function resolveSignatureType(eoaAddress: string, funderAddress: string | undefined): number {
+  if (!funderAddress || funderAddress.toLowerCase() === eoaAddress.toLowerCase()) return 0;
+  return 2; // POLY_GNOSIS_SAFE — most common for Polymarket proxy wallets
+}
+
 async function buildSignedOrder(
   privateKey: `0x${string}`,
   tokenId: string,
@@ -317,9 +326,14 @@ async function buildSignedOrder(
   price: number,
   shares: number,
   orderType: "GTC" | "FOK" | "GTD",
+  funderAddress?: string,
+  negRisk?: boolean,
 ): Promise<ClobSignedOrder> {
   const account = privateKeyToAccount(privateKey);
-  const CTF_EXCHANGE = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E";
+  const exchangeAddress = negRisk ? NEG_RISK_CTF_EXCHANGE : CTF_EXCHANGE;
+  const rawMaker = (funderAddress && funderAddress.trim()) ? funderAddress.trim() : account.address;
+  const maker = getAddress(rawMaker); // normalize to EIP-55 checksum
+  const signatureType = resolveSignatureType(account.address, funderAddress);
 
   const SCALE = 1_000_000n;
   const priceScaled = BigInt(Math.round(price * 1_000_000));
@@ -336,7 +350,7 @@ async function buildSignedOrder(
     name: "Polymarket CTF Exchange",
     version: "1",
     chainId: 137,
-    verifyingContract: CTF_EXCHANGE as `0x${string}`,
+    verifyingContract: exchangeAddress as `0x${string}`,
   };
 
   const types = {
@@ -358,7 +372,7 @@ async function buildSignedOrder(
 
   const message = {
     salt: BigInt(salt),
-    maker: account.address,
+    maker: maker as `0x${string}`,
     signer: account.address,
     taker: "0x0000000000000000000000000000000000000000" as `0x${string}`,
     tokenId: BigInt(tokenId),
@@ -368,7 +382,7 @@ async function buildSignedOrder(
     nonce: 0n,
     feeRateBps: 0n,
     side: side === "BUY" ? 0n : 1n,
-    signatureType: 0n,
+    signatureType: BigInt(signatureType),
   };
 
   const walletClient = createWalletClient({
@@ -386,7 +400,7 @@ async function buildSignedOrder(
 
   return {
     salt,
-    maker: account.address,
+    maker,
     signer: account.address,
     taker: "0x0000000000000000000000000000000000000000",
     tokenId,
@@ -396,7 +410,7 @@ async function buildSignedOrder(
     nonce: "0",
     feeRateBps: "0",
     side,
-    signatureType: 0,
+    signatureType,
     signature,
   };
 }
@@ -408,6 +422,8 @@ async function buildSignedOrder(
 export async function placeOrder(order: Order): Promise<PlacedOrder> {
   await ensureTradingAllowed();
   const { privateKey, creds } = await getAuthContext();
+  const config = loadWalletConfig();
+  const funderAddress = config?.funderAddress;
   const signedOrder = await buildSignedOrder(
     privateKey,
     order.tokenId,
@@ -415,6 +431,8 @@ export async function placeOrder(order: Order): Promise<PlacedOrder> {
     order.price,
     order.shares,
     order.type,
+    funderAddress,
+    order.negRisk,
   );
 
   const payload: ClobOrderPayload = {
@@ -617,7 +635,9 @@ export async function fetchOpenOrders(): Promise<PlacedOrder[]> {
 export async function fetchTradeHistory(): Promise<PlacedOrder[]> {
   try {
     const { privateKey, creds } = await getAuthContext();
-    const makerAddress = privateKeyToAccount(privateKey).address;
+    const config = loadWalletConfig();
+    // Trades are recorded against the funder/proxy wallet, not the EOA signer
+    const makerAddress = config?.funderAddress ?? privateKeyToAccount(privateKey).address;
     const requestPath = `/trades?maker_address=${encodeURIComponent(makerAddress)}`;
     const headers = await createL2Headers(privateKey, creds, "GET", requestPath);
 

@@ -7,6 +7,9 @@ import { For, Show } from "solid-js";
 import { useTheme } from "../context/theme";
 import { alertsState, setAlertsState, deleteAlert, dismissAlert, toggleSound, AlertHistoryEntry } from "../hooks/useAlerts";
 import { PriceAlert, AlertMetric } from "../types/alerts";
+import { PanelHeader, SectionTitle, DataRow, Separator, StatusBadge } from "./ui/panel-components";
+import { sparkline } from "../utils/charts";
+import { appState } from "../state";
 
 function fmtTime(ts: number): string {
   return new Date(ts).toLocaleString("en-US", {
@@ -57,6 +60,33 @@ function formatAlertConfig(alert: Pick<PriceAlert, "cooldownMinutes" | "debounce
   return `CD:${alert.cooldownMinutes}m DB:${alert.debouncePasses}x`;
 }
 
+function getDistanceToThreshold(alert: PriceAlert): string {
+  const market = appState.markets.find(m => m.id === alert.marketId);
+  if (!market) return "  N/A ";
+  let currentValue = 0;
+  switch (alert.metric) {
+    case "price": {
+      const outcome = market.outcomes.find(o => o.id === alert.outcomeId) ?? market.outcomes[0];
+      currentValue = outcome?.price ?? 0;
+      break;
+    }
+    case "change24h": currentValue = market.change24h; break;
+    case "volume24h": currentValue = market.volume24h; break;
+    case "liquidity": currentValue = market.liquidity; break;
+    default: return "  N/A ";
+  }
+  const dist = ((currentValue - alert.threshold) / Math.abs(alert.threshold || 1)) * 100;
+  const sign = dist >= 0 ? "+" : "";
+  return `${sign}${dist.toFixed(1)}%`.padStart(7);
+}
+
+function getAlertSparkline(alert: PriceAlert): string {
+  const market = appState.markets.find(m => m.id === alert.marketId);
+  if (!market || !market.outcomes || market.outcomes.length === 0) return "──────";
+  const prices = market.outcomes.map(o => o.price);
+  return sparkline(prices, 6);
+}
+
 function conditionLabel(condition: string): string {
   switch (condition) {
     case "crossesAbove": return "X> ";
@@ -95,18 +125,20 @@ export function AlertsPanel() {
       zIndex={160}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.warning} flexDirection="row">
-        <text content=" ◈ PRICE ALERTS " fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <box onMouseDown={() => toggleSound()}>
-          <text content={alertsState.soundEnabled ? " [SOUND ON] " : " [SOUND OFF] "} fg={alertsState.soundEnabled ? theme.success : theme.error} />
+      <PanelHeader
+        title="PRICE ALERTS"
+        icon="◈"
+        subtitle={`${visibleAlerts().length} active`}
+        onClose={handleClose}
+      />
+
+      {/* Sub-header with controls */}
+      <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
+        <box onMouseDown={() => toggleSound()} paddingLeft={2}>
+          <text content={alertsState.soundEnabled ? "[SOUND ON]" : "[SOUND OFF]"} fg={alertsState.soundEnabled ? theme.success : theme.error} />
         </box>
-        <box onMouseDown={() => setAlertsState("showHistory", !alertsState.showHistory)}>
-          <text content={alertsState.showHistory ? " [HISTORY] " : " [ALERTS] "} fg={theme.highlightText} />
-        </box>
-        <text content={` ${visibleAlerts().length} active `} fg={theme.highlightText} />
-        <box onMouseDown={handleClose}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
+        <box onMouseDown={() => setAlertsState("showHistory", !alertsState.showHistory)} paddingLeft={2}>
+          <text content={alertsState.showHistory ? "[HISTORY]" : "[ALERTS]"} fg={theme.accent} />
         </box>
       </box>
 
@@ -122,7 +154,8 @@ export function AlertsPanel() {
           <text content="METRIC " fg={theme.textMuted} width={8} />
           <text content="COND  " fg={theme.textMuted} width={7} />
           <text content="THRESHOLD   " fg={theme.textMuted} width={12} />
-          <text content="CONFIG      " fg={theme.textMuted} width={12} />
+          <text content="DIST    " fg={theme.textMuted} width={8} />
+          <text content="SPARK  " fg={theme.textMuted} width={7} />
           <text content="STATUS    " fg={theme.textMuted} width={11} />
           <text content="MARKET / OUTCOME" fg={theme.textMuted} />
         </box>
@@ -160,9 +193,14 @@ export function AlertsPanel() {
                       width={12}
                     />
                     <text
-                      content={formatAlertConfig(alert).padEnd(11, " ")}
+                      content={getDistanceToThreshold(alert).padEnd(7, " ")}
+                      fg={isSelected() ? theme.highlightText : theme.accent}
+                      width={8}
+                    />
+                    <text
+                      content={getAlertSparkline(alert).padEnd(6, " ")}
                       fg={isSelected() ? theme.highlightText : theme.textMuted}
-                      width={12}
+                      width={7}
                     />
                     <text
                       content={alert.status.padEnd(10, " ")}

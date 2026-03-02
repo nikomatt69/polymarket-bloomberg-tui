@@ -153,8 +153,11 @@ export async function fetchUserPositions(): Promise<void> {
   setPositionsState("loading", true);
   setPositionsState("error", null);
 
+  // Positions are held by the proxy/funder wallet, not the EOA
+  const lookupAddress = walletState.funderAddress ?? walletState.address;
+
   try {
-    const positions = await fetchPositions(walletState.address);
+    const positions = await fetchPositions(lookupAddress);
     const analytics = calculatePositionsAnalytics(positions);
     
     setPositionsState(produce((state) => {

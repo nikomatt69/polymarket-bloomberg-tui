@@ -4,7 +4,18 @@
  */
 
 import { useTheme } from "../context/theme";
+import { PanelHeader, SectionTitle, Separator } from "./ui/panel-components";
 import { setShortcutsPanelOpen } from "../state";
+
+function ShortcutRow(props: { keys: string; description: string }) {
+  const { theme } = useTheme();
+  return (
+    <box flexDirection="row">
+      <text content={props.keys} fg={theme.accent} width={12} />
+      <text content={props.description} fg={theme.text} />
+    </box>
+  );
+}
 
 export function ShortcutsPanel() {
   const { theme } = useTheme();
@@ -23,198 +34,88 @@ export function ShortcutsPanel() {
       zIndex={165}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
-        <text content=" ◈ KEYBOARD SHORTCUTS " fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <box onMouseDown={handleClose}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
-        </box>
-      </box>
+      <PanelHeader
+        title="KEYBOARD SHORTCUTS"
+        icon="◈"
+        onClose={handleClose}
+      />
 
-      {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.primaryMuted} />
+      <Separator type="heavy" />
 
       {/* Content */}
-      <box flexDirection="row" flexGrow={1} paddingLeft={2} paddingTop={1} paddingRight={2}>
-        {/* Left column */}
-        <box flexDirection="column" width={40}>
-          <text content="NAVIGATION" fg={theme.primary} />
-          <box flexDirection="row">
-            <text content="  ↑ / ↓  " fg={theme.textMuted} width={10} />
-            <text content="Navigate markets" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  Enter  " fg={theme.textMuted} width={10} />
-            <text content="Select market" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  Ctrl+K " fg={theme.textMuted} width={10} />
-            <text content="Cycle sort" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  R      " fg={theme.textMuted} width={10} />
-            <text content="Refresh data" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  1/5/7/A" fg={theme.textMuted} width={10} />
-            <text content="Timeframe" fg={theme.text} />
-          </box>
-          <text content="" />
-          <text content="MARKET" fg={theme.primary} />
-          <box flexDirection="row">
-            <text content="  X      " fg={theme.textMuted} width={10} />
-            <text content="Toggle watchlist" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  F      " fg={theme.textMuted} width={10} />
-            <text content="Toggle filter" fg={theme.text} />
-          </box>
-          <text content="" />
-          <text content="SYSTEM" fg={theme.primary} />
-          <box flexDirection="row">
-            <text content="  E      " fg={theme.textMuted} width={10} />
-            <text content="Settings" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  K      " fg={theme.textMuted} width={10} />
-            <text content="Shortcuts panel" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  Q      " fg={theme.textMuted} width={10} />
-            <text content="Quit" fg={theme.text} />
-          </box>
+      <box flexDirection="row" flexGrow={1} paddingTop={1} paddingRight={2}>
+        {/* Column 1: Navigation & Market */}
+        <box flexDirection="column" width={38} paddingLeft={2}>
+          <SectionTitle title="Navigation" icon="◈" />
+          <ShortcutRow keys="↑ / ↓   " description="Navigate markets" />
+          <ShortcutRow keys="Enter    " description="AI Chat" />
+          <ShortcutRow keys="Ctrl+K  " description="Cycle sort" />
+          <ShortcutRow keys="R        " description="Refresh data" />
+          <ShortcutRow keys="1-7      " description="Timeframe (1h→all)" />
+          <ShortcutRow keys="/        " description="Search" />
+          <box height={1} />
+          <SectionTitle title="Market" icon="◈" />
+          <ShortcutRow keys="X        " description="Toggle watchlist" />
+          <ShortcutRow keys="F        " description="Watchlist filter" />
+          <ShortcutRow keys="L        " description="Filter panel" />
+          <ShortcutRow keys="Shift+L  " description="Watchlist panel" />
         </box>
 
-        {/* Spacer */}
-        <box width={2} />
-
-        {/* Middle column */}
-        <box flexDirection="column" width={40}>
-          <text content="PANELS" fg={theme.primary} />
-          <box flexDirection="row">
-            <text content="  W      " fg={theme.textMuted} width={10} />
-            <text content="Wallet" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  O      " fg={theme.textMuted} width={10} />
-            <text content="Buy order" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  S      " fg={theme.textMuted} width={10} />
-            <text content="Sell order" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  H      " fg={theme.textMuted} width={10} />
-            <text content="Order history" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  P      " fg={theme.textMuted} width={10} />
-            <text content="Portfolio" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  Z      " fg={theme.textMuted} width={10} />
-            <text content="Price alerts" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  I      " fg={theme.textMuted} width={10} />
-            <text content="Indicators" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  M      " fg={theme.textMuted} width={10} />
-            <text content="Sentiment" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  C      " fg={theme.textMuted} width={10} />
-            <text content="Compare" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  L      " fg={theme.textMuted} width={10} />
-            <text content="Watchlist" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  U      " fg={theme.textMuted} width={10} />
-            <text content="Account stats" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  D      " fg={theme.textMuted} width={10} />
-            <text content="Live order book" fg={theme.text} />
-          </box>
+        {/* Column 2: Trading Panels */}
+        <box flexDirection="column" width={38} paddingLeft={1}>
+          <SectionTitle title="Trading" icon="◈" />
+          <ShortcutRow keys="W        " description="Wallet" />
+          <ShortcutRow keys="O        " description="Buy order" />
+          <ShortcutRow keys="S        " description="Sell order" />
+          <ShortcutRow keys="H        " description="Order history" />
+          <ShortcutRow keys="P        " description="Portfolio" />
+          <ShortcutRow keys="U        " description="Account stats" />
+          <ShortcutRow keys="Z        " description="Price alerts" />
+          <box height={1} />
+          <SectionTitle title="Data" icon="◈" />
+          <ShortcutRow keys="D        " description="Live order book" />
+          <ShortcutRow keys="I        " description="Indicators" />
+          <ShortcutRow keys="M        " description="Sentiment" />
+          <ShortcutRow keys="C        " description="Compare" />
         </box>
 
-        {/* Spacer */}
-        <box width={2} />
+        {/* Column 3: Info Panels */}
+        <box flexDirection="column" width={38} paddingLeft={1}>
+          <SectionTitle title="Info Panels" icon="◈" />
+          <ShortcutRow keys="A        " description="Analytics" />
+          <ShortcutRow keys="N        " description="News" />
+          <ShortcutRow keys="T        " description="Social" />
+          <ShortcutRow keys="B        " description="Automation" />
+          <ShortcutRow keys="V        " description="Skills" />
+          <ShortcutRow keys="Shift+M  " description="Messages" />
+          <ShortcutRow keys="Shift+U  " description="User profile" />
+          <ShortcutRow keys="G        " description="Auth / Login" />
+        </box>
 
-        {/* Right column - Order History */}
-        <box flexDirection="column" width={40}>
-          <text content="ORDER HISTORY" fg={theme.primary} />
-          <box flexDirection="row">
-            <text content="  Tab   " fg={theme.textMuted} width={10} />
-            <text content="Open/Trades" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  ↑/↓   " fg={theme.textMuted} width={10} />
-            <text content="Navigate" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  C     " fg={theme.textMuted} width={10} />
-            <text content="Cancel order" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  A     " fg={theme.textMuted} width={10} />
-            <text content="Cancel all" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  Y     " fg={theme.textMuted} width={10} />
-            <text content="Cancel selected" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  V     " fg={theme.textMuted} width={10} />
-            <text content="Status filter" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  B     " fg={theme.textMuted} width={10} />
-            <text content="Side filter" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  G     " fg={theme.textMuted} width={10} />
-            <text content="Time window" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  M     " fg={theme.textMuted} width={10} />
-            <text content="Market filter" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  /     " fg={theme.textMuted} width={10} />
-            <text content="Search" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  D     " fg={theme.textMuted} width={10} />
-            <text content="Replay order" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  E     " fg={theme.textMuted} width={10} />
-            <text content="Export CSV" fg={theme.text} />
-          </box>
-          <text content="" />
-          <text content="INDICATORS" fg={theme.primary} />
-          <box flexDirection="row">
-            <text content="  1-4   " fg={theme.textMuted} width={10} />
-            <text content="Select indicator" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  +/-    " fg={theme.textMuted} width={10} />
-            <text content="Period +/-" fg={theme.text} />
-          </box>
-          <box flexDirection="row">
-            <text content="  R     " fg={theme.textMuted} width={10} />
-            <text content="Refresh" fg={theme.text} />
-          </box>
+        {/* Column 4: System & Order History */}
+        <box flexDirection="column" width={38} paddingLeft={1}>
+          <SectionTitle title="System" icon="◈" />
+          <ShortcutRow keys="E        " description="Settings" />
+          <ShortcutRow keys="K        " description="Shortcuts panel" />
+          <ShortcutRow keys="Q        " description="Quit" />
+          <box height={1} />
+          <SectionTitle title="In Order History" icon="◈" />
+          <ShortcutRow keys="Tab      " description="Open/Trades" />
+          <ShortcutRow keys="C        " description="Cancel selected" />
+          <ShortcutRow keys="A        " description="Cancel all" />
+          <ShortcutRow keys="Y        " description="Cancel market" />
+          <ShortcutRow keys="V        " description="Status filter" />
+          <ShortcutRow keys="B        " description="Side filter" />
+          <ShortcutRow keys="G        " description="Time window" />
+          <ShortcutRow keys="E        " description="Export CSV" />
+          <ShortcutRow keys="D        " description="Duplicate order" />
         </box>
       </box>
 
       {/* Footer */}
+      <Separator type="light" />
       <box height={1} paddingLeft={2}>
-        <text content="[ESC] Close    [K] Toggle    [Ctrl+K] Cycle sort" fg={theme.textMuted} />
+        <text content="[ESC/K] Close    [Ctrl+K] Cycle sort    [Enter] AI Chat    [Q] Quit" fg={theme.textMuted} />
       </box>
     </box>
   );

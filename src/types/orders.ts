@@ -16,6 +16,7 @@ export interface Order {
   marketId?: string;     // gamma market ID for display
   outcomeTitle?: string;
   marketTitle?: string;
+  negRisk?: boolean;     // true = use NegRisk CTF Exchange
 }
 
 export interface PlacedOrder {

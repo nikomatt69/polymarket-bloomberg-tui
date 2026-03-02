@@ -2,9 +2,11 @@ import { For, Show, createMemo } from "solid-js";
 import { positionsState } from "../hooks/usePositions";
 import { ordersState } from "../hooks/useOrders";
 import { calculatePortfolioSummary } from "../api/positions";
-import { walletState } from "../state";
-import { calculateMonthlyStats, calculateTradeStats, calculateMarketConcentration } from "../utils/analytics";
+import { walletState, appState } from "../state";
+import { calculateMonthlyStats, calculateTradeStats, calculateMarketConcentration, calculateSharpeRatio, calculateMaxDrawdown, calculatePnLTimeSeries, calculatePositionRisk } from "../utils/analytics";
+import { sparkline } from "../utils/charts";
 import { useTheme } from "../context/theme";
+import { PanelHeader, SectionTitle, DataRow, Separator, StatusBadge, PriceChange, ProgressBar } from "./ui/panel-components";
 
 function truncate(str: string, len: number): string {
   return str.length > len ? str.slice(0, len - 1) + "…" : str.padEnd(len, " ");
@@ -177,14 +179,39 @@ export function PortfolioPanel() {
     return calculateTradeStats(filledOrders, positionsState.positions);
   });
 
+  const pnlTimeSeries = createMemo(() =>
+    calculatePnLTimeSeries(ordersState.tradeHistory, positionsState.positions)
+  );
+
+  const sharpeRatio = createMemo(() =>
+    calculateSharpeRatio(pnlTimeSeries().map(e => e.pnl))
+  );
+
+  const maxDrawdown = createMemo(() =>
+    calculateMaxDrawdown(pnlTimeSeries().map(e => e.value))
+  );
+
+  const equitySparkline = createMemo(() =>
+    sparkline(pnlTimeSeries().map(e => e.value), 14)
+  );
+
+  const positionRisks = createMemo(() =>
+    calculatePositionRisk(
+      positionsState.positions,
+      appState.markets.map(m => ({ id: m.id, volume: m.volume, prices: m.outcomes.map(o => o.price) }))
+    )
+  );
+
   return (
     <box flexDirection="column" width="100%" flexGrow={1} padding={1}>
       {/* Header */}
-      <box flexDirection="row" width="100%" justifyContent="space-between">
-        <text content="PORTFOLIO" fg={theme.primary} />
-        <text content={`Updated: ${lastFetchStr()}`} fg={theme.textMuted} />
-      </box>
+      <PanelHeader
+        title="PORTFOLIO"
+        icon="◈"
+        subtitle={`Updated: ${lastFetchStr()}`}
+      />
 
+      <Separator type="light" />
       <text content="" />
 
       <Show
@@ -220,12 +247,22 @@ export function PortfolioPanel() {
                 <text content={`Positions: ${summary().positionCount}`} fg={theme.textMuted} />
               </box>
 
+              {/* Summary row 2: Sharpe / MaxDD / PF / equity sparkline */}
+              <box flexDirection="row" width="100%" gap={2}>
+                <text content={`Sharpe: ${Number.isFinite(sharpeRatio()) ? sharpeRatio().toFixed(2) : "N/A"}`} fg={sharpeRatio() >= 1 ? theme.success : sharpeRatio() >= 0 ? theme.warning : theme.error} />
+                <text content={`MaxDD: ${maxDrawdown().toFixed(1)}%`} fg={maxDrawdown() > 20 ? theme.error : maxDrawdown() > 10 ? theme.warning : theme.success} />
+                <text content={`PF: ${tradeStats().profitFactor === Infinity ? "∞" : tradeStats().profitFactor.toFixed(2)}`} fg={theme.textMuted} />
+                <Show when={equitySparkline().length > 0}>
+                  <text content={equitySparkline()} fg={summary().totalCashPnl >= 0 ? theme.success : theme.error} />
+                </Show>
+              </box>
+
               {/* Risk Metrics Summary */}
               <box flexDirection="row" width="100%" gap={2}>
                 <text content={`Exposure: ${fmtExposure(positionsState.positions.reduce((s, p) => s + p.size, 0), 1)}`} fg={theme.textMuted} />
-                <text content={`Weighted Avg Entry: ${fmtPrice(analytics().weightedAvgEntry)}`} fg={theme.textMuted} />
-                <text 
-                  content={`Risk: ${concentrationRisk().riskLevel.toUpperCase()}`} 
+                <text content={`Avg Entry: ${fmtPrice(analytics().weightedAvgEntry)}`} fg={theme.textMuted} />
+                <text
+                  content={`Risk: ${concentrationRisk().riskLevel.toUpperCase()}`}
                   fg={concentrationRisk().riskLevel === "high" ? theme.error : concentrationRisk().riskLevel === "medium" ? theme.warning : theme.success}
                 />
               </box>
@@ -234,15 +271,15 @@ export function PortfolioPanel() {
 
               {/* Column headers */}
               <box flexDirection="row" width="100%">
-                <text content="MARKET" fg={theme.textMuted} width={28} />
+                <text content="MARKET" fg={theme.textMuted} width={24} />
                 <text content="OUT" fg={theme.textMuted} width={5} />
-                <text content="SHARES" fg={theme.textMuted} width={8} />
+                <text content="SHR" fg={theme.textMuted} width={7} />
                 <text content="ENTRY" fg={theme.textMuted} width={7} />
                 <text content="CUR" fg={theme.textMuted} width={7} />
-                <text content="EXP" fg={theme.textMuted} width={7} />
                 <text content="P&L $" fg={theme.textMuted} width={9} />
                 <text content="ROI" fg={theme.textMuted} width={7} />
-                <text content="LEV" fg={theme.textMuted} width={5} />
+                <text content="RSK" fg={theme.textMuted} width={5} />
+                <text content="TREND" fg={theme.textMuted} width={8} />
               </box>
 
               <Show
@@ -255,31 +292,42 @@ export function PortfolioPanel() {
               >
                 <scrollbox flexGrow={1} width="100%">
                   <For each={positionsState.positions}>
-                    {(position) => (
-                      <box flexDirection="row" width="100%">
-                        <text content={truncate(position.title, 27)} fg={theme.text} width={28} />
-                        <text content={position.outcome.slice(0, 4).padEnd(4, " ")} fg={theme.accent} width={5} />
-                        <text content={position.size.toFixed(1).padStart(7, " ")} fg={theme.text} width={8} />
-                        <text content={fmtPrice(position.avgPrice).padStart(6, " ")} fg={theme.textMuted} width={7} />
-                        <text content={fmtPrice(position.curPrice).padStart(6, " ")} fg={theme.text} width={7} />
-                        <text content={fmtExposure(position.size, position.curPrice).padStart(6, " ")} fg={theme.textMuted} width={7} />
-                        <text
-                          content={fmtUsd(position.cashPnl).padStart(8, " ")}
-                          fg={position.cashPnl >= 0 ? theme.success : theme.error}
-                          width={9}
-                        />
-                        <text
-                          content={fmtPct(position.percentPnl).padStart(6, " ")}
-                          fg={position.percentPnl >= 0 ? theme.success : theme.error}
-                          width={7}
-                        />
-                        <text
-                          content={getLeverageIndicator(position.percentPnl).padStart(4, " ")}
-                          fg={position.percentPnl > 50 ? theme.error : position.percentPnl > 20 ? theme.warning : theme.textMuted}
-                          width={5}
-                        />
-                      </box>
-                    )}
+                    {(position) => {
+                      const riskScore = () => positionRisks().find(r => r.positionId === position.asset)?.score ?? 0;
+                      const riskColor = () => riskScore() > 70 ? theme.error : riskScore() > 40 ? theme.warning : theme.success;
+                      const market = () => appState.markets.find(m => m.id === position.asset || (m as any).conditionId === position.conditionId);
+                      const trendSpark = () => {
+                        const m = market();
+                        if (!m) return "──────";
+                        return sparkline(m.outcomes.map(o => o.price), 6);
+                      };
+                      const rowBg = () => position.cashPnl > 0 ? theme.successMuted : position.cashPnl < 0 ? theme.errorMuted : undefined;
+                      return (
+                        <box flexDirection="row" width="100%" backgroundColor={rowBg()}>
+                          <text content={truncate(position.title, 23)} fg={theme.text} width={24} />
+                          <text content={position.outcome.slice(0, 4).padEnd(4, " ")} fg={theme.accent} width={5} />
+                          <text content={position.size.toFixed(1).padStart(6, " ")} fg={theme.text} width={7} />
+                          <text content={fmtPrice(position.avgPrice).padStart(6, " ")} fg={theme.textMuted} width={7} />
+                          <text content={fmtPrice(position.curPrice).padStart(6, " ")} fg={theme.text} width={7} />
+                          <text
+                            content={fmtUsd(position.cashPnl).padStart(8, " ")}
+                            fg={position.cashPnl >= 0 ? theme.success : theme.error}
+                            width={9}
+                          />
+                          <text
+                            content={fmtPct(position.percentPnl).padStart(6, " ")}
+                            fg={position.percentPnl >= 0 ? theme.success : theme.error}
+                            width={7}
+                          />
+                          <text
+                            content={riskScore().toString().padStart(4, " ")}
+                            fg={riskColor()}
+                            width={5}
+                          />
+                          <text content={trendSpark()} fg={theme.textMuted} width={8} />
+                        </box>
+                      );
+                    }}
                   </For>
                 </scrollbox>
               </Show>

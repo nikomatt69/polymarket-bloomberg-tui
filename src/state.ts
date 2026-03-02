@@ -378,6 +378,7 @@ export const [orderFormSharesInput, setOrderFormSharesInput] = createSignal("");
 export const [orderFormFocusField, setOrderFormFocusField] = createSignal<"price" | "shares">("price");
 export const [orderFormType, setOrderFormType] = createSignal<"GTC" | "FOK" | "GTD">("GTC");
 export const [orderFormPostOnly, setOrderFormPostOnly] = createSignal(false);
+export const [orderFormNegRisk, setOrderFormNegRisk] = createSignal(false);
 
 // Order history selected index for cancel
 export const [orderHistorySelectedIdx, setOrderHistorySelectedIdx] = createSignal(0);
@@ -400,6 +401,8 @@ export const [settingsPanelOpen, setSettingsPanelOpen] = createSignal(false);
 export const [settingsPanelTab, setSettingsPanelTab] = createSignal<"theme" | "providers" | "account" | "display" | "keys">("theme");
 export const [settingsThemeQuery, setSettingsThemeQuery] = createSignal("");
 export const [settingsThemeSearchEditing, setSettingsThemeSearchEditing] = createSignal(false);
+export const [settingsFunderEditing, setSettingsFunderEditing] = createSignal(false);
+export const [settingsFunderInput, setSettingsFunderInput] = createSignal("");
 
 // Search input focus state: while typing, global shortcuts must be blocked
 export const [searchInputFocused, setSearchInputFocused] = createSignal(false);
@@ -1222,6 +1225,9 @@ export interface StreamingTool {
 
 export const [enterpriseChatOpen, setEnterpriseChatOpen] = createSignal(false);
 export const [streamingMessage, setStreamingMessage] = createSignal("");
+
+// ─── Real-time WebSocket status ───────────────────────────────────────────────
+export const [realtimeConnected, setRealtimeConnected] = createSignal(false);
 export const [streamingTools, setStreamingTools] = createSignal<StreamingTool[]>([]);
 export const [inputHistory, setInputHistory] = createSignal<string[]>([]);
 export const [inputHistoryIdx, setInputHistoryIdx] = createSignal(-1);

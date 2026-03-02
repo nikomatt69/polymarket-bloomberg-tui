@@ -5,6 +5,7 @@
 
 import { For, Show, createMemo, createEffect } from "solid-js";
 import { useTheme } from "../context/theme";
+import { PanelHeader, SectionTitle, DataRow, Separator, StatusBadge } from "./ui/panel-components";
 import {
   ordersState,
   cancelOrderById,
@@ -151,6 +152,11 @@ export function OrderHistory() {
     }
   });
 
+  const totalFilled = createMemo(() => tradeHistory().reduce((s, o) => s + o.sizeMatched, 0));
+  const totalOrdered = createMemo(() => tradeHistory().reduce((s, o) => s + o.originalSize, 0));
+  const fillRate = createMemo(() => totalOrdered() > 0 ? (totalFilled() / totalOrdered()) * 100 : 0);
+  const totalUSDC = createMemo(() => tradeHistory().reduce((s, o) => s + o.price * o.sizeMatched, 0));
+
   const lastExportFile = () => {
     if (!ordersState.lastExportPath) return "none";
     const parts = ordersState.lastExportPath.split("/");
@@ -181,14 +187,12 @@ export function OrderHistory() {
       zIndex={150}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
-        <text content=" ◈ ORDER HISTORY " fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <text content={` Updated: ${lastFetchStr()} `} fg={theme.highlightText} />
-        <box onMouseDown={handleClose}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
-        </box>
-      </box>
+      <PanelHeader
+        title="ORDER HISTORY"
+        icon="◈"
+        subtitle={`Updated: ${lastFetchStr()}`}
+        onClose={handleClose}
+      />
 
       {/* Separator */}
       <box height={1} width="100%" backgroundColor={theme.primaryMuted} />
@@ -232,7 +236,8 @@ export function OrderHistory() {
             <text content="SIZE    " fg={theme.textMuted} width={8} />
             <text content="FILLED  " fg={theme.textMuted} width={8} />
             <text content="STATUS    " fg={theme.textMuted} width={10} />
-            <text content="TOKEN ID" fg={theme.textMuted} />
+            <text content="FILL% " fg={theme.textMuted} width={7} />
+            <text content="MARKET" fg={theme.textMuted} />
           </box>
 
           <scrollbox height={8} width="100%">
@@ -240,6 +245,8 @@ export function OrderHistory() {
               {(order, idx) => {
                 const isSelected = () => idx() === orderHistorySelectedIdx();
                 const isCancelling = () => ordersState.cancelling === order.orderId;
+                const orderFillPct = () => order.originalSize > 0 ? (order.sizeMatched / order.originalSize) * 100 : 0;
+                const fillColor = () => orderFillPct() >= 100 ? theme.success : orderFillPct() >= 50 ? theme.warning : theme.error;
                 return (
                   <box
                     flexDirection="row"
@@ -265,7 +272,8 @@ export function OrderHistory() {
                       fg={isCancelling() ? theme.warning : statusColor(order.status, theme)}
                       width={10}
                     />
-                    <text content={truncate(order.tokenId, 20)} fg={theme.textMuted} />
+                    <text content={`${orderFillPct().toFixed(0)}%`.padStart(6, " ")} fg={fillColor()} width={7} />
+                    <text content={truncate((order as any).marketTitle ?? order.tokenId, 20)} fg={theme.textMuted} />
                   </box>
                 );
               }}
@@ -292,7 +300,8 @@ export function OrderHistory() {
             <text content="PRICE  " fg={theme.textMuted} width={7} />
             <text content="FILLED  " fg={theme.textMuted} width={8} />
             <text content="TOTAL USDC " fg={theme.textMuted} width={11} />
-            <text content="TOKEN ID" fg={theme.textMuted} />
+            <text content="FILL% " fg={theme.textMuted} width={7} />
+            <text content="MARKET" fg={theme.textMuted} />
           </box>
 
           <scrollbox flexGrow={1} width="100%">
@@ -300,6 +309,8 @@ export function OrderHistory() {
               {(order, idx) => {
                 const totalUsdc = order.price * order.sizeMatched;
                 const isSelected = () => idx() === orderHistoryTradeSelectedIdx();
+                const orderFillPct = order.originalSize > 0 ? (order.sizeMatched / order.originalSize) * 100 : 0;
+                const fillColor = orderFillPct >= 100 ? theme.success : orderFillPct >= 50 ? theme.warning : theme.error;
                 return (
                   <box
                     flexDirection="row"
@@ -319,12 +330,20 @@ export function OrderHistory() {
                     <text content={fmtPrice(order.price).padStart(6, " ")} fg={isSelected() && orderHistorySection() === "trades" ? theme.highlightText : theme.text} width={7} />
                     <text content={order.sizeMatched.toFixed(1).padStart(7, " ")} fg={isSelected() && orderHistorySection() === "trades" ? theme.highlightText : theme.success} width={8} />
                     <text content={`$${totalUsdc.toFixed(2)}`.padStart(10, " ")} fg={isSelected() && orderHistorySection() === "trades" ? theme.highlightText : theme.text} width={11} />
-                    <text content={truncate(order.tokenId, 20)} fg={theme.textMuted} />
+                    <text content={`${orderFillPct.toFixed(0)}%`.padStart(6, " ")} fg={fillColor} width={7} />
+                    <text content={truncate((order as any).marketTitle ?? order.tokenId, 18)} fg={theme.textMuted} />
                   </box>
                 );
               }}
             </For>
           </scrollbox>
+
+          {/* Stats summary */}
+          <box flexDirection="row" width="100%" paddingTop={1} gap={3}>
+            <text content={`Trades: ${tradeHistory().length}`} fg={theme.textMuted} />
+            <text content={`Filled: $${totalUSDC().toFixed(2)}`} fg={theme.text} />
+            <text content={`FillRate: ${fillRate().toFixed(1)}%`} fg={fillRate() >= 80 ? theme.success : fillRate() >= 50 ? theme.warning : theme.error} />
+          </box>
         </Show>
 
         <text content="" />

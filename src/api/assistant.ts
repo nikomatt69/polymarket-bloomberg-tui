@@ -942,6 +942,7 @@ export async function sendMessageToAssistantStream(
     return {
       response: resolved.error,
       toolCalls: [],
+      tokensUsed: 0,
     };
   }
 

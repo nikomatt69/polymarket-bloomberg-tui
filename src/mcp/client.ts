@@ -19,7 +19,7 @@ export class MCPClient {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),
       });
-      const jsonRPCResponse: JSONRPCResponse = await response.json();
+      const jsonRPCResponse = (await response.json()) as JSONRPCResponse;
       if (jsonRPCResponse.error) {
         throw new Error(jsonRPCResponse.error.message);
       }

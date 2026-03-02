@@ -2,6 +2,7 @@ import { Show } from "solid-js";
 import { RGBA } from "@opentui/core";
 import { TopBar } from "./top-bar";
 import { SearchBar } from "./search-bar";
+import { QuickActions } from "./quick-actions";
 import { MarketList } from "./market-list";
 import { MarketDetails } from "./market-details";
 import { PortfolioPanel } from "./portfolio-panel";
@@ -13,6 +14,7 @@ import { AutomationPanel } from "./automation-panel";
 import { SkillsPanel } from "./skills-panel";
 import { EnterpriseChat } from "./enterprise-chat";
 import { useTheme } from "../context/theme";
+import { Separator } from "./ui/panel-components";
 import {
   walletModalOpen,
   portfolioOpen,
@@ -80,15 +82,16 @@ export function Layout() {
         <SearchBar />
       </box>
 
+      {/* Quick Actions Bar */}
+      <QuickActions />
+
       {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.borderSubtle}>
-        <text content="────────────────────────────────────────────────────────────────────────────────" fg={theme.border} />
-      </box>
+      <Separator type="heavy" />
 
       {/* Main Content */}
       <box flexGrow={1} width="100%" flexDirection="column">
-        {/* Upper market workspace */}
-        <box width="100%" height="70%" flexDirection="row">
+        {/* Upper market workspace - fills remaining space */}
+        <box width="100%" flexGrow={1} flexDirection="row">
           {/* Left: Market List */}
           <box width="52%" backgroundColor={theme.background}>
             <MarketList />
@@ -106,9 +109,6 @@ export function Layout() {
             </Show>
           </box>
         </box>
-
-        {/* Horizontal separator before chat */}
-
 
       </box>
 

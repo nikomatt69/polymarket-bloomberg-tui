@@ -305,7 +305,10 @@ export async function submitOrder(order: Order): Promise<PlacedOrder | null> {
 
   try {
     const result = await placeOrder(order);
+    // Optimistically prepend to open orders immediately
     setOrdersState("openOrders", (prev) => [result, ...prev]);
+    // Then fetch authoritative state from exchange (async, non-blocking)
+    void refreshOrders();
     return result;
   } catch (err) {
     setOrdersState("error", err instanceof Error ? err.message : "Order failed");

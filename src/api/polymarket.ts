@@ -98,6 +98,7 @@ export interface OrderBookSummary {
   minOrderSize: number | null;
   tickSize: number | null;
   updatedAt: number | null;
+  negRisk: boolean;
 }
 
 export interface MarketQuote {
@@ -395,6 +396,7 @@ export async function getOrderBookSummary(tokenId: string): Promise<OrderBookSum
       minOrderSize: data.min_order_size ? parseNumeric(data.min_order_size, 0) : null,
       tickSize: data.tick_size ? parseNumeric(data.tick_size, 0) : null,
       updatedAt: data.timestamp ? new Date(data.timestamp).getTime() : null,
+      negRisk: data.neg_risk === true,
     };
   } catch {
     return null;

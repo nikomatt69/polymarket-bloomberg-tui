@@ -1,4 +1,4 @@
-import { createPublicClient, http, formatUnits } from "viem";
+import { createPublicClient, http, formatUnits, getCreate2Address, encodePacked, encodeAbiParameters, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
 import { createHmac } from "crypto";
@@ -6,8 +6,39 @@ import { homedir } from "os";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
+// ─── Polymarket Proxy Wallet Derivation (from builder-relayer-client) ─────────
+
+const PROXY_FACTORY_POLYGON = "0xaB45c5A4B0c941a2F231C04C3f49182e1A254052";
+const SAFE_FACTORY_POLYGON  = "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b";
+const PROXY_INIT_CODE_HASH  = "0xd21df8dc65880a8606f09fe0ce3df9b8869287ab0b058be05aa9e8af6330a00b";
+const SAFE_INIT_CODE_HASH   = "0x2bce2127ff07fb632d16c8347c4ebf501f4841168bed00d9e6ef715ddb6fcecf";
+
+export function derivePolymarketProxyWallet(eoaAddress: string): string {
+  return getCreate2Address({
+    bytecodeHash: PROXY_INIT_CODE_HASH as `0x${string}`,
+    from: PROXY_FACTORY_POLYGON as `0x${string}`,
+    salt: keccak256(encodePacked(["address"], [eoaAddress as `0x${string}`])),
+  });
+}
+
+export function derivePolymarketSafeWallet(eoaAddress: string): string {
+  return getCreate2Address({
+    bytecodeHash: SAFE_INIT_CODE_HASH as `0x${string}`,
+    from: SAFE_FACTORY_POLYGON as `0x${string}`,
+    salt: keccak256(encodeAbiParameters([{ name: "owner", type: "address" }], [eoaAddress as `0x${string}`])),
+  });
+}
+
 const CLOB_API_BASE = "https://clob.polymarket.com";
-const USDC_CONTRACT = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174";
+// Polymarket uses native USDC on Polygon (Circle-issued)
+// Also check bridged USDC.e as fallback
+const USDC_NATIVE   = "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"; // native USDC
+const USDC_BRIDGED  = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"; // USDC.e (bridged)
+const POLYGON_RPCS  = [
+  "https://polygon-bor-rpc.publicnode.com",
+  "https://rpc.ankr.com/polygon",
+  "https://polygon-rpc.com",
+];
 const CLOB_AUTH_MESSAGE = "This message attests that I control the given wallet";
 const DEFAULT_TIMEOUT = 15000;
 
@@ -53,6 +84,7 @@ export interface WalletConfig {
   apiKey?: string;
   apiSecret?: string;
   apiPassphrase?: string;
+  funderAddress?: string; // Polymarket proxy wallet (maker for CLOB orders)
 }
 
 export interface WalletState {
@@ -98,6 +130,12 @@ export function clearWalletConfig(): void {
   } catch {
     // ignore
   }
+}
+
+export function persistFunderAddress(funderAddress: string): void {
+  const config = loadWalletConfig();
+  if (!config) return;
+  saveWalletConfig({ ...config, funderAddress });
 }
 
 export function persistApiCredentials(creds: ApiCredentials): void {
@@ -316,57 +354,78 @@ export async function getClobL2Headers(
   };
 }
 
-export async function fetchUsdcBalance(address: string): Promise<number> {
-  try {
-    const client = createPublicClient({
-      chain: polygon,
-      transport: http("https://polygon-rpc.com", {
-        timeout: DEFAULT_TIMEOUT,
-      }),
-    });
+const ERC20_BALANCE_ABI = [
+  {
+    name: "balanceOf",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
 
-    const balance = await client.readContract({
-      address: USDC_CONTRACT as `0x${string}`,
-      abi: [
-        {
-          name: "balanceOf",
-          type: "function",
-          stateMutability: "view",
-          inputs: [{ name: "account", type: "address" }],
-          outputs: [{ name: "", type: "uint256" }],
-        },
-      ] as const,
+async function readUsdcFromRpc(rpcUrl: string, address: string): Promise<number> {
+  const client = createPublicClient({
+    chain: polygon,
+    transport: http(rpcUrl, { timeout: DEFAULT_TIMEOUT }),
+  });
+
+  // Fetch both native USDC and bridged USDC.e, return the sum
+  const [native, bridged] = await Promise.allSettled([
+    client.readContract({
+      address: USDC_NATIVE as `0x${string}`,
+      abi: ERC20_BALANCE_ABI,
       functionName: "balanceOf",
       args: [address as `0x${string}`],
-    });
+    }),
+    client.readContract({
+      address: USDC_BRIDGED as `0x${string}`,
+      abi: ERC20_BALANCE_ABI,
+      functionName: "balanceOf",
+      args: [address as `0x${string}`],
+    }),
+  ]);
 
-    return parseFloat(formatUnits(balance, 6));
-  } catch (err) {
-    if (err instanceof ConnectionTimeoutError || err instanceof NetworkError) {
-      throw err;
+  const nativeAmt  = native.status  === "fulfilled" ? parseFloat(formatUnits(native.value,  6)) : 0;
+  const bridgedAmt = bridged.status === "fulfilled" ? parseFloat(formatUnits(bridged.value, 6)) : 0;
+  return nativeAmt + bridgedAmt;
+}
+
+export async function fetchUsdcBalance(address: string): Promise<number> {
+  // Try each RPC in order until one succeeds
+  for (const rpc of POLYGON_RPCS) {
+    try {
+      const balance = await readUsdcFromRpc(rpc, address);
+      if (balance >= 0) return balance;
+    } catch (err) {
+      console.warn(`RPC ${rpc} failed:`, err);
     }
-    console.warn("Failed to fetch USDC balance from Polygon, falling back to CLOB:", err);
-    return fetchClobBalance(address);
+  }
+
+  // All RPCs failed — try CLOB fallback
+  try {
+    return await fetchClobBalance(address);
+  } catch {
+    return 0;
   }
 }
 
 async function fetchClobBalance(address: string): Promise<number> {
+  // Try CLOB /user endpoint
   try {
-    const response = await fetchWithTimeout(`${CLOB_API_BASE}/balance?address=${address}`);
-    if (!response.ok) {
-      throw new NetworkError(
-        `Failed to fetch balance: HTTP ${response.status} ${response.statusText}`,
-        response.status
-      );
+    const response = await fetchWithTimeout(
+      `${CLOB_API_BASE}/user?userAddress=${encodeURIComponent(address)}`
+    );
+    if (response.ok) {
+      const data = (await response.json()) as { balance?: string | number; usdcBalance?: string | number };
+      const raw = data.usdcBalance ?? data.balance;
+      if (raw != null) return parseFloat(String(raw));
     }
-    const data = (await response.json()) as { balance?: string | number };
-    return parseFloat(String(data.balance ?? "0"));
-  } catch (err) {
-    if (err instanceof ConnectionTimeoutError || err instanceof NetworkError) {
-      throw err;
-    }
-    throw new NetworkError("Failed to fetch balance from CLOB API");
+  } catch {
+    // fall through
   }
+  // Final fallback: return 0 so the wallet still connects
+  return 0;
 }
 
 export async function fetchOrCreateApiCredentials(privateKey: `0x${string}`): Promise<ApiCredentials | null> {

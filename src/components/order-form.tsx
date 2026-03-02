@@ -6,6 +6,7 @@
 
 import { Show, createMemo, createSignal, createEffect } from "solid-js";
 import { useTheme } from "../context/theme";
+import { PanelHeader, SectionTitle, DataRow, Separator, StatusBadge } from "./ui/panel-components";
 import {
   walletState,
   orderFormSide,
@@ -23,8 +24,10 @@ import {
   setOrderFormOpen,
   setOrderFormPriceInput,
   setOrderFormSharesInput,
+  setOrderFormNegRisk,
 } from "../state";
 import { ordersState } from "../hooks/useOrders";
+import { positionsState } from "../hooks/usePositions";
 import { getOrderBookSummary, OrderBookSummary } from "../api/polymarket";
 
 function truncate(str: string, max: number): string {
@@ -71,6 +74,7 @@ export function OrderForm() {
         const snapshot = await getOrderBookSummary(tokenId);
         if (!cancelled) {
           setOrderBook(snapshot);
+          setOrderFormNegRisk(snapshot?.negRisk === true);
         }
       } finally {
         if (!cancelled) {
@@ -182,6 +186,26 @@ export function OrderForm() {
     orderFormPostOnly() && orderFormType() === "FOK"
   );
 
+  const breakevenPrice = createMemo(() => {
+    const p = parsedPrice();
+    return Number.isFinite(p) ? p : null;
+  });
+
+  const kellySizing = createMemo(() => {
+    const p = parsedPrice();
+    if (!Number.isFinite(p) || p <= 0 || p >= 1) return null;
+    const b = (1 - p) / p;
+    const k = (p * (b + 1) - 1) / b;
+    if (k <= 0) return 0;
+    return Math.min(k * walletState.balance, walletState.balance * 0.25);
+  });
+
+  const positionImpact = createMemo(() => {
+    const existingTotal = positionsState.positions.reduce((s, pos) => s + pos.currentValue, 0);
+    const newCost = estimatedCost() ?? 0;
+    return existingTotal + newCost;
+  });
+
   const canSubmit = createMemo(() =>
     priceValid()
     && sharesValid()
@@ -198,24 +222,22 @@ export function OrderForm() {
       top={3}
       left="20%"
       width="60%"
-      height={19}
+      height={27}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={200}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={sideColor()} flexDirection="row">
-        <text content={` ◈ ${side()} ORDER `} fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <box onMouseDown={() => {
+      <PanelHeader
+        title={`${side()} ORDER`}
+        icon="◈"
+        onClose={() => {
           setOrderFormOpen(false);
           setOrderFormPriceInput("");
           setOrderFormSharesInput("");
           setOrderFormPostOnly(false);
-        }}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
-        </box>
-      </box>
+        }}
+      />
 
       {/* Separator */}
       <box height={1} width="100%" backgroundColor={sideColor()} />
@@ -282,6 +304,7 @@ export function OrderForm() {
             width={12}
             value={orderFormPriceInput()}
             focused={orderFormFocusField() === "price"}
+            onInput={(v: string) => setOrderFormPriceInput(v)}
           />
           <Show when={orderFormPriceInput() !== "" && !priceValid()}>
             <text content="  ✗ 0.01-0.99" fg={theme.error} />
@@ -301,6 +324,7 @@ export function OrderForm() {
             width={12}
             value={orderFormSharesInput()}
             focused={orderFormFocusField() === "shares"}
+            onInput={(v: string) => setOrderFormSharesInput(v)}
           />
           <Show when={minSizeInvalid()}>
             <text content={`  ✗ Min ${orderBook()?.minOrderSize?.toFixed(2) ?? "--"}`} fg={theme.error} />
@@ -328,6 +352,19 @@ export function OrderForm() {
           <text content={spreadWarning()!} fg={theme.warning} />
         </Show>
       </box>
+
+      {/* Breakeven / Kelly / Post-trade */}
+      <Show when={walletState.connected}>
+        <box flexDirection="row" paddingLeft={2} gap={4}>
+          <Show when={breakevenPrice() !== null}>
+            <text content={`Breakeven: ${((breakevenPrice()!) * 100).toFixed(1)}¢`} fg={theme.textMuted} />
+          </Show>
+          <Show when={kellySizing() !== null && kellySizing()! > 0}>
+            <text content={`Kelly: $${kellySizing()!.toFixed(2)}`} fg={theme.accent} />
+          </Show>
+          <text content={`Post-trade: $${positionImpact().toFixed(2)}`} fg={theme.warning} />
+        </box>
+      </Show>
 
       <text content="" />
 

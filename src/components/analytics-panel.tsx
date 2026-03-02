@@ -1,8 +1,10 @@
 import { Show, createSignal, createEffect, createMemo, For } from "solid-js";
 import { RGBA } from "@opentui/core";
 import { useTheme } from "../context/theme";
+import { PanelHeader, SectionTitle, Separator, ProgressBar } from "./ui/panel-components";
 import { appState, analyticsPanelOpen, setAnalyticsPanelOpen, getFilteredMarkets, highlightedIndex } from "../state";
 import { usePriceHistory } from "../hooks/useMarketData";
+import { sparkline, volumeBar, barChart, histogram } from "../utils/charts";
 
 interface AnalyticsTab {
   id: "volume" | "liquidity" | "momentum" | "correlation";
@@ -308,7 +310,7 @@ export function AnalyticsPanel() {
     return calculateVolatility(prices);
   });
   
-  const sparkline = createMemo(() => {
+  const priceSparkline = createMemo(() => {
     const prices = history().map(h => h.price);
     return generateSparkline(prices);
   });
@@ -357,8 +359,10 @@ export function AnalyticsPanel() {
         <text content="" />
         
         <box flexDirection="column">
-          <text content="Trend Sparkline:" fg={theme.textMuted} />
-          <text content={sparkline()} fg={trendStrength().direction === "up" ? theme.success : trendStrength().direction === "down" ? theme.error : theme.textMuted} />
+          <text content="Vol Bar:" fg={theme.textMuted} />
+          <text content={volumeBar(volumeProfile()?.score ?? 0, 100, 24)} fg={volumeProfile()?.level === "Very High" || volumeProfile()?.level === "High" ? theme.success : theme.warning} />
+          <text content="Price Trend:" fg={theme.textMuted} />
+          <text content={priceSparkline()} fg={trendStrength().direction === "up" ? theme.success : trendStrength().direction === "down" ? theme.error : theme.textMuted} />
         </box>
         
         <text content="" />
@@ -457,87 +461,84 @@ export function AnalyticsPanel() {
         
         <box flexDirection="column">
           <text content="Direction:" fg={theme.textMuted} />
-          <text 
-            content={trendStrength().direction === "up" ? "▲ Bullish" : trendStrength().direction === "down" ? "▼ Bearish" : "─ Neutral"} 
-            fg={trendStrength().direction === "up" ? theme.success : trendStrength().direction === "down" ? theme.error : theme.textMuted} 
+          <text
+            content={trendStrength().direction === "up" ? "▲ Bullish" : trendStrength().direction === "down" ? "▼ Bearish" : "─ Neutral"}
+            fg={trendStrength().direction === "up" ? theme.success : trendStrength().direction === "down" ? theme.error : theme.textMuted}
           />
         </box>
-        
+
+        <text content="" />
+
+        <box flexDirection="column">
+          <text content="Momentum Bar:" fg={theme.textMuted} />
+          <text content={volumeBar(momentumScore().score, 100, 24)} fg={momentumScore().score > 60 ? theme.success : momentumScore().score < 40 ? theme.error : theme.warning} />
+          <text content="Price Trend:" fg={theme.textMuted} />
+          <text content={priceSparkline()} fg={trendStrength().direction === "up" ? theme.success : trendStrength().direction === "down" ? theme.error : theme.textMuted} />
+        </box>
+
         <text content="" />
         <text content="[1] Volume  [2] Liquidity  [3] Momentum  [4] Correlation" fg={theme.textMuted} />
       </Show>
-      
+
       <Show when={!selectedMarket()}>
         <text content="Select a market to view analytics" fg={theme.textMuted} />
       </Show>
     </box>
   );
-  
-  const renderCorrelationTab = () => (
-    <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
-      <text content="Market Correlation" fg={theme.textBright} />
-      <text content="" />
-      
-      <Show when={selectedMarket()}>
-        <box flexDirection="column">
-          <text content="Primary Market:" fg={theme.textMuted} />
-          <text content={selectedMarket()!.title.slice(0, 40)} fg={theme.text} />
-        </box>
-        
+
+  const renderCorrelationTab = () => {
+    const current = selectedMarket();
+    const top5 = () => markets().filter(m => m.id !== current?.id).slice(0, 5);
+    const baseDir = () => current ? (current.change24h > 0.5 ? 1 : current.change24h < -0.5 ? -1 : 0) : 0;
+    const proxyCorr = (m: ReturnType<typeof markets>[0]) => {
+      const dir = m.change24h > 0.5 ? 1 : m.change24h < -0.5 ? -1 : 0;
+      if (baseDir() === 0 || dir === 0) return 0;
+      return baseDir() === dir ? 1 : -1;
+    };
+    return (
+      <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
+        <text content="Market Correlation" fg={theme.textBright} />
         <text content="" />
-        
-        <box flexDirection="column">
-          <text content="Compare with:" fg={theme.textMuted} />
-          <Show when={!compareMarketId()}>
-            <text content="Press [C] to select market" fg={theme.warning} />
-          </Show>
-          <Show when={compareMarketId()}>
-            <text content={markets().find(m => m.id === compareMarketId())?.title.slice(0, 40) || "N/A"} fg={theme.text} />
-          </Show>
-        </box>
-        
-        <text content="" />
-        
-        <Show when={compareMarketId()}>
+
+        <Show when={current}>
           <box flexDirection="column">
-            <text content="Correlation:" fg={theme.textMuted} />
-            <text 
-              content={`${correlation().value.toFixed(3)} (${correlation().label})`}
-              fg={correlation().value > 0.5 ? theme.success : correlation().value < -0.5 ? theme.error : theme.textMuted}
-            />
+            <text content="Primary Market:" fg={theme.textMuted} />
+            <text content={current!.title.slice(0, 38)} fg={theme.text} />
           </box>
-          
+
           <text content="" />
-          
-          <box flexDirection="column">
-            <text content="Interpretation:" fg={theme.textMuted} />
-            <Show when={correlation().value > 0.7}>
-              <text content="Strong positive correlation - markets move together" fg={theme.text} />
-            </Show>
-            <Show when={correlation().value > 0.3 && correlation().value <= 0.7}>
-              <text content="Moderate positive correlation" fg={theme.text} />
-            </Show>
-            <Show when={correlation().value > -0.3 && correlation().value <= 0.3}>
-              <text content="Weak or no correlation - independent movement" fg={theme.text} />
-            </Show>
-            <Show when={correlation().value > -0.7 && correlation().value <= -0.3}>
-              <text content="Moderate negative correlation" fg={theme.text} />
-            </Show>
-            <Show when={correlation().value <= -0.7}>
-              <text content="Strong negative correlation - inverse movement" fg={theme.text} />
-            </Show>
-          </box>
+
+          <text content="MARKET                                 CHG24  CORR" fg={theme.textMuted} />
+          <For each={top5()}>
+            {(m) => {
+              const corr = proxyCorr(m);
+              return (
+                <box flexDirection="row" width="100%">
+                  <text content={m.title.slice(0, 36).padEnd(37, " ")} fg={theme.text} width={37} />
+                  <text
+                    content={`${m.change24h >= 0 ? "+" : ""}${m.change24h.toFixed(1)}%`.padStart(6)}
+                    fg={m.change24h > 0 ? theme.success : m.change24h < 0 ? theme.error : theme.textMuted}
+                    width={7}
+                  />
+                  <text
+                    content={corr === 1 ? " +1.0" : corr === -1 ? " -1.0" : "  0.0"}
+                    fg={corr === 1 ? theme.success : corr === -1 ? theme.error : theme.textMuted}
+                  />
+                </box>
+              );
+            }}
+          </For>
+
+          <text content="" />
+          <text content="[ESC] Close" fg={theme.textMuted} />
         </Show>
-        
-        <text content="" />
-        <text content="[C] Select market  [ESC] Close" fg={theme.textMuted} />
-      </Show>
-      
-      <Show when={!selectedMarket()}>
-        <text content="Select a market to view analytics" fg={theme.textMuted} />
-      </Show>
-    </box>
-  );
+
+        <Show when={!current}>
+          <text content="Select a market to view analytics" fg={theme.textMuted} />
+        </Show>
+      </box>
+    );
+  };
   
   return (
     <box
@@ -545,18 +546,16 @@ export function AnalyticsPanel() {
       top={2}
       left="5%"
       width="35%"
-      height={18}
+      height={22}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={150}
     >
-      <box height={1} width="100%" backgroundColor={theme.accent} flexDirection="row">
-        <text content=" ◈ MARKET ANALYTICS " fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <box onMouseDown={() => setAnalyticsPanelOpen(false)}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
-        </box>
-      </box>
+      <PanelHeader
+        title="MARKET ANALYTICS"
+        icon="◈"
+        onClose={() => setAnalyticsPanelOpen(false)}
+      />
       
       <box height={1} width="100%" backgroundColor={theme.accentMuted} />
       
@@ -569,7 +568,7 @@ export function AnalyticsPanel() {
               onMouseDown={() => setActiveTab(tab.id)}
             >
               <text 
-                content={activeTab() === tab.id ? `[${tab.label}]` : ` ${tab.label} `}
+                content={activeTab() === tab.id ? `> ${tab.label.toUpperCase()} <` : ` ${tab.label.toUpperCase()} `}
                 fg={activeTab() === tab.id ? theme.accent : theme.textMuted}
               />
             </box>
@@ -577,7 +576,7 @@ export function AnalyticsPanel() {
         </For>
       </box>
       
-      <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
+      <Separator type="light" />
       
       <Show when={loading()}>
         <box padding={1}>

@@ -37,8 +37,9 @@ export async function fetchAccountOverview(): Promise<AccountOverview | null> {
   }
 
   try {
+    const lookupAddress = walletState.funderAddress ?? walletState.address;
     const [positions, tradeHistory, openOrders] = await Promise.all([
-      fetchPositions(walletState.address),
+      fetchPositions(lookupAddress!),
       fetchTradeHistory(),
       fetchOpenOrders(),
     ]);
