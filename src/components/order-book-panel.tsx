@@ -240,14 +240,15 @@ export function OrderBookPanel() {
       <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
         <text content=" ▤ LIVE ORDER BOOK " fg={theme.highlightText} />
         <Show when={selectedMarket()}>
+          <text content="│ " fg={theme.primaryMuted} />
           <text
-            content={` ${(selectedMarket()!.title ?? "").slice(0, 30)}`}
+            content={`${(selectedMarket()!.title ?? "").slice(0, 34)}`}
             fg={theme.highlightText}
           />
         </Show>
         <box flexGrow={1} />
         <text
-          content={wsStatus() === "connected" ? " ● LIVE " : wsStatus() === "connecting" ? " ◌ CONNECTING " : " ○ OFFLINE "}
+          content={wsStatus() === "connected" ? " ● LIVE " : wsStatus() === "connecting" ? " ◌ SYNC… " : " ○ OFFLINE "}
           fg={wsStatus() === "connected" ? theme.success : wsStatus() === "connecting" ? theme.warning : theme.error}
         />
         <box onMouseDown={() => setOrderBookPanelOpen(false)}>

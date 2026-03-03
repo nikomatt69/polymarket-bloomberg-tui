@@ -15,6 +15,7 @@ import {
   SocialSentiment,
 } from "../state";
 import type { Market } from "../types/market";
+import { PanelHeader, Separator, LoadingState } from "./ui/panel-components";
 
 const BULLISH_WORDS = ["bull", "pump", "moon", "buy", "long", "up", "surge", "rally", "gain", "winner", "profit", "rise", "soar", "explode"];
 const BEARISH_WORDS = ["bear", "dump", "crash", "sell", "short", "down", "drop", "fall", "loss", "red", "rekt", "plunge", "decline", "collapse"];
@@ -171,6 +172,15 @@ export function SocialPanel() {
     return "NEU ";
   }
 
+  const bullPct = () => sent().total > 0 ? Math.round((sent().bullish / sent().total) * 100) : 0;
+  const bearPct = () => sent().total > 0 ? Math.round((sent().bearish / sent().total) * 100) : 0;
+  const neuPct = () => 100 - bullPct() - bearPct();
+
+  const sentMeter = (pct: number, color: "bull" | "bear" | "neu") => {
+    const bars = Math.max(0, Math.round(pct / 5));
+    return "█".repeat(bars);
+  };
+
   return (
     <box
       position="absolute"
@@ -183,84 +193,78 @@ export function SocialPanel() {
       zIndex={160}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.accent} flexDirection="row">
-        <text content=" ◈ SOCIAL SENTIMENT " fg={theme.highlightText} />
-        <Show when={selectedMarket()}>
-          {(m: () => Market) => <text content={`| ${truncate(m().title, 38)} `} fg={theme.highlightText} />}
-        </Show>
-        <box flexGrow={1} />
-        <text content={`${socialItems().length} posts `} fg={theme.highlightText} />
-        <box onMouseDown={() => setSocialPanelOpen(false)}>
-          <text content=" [T] ✕ " fg={theme.highlightText} />
-        </box>
-      </box>
+      <PanelHeader
+        title="SOCIAL SENTIMENT"
+        icon="◈"
+        subtitle={selectedMarket() ? truncate((selectedMarket() as unknown as Market).title, 32) : `${socialItems().length} posts`}
+        onClose={() => setSocialPanelOpen(false)}
+      />
 
-      {/* Sentiment bar */}
+      {/* Sentiment gauge row */}
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row" paddingLeft={2}>
         <Show
           when={sent().total > 0}
-          fallback={<text content="Computing sentiment…" fg={theme.textMuted} />}
+          fallback={<text content="Awaiting data…" fg={theme.textMuted} />}
         >
-          <text
-            content={`BULL ${Math.round((sent().bullish / sent().total) * 100)}%`}
-            fg={theme.success}
-          />
-          <text content={` ${"■".repeat(Math.round((sent().bullish / sent().total) * 10))} `} fg={theme.success} />
-          <text
-            content={`NEU ${Math.round((sent().neutral / sent().total) * 100)}%`}
-            fg={theme.textMuted}
-          />
-          <text content={` ${"■".repeat(Math.round((sent().neutral / sent().total) * 10))} `} fg={theme.textMuted} />
-          <text
-            content={`BEAR ${Math.round((sent().bearish / sent().total) * 100)}%`}
-            fg={theme.error}
-          />
-          <text content={` ${"■".repeat(Math.round((sent().bearish / sent().total) * 10))} `} fg={theme.error} />
+          <text content="BULL " fg={theme.textMuted} />
+          <text content={`${bullPct()}%`} fg={theme.success} />
+          <text content=" " />
+          <text content={sentMeter(bullPct(), "bull")} fg={theme.success} />
+          <text content="  NEU " fg={theme.textMuted} />
+          <text content={`${neuPct()}%`} fg={theme.textMuted} />
+          <text content=" " />
+          <text content={sentMeter(neuPct(), "neu")} fg={theme.textMuted} />
+          <text content="  BEAR " fg={theme.textMuted} />
+          <text content={`${bearPct()}%`} fg={theme.error} />
+          <text content=" " />
+          <text content={sentMeter(bearPct(), "bear")} fg={theme.error} />
+          <box flexGrow={1} />
+          <text content={`${sent().total} posts  `} fg={theme.textMuted} />
         </Show>
       </box>
 
-      {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
+      <Separator type="heavy" />
 
       <Show when={loading()}>
-        <box flexGrow={1} paddingLeft={2} paddingTop={1}>
-          <text content="Fetching social data…" fg={theme.textMuted} />
+        <box flexGrow={1} paddingTop={1}>
+          <LoadingState message="Fetching social feeds (CryptoPanic + Nitter)…" />
         </box>
       </Show>
 
       <Show when={!loading()}>
         {/* Column headers */}
-        <box flexDirection="row" width="100%" paddingLeft={1} paddingTop={0}>
-          <text content="SOURCE     " fg={theme.textMuted} width={12} />
-          <text content="AGE  " fg={theme.textMuted} width={6} />
-          <text content="SENT " fg={theme.textMuted} width={6} />
-          <text content="TEXT" fg={theme.textMuted} />
+        <box flexDirection="row" width="100%" paddingLeft={1} backgroundColor={theme.backgroundPanel}>
+          <text content={"SOURCE".padEnd(12)} fg={theme.textMuted} width={12} />
+          <text content={"AGE".padEnd(6)} fg={theme.textMuted} width={6} />
+          <text content={"SENT".padEnd(6)} fg={theme.textMuted} width={6} />
+          <text content="POST" fg={theme.textMuted} />
         </box>
 
         <Show
           when={socialItems().length > 0}
           fallback={
             <box flexGrow={1} paddingLeft={2} paddingTop={1}>
-              <text content="No social data available. CryptoPanic or Nitter may be down." fg={theme.textMuted} />
+              <text content="No social data available." fg={theme.textMuted} />
+              <text content="CryptoPanic or Nitter RSS may be unavailable." fg={theme.textMuted} />
             </box>
           }
         >
-          <scrollbox height={20} width="100%" paddingLeft={1}>
+          <scrollbox height={19} width="100%" paddingLeft={1}>
             <For each={socialItems()}>
               {(item) => (
                 <box flexDirection="row" width="100%">
                   <text
-                    content={(item.source === "cryptopanic" ? "CryptoPanic" : "Nitter   ").slice(0, 11).padEnd(11, " ")}
+                    content={(item.source === "cryptopanic" ? "CryptoPanic" : "Nitter     ").slice(0, 11).padEnd(11, " ")}
                     fg={item.source === "cryptopanic" ? theme.accent : theme.primary}
                     width={12}
                   />
                   <text content={fmtAge(item.timestamp).padEnd(5, " ")} fg={theme.textMuted} width={6} />
                   <text
-                    content={sentLabel(item.sentiment)}
+                    content={sentLabel(item.sentiment).padEnd(5, " ")}
                     fg={sentColor(item.sentiment)}
                     width={6}
                   />
-                  <text content={truncate(item.text, 80)} fg={theme.text} />
+                  <text content={truncate(item.text, 82)} fg={theme.text} />
                 </box>
               )}
             </For>
@@ -269,9 +273,13 @@ export function SocialPanel() {
       </Show>
 
       {/* Footer */}
+      <Separator type="light" />
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} paddingLeft={2} flexDirection="row">
-        <text content="[T] close  " fg={theme.textMuted} />
-        <text content="Source: CryptoPanic + Nitter RSS" fg={theme.textMuted} />
+        <text content="[↑↓] Scroll   " fg={theme.textMuted} />
+        <text content="[T] Close   " fg={theme.textMuted} />
+        <text content="Source: CryptoPanic + Nitter RSS  " fg={theme.textMuted} />
+        <box flexGrow={1} />
+        <text content={`● = BULL  ○ = BEAR  ${sent().total} posts  `} fg={theme.textMuted} />
       </box>
     </box>
   );
