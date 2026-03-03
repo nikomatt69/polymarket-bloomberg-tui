@@ -2,7 +2,7 @@ import { For, Show, createMemo } from "solid-js";
 import { positionsState } from "../hooks/usePositions";
 import { ordersState } from "../hooks/useOrders";
 import { calculatePortfolioSummary } from "../api/positions";
-import { walletState, appState, portfolioTab, setPortfolioTab } from "../state";
+import { walletState, appState, portfolioTab, setPortfolioTab, highlightedIndex, setHighlightedIndex, setPortfolioOpen } from "../state";
 import { calculateMonthlyStats, calculateTradeStats, calculateMarketConcentration, calculateSharpeRatio, calculateMaxDrawdown, calculatePnLTimeSeries, calculatePositionRisk } from "../utils/analytics";
 import { sparkline } from "../utils/charts";
 import { useTheme } from "../context/theme";
@@ -260,8 +260,9 @@ export function PortfolioPanel() {
                     </box>
                   </Show>
 
-                  {/* Metrics 2×3 grid */}
+                  {/* Metrics grid */}
                   <box flexDirection="column" paddingTop={1}>
+                    <text content="─── PERFORMANCE ───" fg={theme.borderSubtle} />
                     <box flexDirection="row" width="100%" gap={4}>
                       <box width={22}>
                         <DataRow
@@ -278,14 +279,18 @@ export function PortfolioPanel() {
                         />
                       </box>
                     </box>
+                    <box flexDirection="row" width="100%" gap={4} paddingLeft={1}>
+                      <text content="Win Rate" fg={theme.textMuted} />
+                      <text
+                        content={"█".repeat(Math.round(parseFloat(accountStats().winRate) / 100 * 20)) + "░".repeat(20 - Math.round(parseFloat(accountStats().winRate) / 100 * 20))}
+                        fg={parseFloat(accountStats().winRate) >= 50 ? theme.success : theme.error}
+                      />
+                      <text
+                        content={accountStats().winRate}
+                        fg={parseFloat(accountStats().winRate) >= 50 ? theme.success : theme.error}
+                      />
+                    </box>
                     <box flexDirection="row" width="100%" gap={4}>
-                      <box width={22}>
-                        <DataRow
-                          label="Win Rate"
-                          value={accountStats().winRate}
-                          valueColor={parseFloat(accountStats().winRate) >= 50 ? "success" : "error"}
-                        />
-                      </box>
                       <box width={22}>
                         <DataRow
                           label="Profit Factor"
@@ -294,6 +299,7 @@ export function PortfolioPanel() {
                         />
                       </box>
                     </box>
+                    <text content="─── EXPOSURE ───" fg={theme.borderSubtle} />
                     <box flexDirection="row" width="100%" gap={4}>
                       <box width={22}>
                         <DataRow
@@ -378,18 +384,34 @@ export function PortfolioPanel() {
                   >
                     <scrollbox flexGrow={1} width="100%">
                       <For each={positionsState.positions}>
-                        {(position) => {
+                        {(position, idx) => {
                           const riskScore = () => positionRisks().find(r => r.positionId === position.asset)?.score ?? 0;
                           const riskColor = () => riskScore() > 70 ? theme.error : riskScore() > 40 ? theme.warning : theme.success;
                           const market = () => appState.markets.find(m => m.id === position.asset || (m as any).conditionId === position.conditionId);
                           const trendSpark = () => {
                             const m = market();
-                            if (!m) return "──────";
-                            return sparkline(m.outcomes.map(o => o.price), 6);
+                            const arrow = position.cashPnl > 0 ? "▲" : position.cashPnl < 0 ? "▼" : "─";
+                            if (!m) return `${arrow}─────`;
+                            return `${arrow}${sparkline(m.outcomes.map(o => o.price), 5)}`;
                           };
                           const rowBg = () => position.cashPnl > 0 ? theme.successMuted : position.cashPnl < 0 ? theme.errorMuted : undefined;
+                          const handleClick = () => {
+                            const m = market();
+                            if (m) {
+                              const marketIdx = appState.markets.findIndex(mk => mk.id === m.id);
+                              if (marketIdx >= 0) {
+                                setHighlightedIndex(marketIdx);
+                                setPortfolioOpen(false);
+                              }
+                            }
+                          };
                           return (
-                            <box flexDirection="row" width="100%" backgroundColor={rowBg()}>
+                            <box 
+                              flexDirection="row" 
+                              width="100%" 
+                              backgroundColor={rowBg()}
+                              onMouseDown={handleClick}
+                            >
                               <text content={truncate(position.title, 22)} fg={theme.text} width={23} />
                               <text content={position.outcome.slice(0, 4).padEnd(4, " ")} fg={theme.accent} width={5} />
                               <text content={position.size.toFixed(1).padStart(6, " ")} fg={theme.text} width={7} />
@@ -431,24 +453,29 @@ export function PortfolioPanel() {
                     <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
                       <text content="SECTOR" fg={theme.textMuted} width={14} />
                       <text content="VALUE" fg={theme.textMuted} width={10} />
-                      <text content="ALLOC" fg={theme.textMuted} width={8} />
+                      <text content="ALLOC BAR       " fg={theme.textMuted} width={22} />
                       <text content="POS" fg={theme.textMuted} width={5} />
                       <text content="P&L" fg={theme.textMuted} width={10} />
                     </box>
                     <For each={analytics().sectorAllocations.slice(0, 8)}>
-                      {(sector) => (
-                        <box flexDirection="row" width="100%">
-                          <text content={sector.sector.padEnd(13, " ")} fg={theme.text} width={14} />
-                          <text content={fmtValue(sector.value).padStart(9, " ")} fg={theme.textMuted} width={10} />
-                          <text content={`${sector.percentage.toFixed(1)}%`.padStart(7, " ")} fg={theme.accent} width={8} />
-                          <text content={sector.positionCount.toString().padStart(4, " ")} fg={theme.textMuted} width={5} />
-                          <text
-                            content={fmtUsd(sector.pnl).padStart(9, " ")}
-                            fg={sector.pnl >= 0 ? theme.success : theme.error}
-                            width={10}
-                          />
-                        </box>
-                      )}
+                      {(sector) => {
+                        const allocFilled = Math.round(Math.max(0, Math.min(100, sector.percentage)) / 100 * 15);
+                        const allocBar = "█".repeat(allocFilled) + "░".repeat(15 - allocFilled);
+                        return (
+                          <box flexDirection="row" width="100%">
+                            <text content={sector.sector.padEnd(13, " ")} fg={theme.text} width={14} />
+                            <text content={fmtValue(sector.value).padStart(9, " ")} fg={theme.textMuted} width={10} />
+                            <text content={allocBar} fg={theme.accent} width={16} />
+                            <text content={`${sector.percentage.toFixed(1)}%`.padStart(6, " ")} fg={theme.accent} width={7} />
+                            <text content={sector.positionCount.toString().padStart(4, " ")} fg={theme.textMuted} width={5} />
+                            <text
+                              content={fmtUsd(sector.pnl).padStart(9, " ")}
+                              fg={sector.pnl >= 0 ? theme.success : theme.error}
+                              width={10}
+                            />
+                          </box>
+                        );
+                      }}
                     </For>
                   </Show>
 

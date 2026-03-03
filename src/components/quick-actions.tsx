@@ -31,34 +31,40 @@ export function QuickActions() {
       flexDirection="column"
       width="100%"
       backgroundColor={theme.backgroundPanel}
-      paddingTop={0}
     >
       {/* Quick Actions Row */}
       <box flexDirection="row" height={1} paddingLeft={1}>
-        <text content="◈ QUICK: " fg={theme.accent} />
-        
-        <box flexDirection="row" paddingLeft={1}>
-          <text content="[" fg={theme.textMuted} />
+        <text content="◈ " fg={theme.accent} />
+
+        {/* Action buttons with colored key highlights */}
+        <box flexDirection="row" paddingRight={1}>
+          <text content="[" fg={theme.borderSubtle} />
           <text content="O" fg={theme.success} />
-          <text content="] Buy" fg={theme.text} />
+          <text content="] Buy" fg={theme.textMuted} />
         </box>
-        
-        <box flexDirection="row" paddingLeft={2}>
-          <text content="[" fg={theme.textMuted} />
+        <text content=" │ " fg={theme.borderSubtle} />
+        <box flexDirection="row" paddingRight={1}>
+          <text content="[" fg={theme.borderSubtle} />
           <text content="S" fg={theme.error} />
-          <text content="] Sell" fg={theme.text} />
+          <text content="] Sell" fg={theme.textMuted} />
         </box>
-        
-        <box flexDirection="row" paddingLeft={2}>
-          <text content="[" fg={theme.textMuted} />
+        <text content=" │ " fg={theme.borderSubtle} />
+        <box flexDirection="row" paddingRight={1}>
+          <text content="[" fg={theme.borderSubtle} />
           <text content="X" fg={theme.accent} />
-          <text content="] Watch" fg={theme.text} />
+          <text content="] Watch" fg={theme.textMuted} />
         </box>
-        
-        <box flexDirection="row" paddingLeft={2}>
-          <text content="[" fg={theme.textMuted} />
+        <text content=" │ " fg={theme.borderSubtle} />
+        <box flexDirection="row" paddingRight={1}>
+          <text content="[" fg={theme.borderSubtle} />
+          <text content="H" fg={theme.primary} />
+          <text content="] Orders" fg={theme.textMuted} />
+        </box>
+        <text content=" │ " fg={theme.borderSubtle} />
+        <box flexDirection="row" paddingRight={1}>
+          <text content="[" fg={theme.borderSubtle} />
           <text content="Enter" fg={theme.primary} />
-          <text content="] AI Chat" fg={theme.text} />
+          <text content="] AI" fg={theme.textMuted} />
         </box>
 
         <box flexGrow={1} />
@@ -67,22 +73,22 @@ export function QuickActions() {
         <Show when={selectedMarket()}>
           {(market: () => Market | undefined) => (
             <Show when={market()}>
-              {(m: () => Market) => (
-                <box flexDirection="row">
-                  <text content="◈ " fg={theme.accent} />
-                  <text content={m().title.slice(0, 25)} fg={theme.text} />
-                  <text content=" " />
-                  <text 
-                    content={`${(m().outcomes[0]?.price * 100).toFixed(1)}¢`} 
-                    fg={m().change24h >= 0 ? theme.success : theme.error} 
-                  />
-                  <text content=" " />
-                  <text 
-                    content={trendArrow(m().outcomes[0]?.price || 0, (m().outcomes[0]?.price || 0) - (m().change24h / 100))}
-                    fg={m().change24h >= 0 ? theme.success : theme.error}
-                  />
-                </box>
-              )}
+              {(m: () => Market) => {
+                const price = m().outcomes[0]?.price ?? 0;
+                const pricePct = (price * 100).toFixed(1);
+                const changeDir = m().change24h >= 0 ? "▲" : "▼";
+                return (
+                  <box flexDirection="row">
+                    <text content="◈ " fg={theme.accent} />
+                    <text content={m().title.slice(0, 24)} fg={theme.text} />
+                    <text content=" " />
+                    <text content={`${pricePct}¢`} fg={m().change24h >= 0 ? theme.success : theme.error} />
+                    <text content=" " />
+                    <text content={changeDir} fg={m().change24h >= 0 ? theme.success : theme.error} />
+                    <text content=" " />
+                  </box>
+                );
+              }}
             </Show>
           )}
         </Show>
@@ -90,34 +96,30 @@ export function QuickActions() {
 
       {/* Market Ticker Row */}
       <box flexDirection="row" height={1} paddingLeft={1}>
-        <text content="TRENDING: " fg={theme.textMuted} />
-        
+        <text content="HOT: " fg={theme.textMuted} />
         <For each={topMarkets()}>
           {(m: Market, idx: () => number) => (
-            <box flexDirection="row" paddingRight={2}>
+            <box flexDirection="row">
               <text content={`${idx() + 1}.`} fg={theme.textMuted} />
-              <text content={m.title.slice(0, 15)} fg={theme.text} />
+              <text content={m.title.slice(0, 14)} fg={theme.text} />
               <text content=" " />
-              <text 
-                content={`${fmtPct(m.change24h)}`}
+              <text
+                content={fmtPct(m.change24h)}
                 fg={m.change24h >= 0 ? theme.success : theme.error}
               />
-              <text content=" │" fg={theme.borderSubtle} />
+              <text content=" │ " fg={theme.borderSubtle} />
             </box>
           )}
         </For>
 
         <box flexGrow={1} />
 
-        {/* Position Count */}
         <Show when={positionsState.positions.length > 0}>
-          <text content={`Pos: ${positionsState.positions.length}`} fg={theme.textMuted} />
-          <text content=" │" fg={theme.borderSubtle} />
+          <text content={`Pos:${positionsState.positions.length} `} fg={theme.textMuted} />
         </Show>
-
-        {/* Watchlist Count */}
         <Show when={watchlistState.marketIds.length > 0}>
-          <text content={`Watch: ${watchlistState.marketIds.length}`} fg={theme.accent} />
+          <text content="★" fg={theme.warning} />
+          <text content={`${watchlistState.marketIds.length} `} fg={theme.textMuted} />
         </Show>
       </box>
     </box>

@@ -52,12 +52,12 @@ export function MessagesPanel() {
     <box
       position="absolute"
       top={2}
-      left="25%"
-      width="50%"
-      height="90%"
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
-      zIndex={100}
+      zIndex={160}
     >
       {/* Header */}
       <PanelHeader

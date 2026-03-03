@@ -575,8 +575,8 @@ export function AnalyticsPanel() {
     <box
       position="absolute"
       top={2}
-      left="5%"
-      width="38%"
+      left="8%"
+      width="84%"
       height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"

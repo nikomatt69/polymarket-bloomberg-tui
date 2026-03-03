@@ -244,28 +244,38 @@ export function OrderForm() {
 
       {/* Market info */}
       <box flexDirection="column" paddingLeft={2} paddingTop={1}>
-        <box flexDirection="row" gap={1}>
-          <text content="Market :" fg={theme.textMuted} width={10} />
-          <text content={truncate(orderFormMarketTitle(), 48)} fg={theme.textBright} />
+        <text content="─── MARKET ──────────────────────────────────────────" fg={theme.borderSubtle} />
+        <box flexDirection="row" paddingTop={1}>
+          <text content="Market : " fg={theme.textMuted} width={10} />
+          <text content={truncate(orderFormMarketTitle(), 46)} fg={theme.textBright} />
         </box>
-        <box flexDirection="row" gap={1}>
-          <text content="Outcome:" fg={theme.textMuted} width={10} />
+        <box flexDirection="row">
+          <text content="Outcome: " fg={theme.textMuted} width={10} />
           <text content={orderFormOutcomeTitle()} fg={sideColor()} />
           <text content="  curr:" fg={theme.textMuted} />
           <text content={`${(orderFormCurrentPrice() * 100).toFixed(1)}¢`} fg={theme.text} />
         </box>
-        <Show when={orderBook()} fallback={<Show when={bookLoading()}><text content="Book: loading..." fg={theme.textMuted} /></Show>}>
-          <text
-            content={`Book  Bid:${formatCents(orderBook()?.bestBid)}  Ask:${formatCents(orderBook()?.bestAsk)}  Mid:${formatCents(orderBook()?.midpoint)}  Spread:${formatBps(orderBook()?.spreadBps)}`}
-            fg={theme.textMuted}
-          />
+        <Show when={bookLoading()}>
+          <text content="Book   : loading..." fg={theme.textMuted} />
+        </Show>
+        <Show when={orderBook()}>
+          <box flexDirection="row">
+            <text content="Book   : " fg={theme.textMuted} width={10} />
+            <text content="Bid " fg={theme.textMuted} />
+            <text content={formatCents(orderBook()?.bestBid)} fg={theme.success} />
+            <text content="  Ask " fg={theme.textMuted} />
+            <text content={formatCents(orderBook()?.bestAsk)} fg={theme.error} />
+            <text content="  Mid " fg={theme.textMuted} />
+            <text content={formatCents(orderBook()?.midpoint)} fg={theme.text} />
+            <text content="  Spread " fg={theme.textMuted} />
+            <text content={formatBps(orderBook()?.spreadBps)} fg={theme.warning} />
+          </box>
         </Show>
       </box>
 
-      <text content="" />
-
       {/* Fields */}
       <box flexDirection="column" paddingLeft={2} paddingTop={1} gap={0}>
+        <text content="─── ORDER PARAMETERS ────────────────────────────────" fg={theme.borderSubtle} />
         <box flexDirection="row" alignItems="center">
           <text content="Order Type   : " fg={theme.textMuted} width={16} />
           <box onMouseDown={() => {
@@ -355,7 +365,8 @@ export function OrderForm() {
 
       {/* Balance usage bar */}
       <Show when={walletState.connected && estimatedCost() !== null}>
-        <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1}>
+        <box flexDirection="column" paddingLeft={2} paddingRight={2}>
+          <text content="─── RISK ANALYSIS ───────────────────────────────────" fg={theme.borderSubtle} />
           {(() => {
             const pct = Math.min(1, (estimatedCost() ?? 0) / Math.max(1, walletState.balance));
             const barWidth = 30;
@@ -390,6 +401,9 @@ export function OrderForm() {
       <text content="" />
 
       {/* Status / hints */}
+      <box flexDirection="column" paddingLeft={2}>
+        <text content="─────────────────────────────────────────────────────" fg={theme.borderSubtle} />
+      </box>
       <box paddingLeft={2}>
         <Show when={ordersState.placing}>
           <text content="Placing order..." fg={theme.warning} />

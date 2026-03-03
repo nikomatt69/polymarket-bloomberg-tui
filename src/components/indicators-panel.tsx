@@ -158,9 +158,9 @@ export function IndicatorsPanel() {
     <box
       position="absolute"
       top={2}
-      left="32%"
-      width="36%"
-      height={20}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={150}

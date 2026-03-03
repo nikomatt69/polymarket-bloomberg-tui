@@ -238,9 +238,9 @@ export function SettingsPanel() {
     <box
       position="absolute"
       top={2}
-      left="6%"
-      width="88%"
-      height={36}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={170}

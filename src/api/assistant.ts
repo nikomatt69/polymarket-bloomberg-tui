@@ -934,8 +934,25 @@ export interface AssistantMessage {
 
 export async function sendMessageToAssistantStream(
   onChunk?: (chunk: string) => void,
-  onToolCall?: (tool: { name: string; args: unknown }) => void,
-  onToolResult?: (tool: { name: string; result: unknown }) => void,
+  onToolCall?: (tool: {
+    id: string;
+    name: string;
+    args: unknown;
+    category?: string;
+    startedAt: number;
+  }) => void,
+  onToolResult?: (tool: {
+    id: string;
+    name: string;
+    result: unknown;
+    completedAt: number;
+  }) => void,
+  onToolError?: (tool: {
+    id: string;
+    name: string;
+    error: string;
+    completedAt: number;
+  }) => void,
 ): Promise<{ response: string; toolCalls: ToolCall[]; tokensUsed: number }> {
   const resolved = resolveAssistantModel();
   if ("error" in resolved) {
@@ -1087,17 +1104,40 @@ Respond in the same language as the user. Be concise but thorough on trading mat
       ...(toolDef as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       execute: async (args: any) => {
-        onToolCall?.({ name, args });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const result = await (toolDef as any).execute(args);
-        onToolResult?.({ name, result });
-        trackedToolCalls.push({
-          id: `tc-${Math.random().toString(36).slice(2, 10)}`,
-          name,
-          arguments: args as Record<string, unknown>,
-          result,
-        });
-        return result;
+        const callId = `tc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        const startedAt = Date.now();
+        const category = agentTools.getTool(name)?.category;
+
+        onToolCall?.({ id: callId, name, args, category, startedAt });
+
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const result = await (toolDef as any).execute(args);
+          const completedAt = Date.now();
+
+          onToolResult?.({ id: callId, name, result, completedAt });
+          trackedToolCalls.push({
+            id: callId,
+            name,
+            arguments: args as Record<string, unknown>,
+            result,
+          });
+
+          return result;
+        } catch (error) {
+          const completedAt = Date.now();
+          const errorMessage = error instanceof Error ? error.message : "Tool execution failed";
+
+          onToolError?.({ id: callId, name, error: errorMessage, completedAt });
+          trackedToolCalls.push({
+            id: callId,
+            name,
+            arguments: args as Record<string, unknown>,
+            result: { success: false, error: errorMessage },
+          });
+
+          throw error;
+        }
       },
     };
   }

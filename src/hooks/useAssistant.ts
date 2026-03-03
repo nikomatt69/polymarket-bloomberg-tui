@@ -27,6 +27,9 @@ import {
   sessionTokens,
   setSessionTokens,
   getActiveAIProvider,
+  setEnterpriseRunPhase,
+  setEnterpriseToolSelectedId,
+  clearEnterpriseToolUiState,
 } from "../state";
 import { sendMessageToAssistantStream } from "../api/assistant";
 import {
@@ -103,6 +106,8 @@ function handleSlashCommand(cmd: string, args: string): boolean {
       setSessionTokens(0);
       setStreamingMessage("");
       setStreamingTools([]);
+      setEnterpriseRunPhase("idle");
+      clearEnterpriseToolUiState();
       setChatMessages([
         {
           id: generateId(),
@@ -293,37 +298,68 @@ export function useAssistant() {
       content: input,
       timestamp: new Date(),
     };
-    setChatMessages([...chatMessages(), userMessage]);
+    setChatMessages((prev) => [...prev, userMessage]);
     setChatInputValue("");
     setChatLoading(true);
     setStreamingMessage("");
     setStreamingTools([]);
+    setEnterpriseRunPhase("streaming_text");
+    clearEnterpriseToolUiState();
 
     try {
       const { response, toolCalls, tokensUsed } = await sendMessageToAssistantStream(
         // onChunk — append to streaming preview
         (chunk) => {
           setStreamingMessage((prev) => prev + chunk);
+          setEnterpriseRunPhase("streaming_text");
         },
         // onToolCall — add to live tool inspector
         (tool) => {
           setStreamingTools((prev) => [
             ...prev,
-            { name: tool.name, args: tool.args, status: "calling" },
+            {
+              id: tool.id,
+              name: tool.name,
+              args: tool.args,
+              category: tool.category,
+              startedAt: tool.startedAt,
+              status: "calling",
+            },
           ]);
+          setEnterpriseRunPhase("tool_calling");
+          if (!tool.id) return;
+          setEnterpriseToolSelectedId((prev) => prev || tool.id);
         },
         // onToolResult — update matching tool to done
         (tool) => {
           setStreamingTools((prev) =>
             prev.map((t) =>
-              t.name === tool.name && t.status === "calling"
-                ? { ...t, status: "done", result: tool.result }
+              t.id === tool.id
+                ? { ...t, status: "done", result: tool.result, completedAt: tool.completedAt }
                 : t,
             ),
           );
+          setEnterpriseRunPhase("tool_done");
+        },
+        (tool) => {
+          setStreamingTools((prev) =>
+            prev.map((t) =>
+              t.id === tool.id
+                ? {
+                    ...t,
+                    status: "error",
+                    error: tool.error,
+                    result: { success: false, error: tool.error },
+                    completedAt: tool.completedAt,
+                  }
+                : t,
+            ),
+          );
+          setEnterpriseRunPhase("tool_error");
         },
       );
 
+      setEnterpriseRunPhase("finalizing");
       const assistantMessage: ChatMessage = {
         id: generateId(),
         role: "assistant",
@@ -340,6 +376,7 @@ export function useAssistant() {
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
+      setEnterpriseRunPhase("tool_error");
       setChatMessages((prev) => [
         ...prev,
         {
@@ -353,6 +390,8 @@ export function useAssistant() {
       setChatLoading(false);
       setStreamingMessage("");
       setStreamingTools([]);
+      setEnterpriseRunPhase("idle");
+      clearEnterpriseToolUiState();
     }
   };
 
@@ -382,6 +421,8 @@ export function useAssistant() {
     setSessionTokens(0);
     setStreamingMessage("");
     setStreamingTools([]);
+    setEnterpriseRunPhase("idle");
+    clearEnterpriseToolUiState();
   };
 
   const setInput = (value: string) => {

@@ -80,8 +80,8 @@ export function SentimentPanel() {
       position="absolute"
       top={2}
       left="8%"
-      width="44%"
-      height={22}
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={150}

@@ -184,10 +184,10 @@ export function SocialPanel() {
   return (
     <box
       position="absolute"
-      top={1}
-      left="5%"
-      width="90%"
-      height={28}
+      top={2}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={160}

@@ -132,13 +132,41 @@ export function AlertsPanel() {
         onClose={handleClose}
       />
 
-      {/* Sub-header with controls */}
+      {/* Sub-header tab bar */}
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
-        <box onMouseDown={() => toggleSound()} paddingLeft={2}>
-          <text content={alertsState.soundEnabled ? "[SOUND ON]" : "[SOUND OFF]"} fg={alertsState.soundEnabled ? theme.success : theme.error} />
+        <box
+          paddingLeft={2}
+          paddingRight={2}
+          backgroundColor={!alertsState.showHistory ? theme.primary : undefined}
+          onMouseDown={() => setAlertsState("showHistory", false)}
+        >
+          <text
+            content="ALERTS"
+            fg={!alertsState.showHistory ? theme.highlightText : theme.textMuted}
+          />
         </box>
-        <box onMouseDown={() => setAlertsState("showHistory", !alertsState.showHistory)} paddingLeft={2}>
-          <text content={alertsState.showHistory ? "[HISTORY]" : "[ALERTS]"} fg={theme.accent} />
+        <box
+          paddingLeft={2}
+          paddingRight={2}
+          backgroundColor={alertsState.showHistory ? theme.primary : undefined}
+          onMouseDown={() => setAlertsState("showHistory", true)}
+        >
+          <text
+            content="HISTORY"
+            fg={alertsState.showHistory ? theme.highlightText : theme.textMuted}
+          />
+        </box>
+        <text content="  │  " fg={theme.borderSubtle} />
+        <box
+          paddingLeft={1}
+          paddingRight={1}
+          backgroundColor={alertsState.soundEnabled ? theme.success : undefined}
+          onMouseDown={() => toggleSound()}
+        >
+          <text
+            content={alertsState.soundEnabled ? "SOUND ON" : "SOUND OFF"}
+            fg={alertsState.soundEnabled ? theme.background : theme.textMuted}
+          />
         </box>
       </box>
 
@@ -219,10 +247,7 @@ export function AlertsPanel() {
         <Show when={alertsState.showHistory}>
           <box flexDirection="column" width="100%">
             <text content="" />
-            <box flexDirection="row" height={1}>
-              <text content="◈ ALERT HISTORY" fg={theme.primary} />
-              <text content={`  (${alertsState.alertHistory.length} entries)`} fg={theme.textMuted} />
-            </box>
+            <text content={`─── ALERT HISTORY (${alertsState.alertHistory.length} entries) ───────────────────`} fg={theme.borderSubtle} />
             <text content="" />
             <Show
               when={alertsState.alertHistory.length > 0}
@@ -266,7 +291,7 @@ export function AlertsPanel() {
         {/* Add form */}
         <Show when={alertsState.adding}>
           <box flexDirection="column" paddingLeft={1}>
-            <text content="ADD ALERT — selected market's first outcome" fg={theme.primary} />
+            <text content="─── ADD ALERT ─────────────────────────────────────────────" fg={theme.borderSubtle} />
             <text content="" />
             <box flexDirection="row" gap={2}>
               <text content={alertsState.addFocus === "condition" ? "▶ Metric: " : "  Metric: "} fg={alertsState.addFocus === "condition" ? theme.accent : theme.textMuted} width={14} />

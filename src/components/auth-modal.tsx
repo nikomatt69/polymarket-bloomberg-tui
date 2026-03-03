@@ -18,6 +18,7 @@ import {
   setAuthEmailInput,
   setAuthPasswordInput,
 } from "../state";
+import { PanelHeader, Separator } from "./ui/panel-components";
 
 export function AuthModal() {
   const { theme } = useTheme();
@@ -29,111 +30,127 @@ export function AuthModal() {
     setAuthPasswordInput("");
   };
 
+  const sLine = (label: string) => `─── ${label} ` + "─".repeat(Math.max(0, 28 - label.length - 5));
+
   return (
     <box
       position="absolute"
       top={3}
       left="30%"
       width="40%"
-      height={authModalMode() === "login" ? 14 : 16}
+      height={authModalMode() === "login" ? 15 : 18}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={100}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
-        <text content=" ◈ AUTH " fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <box onMouseDown={handleClose}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
+      <PanelHeader
+        title="ACCOUNT AUTH"
+        icon="◈"
+        subtitle={authModalMode() === "login" ? "Sign In" : "New Account"}
+        onClose={handleClose}
+      />
+
+      {/* Mode tab bar */}
+      <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
+        <box
+          paddingLeft={2}
+          paddingRight={2}
+          backgroundColor={authModalMode() === "login" ? theme.primary : undefined}
+          onMouseDown={() => { setAuthModalOpen(true); }}
+        >
+          <text
+            content="LOGIN"
+            fg={authModalMode() === "login" ? theme.highlightText : theme.textMuted}
+          />
         </box>
+        <box
+          paddingLeft={2}
+          paddingRight={2}
+          backgroundColor={authModalMode() === "register" ? theme.primary : undefined}
+        >
+          <text
+            content="REGISTER"
+            fg={authModalMode() === "register" ? theme.highlightText : theme.textMuted}
+          />
+        </box>
+        <box flexGrow={1} />
+        <text content="[Tab] switch  " fg={theme.textMuted} />
       </box>
 
-      {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.primaryMuted} />
+      <Separator type="heavy" />
 
       {/* Body */}
       <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingRight={2} paddingTop={1}>
-        {/* Mode indicator */}
-        <box flexDirection="row" gap={2}>
-          <text
-            content={authModalMode() === "login" ? "● LOGIN" : "○ LOGIN"}
-            fg={authModalMode() === "login" ? theme.primary : theme.textMuted}
+        <text content={sLine("CREDENTIALS")} fg={theme.borderSubtle} />
+
+        {/* Register-only: Username */}
+        <Show when={authModalMode() === "register"}>
+          <box flexDirection="row" paddingTop={1}>
+            <text content="Username : " fg={theme.textMuted} width={11} />
+            <input
+              width="80%"
+              value={authUsernameInput()}
+              focused={authModalMode() === "register" && !authUsernameInput()}
+              onInput={(v: string) => setAuthUsernameInput(v)}
+            />
+          </box>
+          <box flexDirection="row">
+            <text content="Email    : " fg={theme.textMuted} width={11} />
+            <input
+              width="80%"
+              value={authEmailInput()}
+              focused={authModalMode() === "register" && !!authUsernameInput() && !authEmailInput()}
+              onInput={(v: string) => setAuthEmailInput(v)}
+            />
+          </box>
+        </Show>
+
+        {/* Login: Username */}
+        <Show when={authModalMode() === "login"}>
+          <box flexDirection="row" paddingTop={1}>
+            <text content="Username : " fg={theme.textMuted} width={11} />
+            <input
+              width="80%"
+              value={authUsernameInput()}
+              focused
+              onInput={(v: string) => setAuthUsernameInput(v)}
+            />
+          </box>
+        </Show>
+
+        {/* Password — both modes */}
+        <box flexDirection="row">
+          <text content="Password : " fg={theme.textMuted} width={11} />
+          <input
+            width="80%"
+            value={authPasswordInput()}
+            focused={authModalMode() === "login"
+              ? !!authUsernameInput()
+              : !!authEmailInput()}
+            onInput={(v: string) => setAuthPasswordInput(v)}
           />
-          <text content="|" fg={theme.textMuted} />
-          <text
-            content={authModalMode() === "register" ? "● REGISTER" : "○ REGISTER"}
-            fg={authModalMode() === "register" ? theme.primary : theme.textMuted}
-          />
-          <text content=" [TAB] to switch" fg={theme.textMuted} />
         </box>
 
-        <box height={1} />
-
-        {/* Username field */}
-        <Show when={authModalMode() === "register"}>
-          <text content="Username:" fg={theme.textMuted} />
-          <input
-            width="100%"
-            value={authUsernameInput()}
-            focused={authModalMode() === "register" && !authUsernameInput()}
-            onInput={(v: string) => setAuthUsernameInput(v)}
-          />
-        </Show>
-
-        {/* Email field (register only) */}
-        <Show when={authModalMode() === "register"}>
-          <text content="Email:" fg={theme.textMuted} />
-          <input
-            width="100%"
-            value={authEmailInput()}
-            focused={authModalMode() === "register" && !!authUsernameInput()}
-            onInput={(v: string) => setAuthEmailInput(v)}
-          />
-        </Show>
-
-        {/* Username for login */}
-        <Show when={authModalMode() === "login"}>
-          <text content="Username:" fg={theme.textMuted} />
-          <input
-            width="100%"
-            value={authUsernameInput()}
-            focused
-            onInput={(v: string) => setAuthUsernameInput(v)}
-          />
-        </Show>
-
-        {/* Password field */}
-        <text content="Password:" fg={theme.textMuted} />
-        <input
-          width="100%"
-          value={authPasswordInput()}
-          focused={authModalMode() === "login" || (authModalMode() === "register" && !!authEmailInput())}
-          onInput={(v: string) => setAuthPasswordInput(v)}
-        />
-
-        {/* Error message */}
+        {/* Status */}
         <Show when={authError()}>
+          <text content="" />
           <text content={`✗ ${authError()}`} fg={theme.error} />
         </Show>
-
-        {/* Loading indicator */}
         <Show when={authLoading()}>
-          <text content="Processing..." fg={theme.warning} />
+          <text content="" />
+          <text content="⟳ Processing..." fg={theme.warning} />
         </Show>
 
         <box flexGrow={1} />
 
-        {/* Actions */}
-        <box flexDirection="row" gap={3}>
-          <text
-            content="[ENTER] Submit"
-            fg={theme.success}
-          />
-          <text
-            content="[ESC] Cancel"
-            fg={theme.textMuted}
-          />
+        {/* Footer actions */}
+        <Separator type="light" />
+        <box flexDirection="row" paddingTop={1} gap={3}>
+          <box backgroundColor={theme.success} paddingLeft={1} paddingRight={1}>
+            <text content="[Enter] Submit" fg={theme.background} />
+          </box>
+          <text content="[ESC] Cancel" fg={theme.textMuted} />
         </box>
       </box>
     </box>

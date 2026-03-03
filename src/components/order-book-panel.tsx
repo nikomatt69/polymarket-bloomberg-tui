@@ -229,9 +229,9 @@ export function OrderBookPanel() {
     <box
       position="absolute"
       top={2}
-      left="10%"
-      width="80%"
-      height={32}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={160}

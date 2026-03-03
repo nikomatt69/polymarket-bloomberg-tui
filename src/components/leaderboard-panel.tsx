@@ -9,16 +9,23 @@ import {
   fetchBuilderLeaderboard,
   TraderLeaderboardEntry,
   BuilderEntry,
-  TraderLeaderboardResponse,
-  BuilderLeaderboardResponse,
 } from "../api/data";
+import { PanelHeader, Separator, LoadingState } from "./ui/panel-components";
 
 type LeaderboardTab = "traders" | "builders";
+type Timeframe = "daily" | "weekly" | "monthly" | "allTime";
+
+const TIMEFRAMES: { key: Timeframe; label: string }[] = [
+  { key: "daily",    label: "Day"  },
+  { key: "weekly",   label: "Week" },
+  { key: "monthly",  label: "Mon"  },
+  { key: "allTime",  label: "All"  },
+];
 
 export function LeaderboardPanel() {
   const { theme } = useTheme();
   const [activeTab, setActiveTab] = createSignal<LeaderboardTab>("traders");
-  const [timeframe, setTimeframe] = createSignal<"daily" | "weekly" | "monthly" | "allTime">("weekly");
+  const [timeframe, setTimeframe] = createSignal<Timeframe>("weekly");
   const [traders, setTraders] = createSignal<TraderLeaderboardEntry[]>([]);
   const [builders, setBuilders] = createSignal<BuilderEntry[]>([]);
   const [loading, setLoading] = createSignal(true);
@@ -41,7 +48,6 @@ export function LeaderboardPanel() {
   onMount(loadData);
 
   createEffect(() => {
-    // Reload when tab or timeframe changes
     activeTab();
     timeframe();
     loadData();
@@ -55,72 +61,147 @@ export function LeaderboardPanel() {
 
   const fmtPnl = (n: number): string => {
     const prefix = n >= 0 ? "+" : "";
+    if (Math.abs(n) >= 1_000_000) return `${prefix}$${(n / 1_000_000).toFixed(1)}M`;
+    if (Math.abs(n) >= 1_000) return `${prefix}$${(n / 1_000).toFixed(0)}K`;
     return `${prefix}$${n.toFixed(2)}`;
+  };
+
+  const rankMedal = (rank: number): string => {
+    if (rank === 1) return "◆";
+    if (rank === 2) return "◇";
+    if (rank === 3) return "○";
+    return " ";
+  };
+
+  const rankMedalColor = (rank: number) => {
+    const { theme } = useTheme();
+    if (rank === 1) return theme.warning;
+    if (rank === 2) return theme.textMuted;
+    if (rank === 3) return theme.accent;
+    return theme.textMuted;
   };
 
   return (
     <box
       position="absolute"
-      left="20%"
-      top="15%"
-      width="60%"
-      height="70%"
+      top={2}
+      left="8%"
+      width="84%"
+      height={24}
       flexDirection="column"
-      backgroundColor={theme.background}
-      borderColor={theme.border}
+      backgroundColor={theme.panelModal}
       zIndex={100}
     >
       {/* Header */}
-      <box flexDirection="row" padding={1} backgroundColor={theme.primary}>
-        <text content="LEADERBOARD" fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <text content="[T]raders" fg={activeTab() === "traders" ? theme.accent : theme.textMuted} />
-        <text content=" [B]uilders" fg={activeTab() === "builders" ? theme.accent : theme.textMuted} />
-      </box>
+      <PanelHeader
+        title="LEADERBOARD"
+        icon="◈"
+        subtitle={`${activeTab() === "traders" ? "Top Traders" : "Top Builders"} · ${
+          TIMEFRAMES.find(t => t.key === timeframe())?.label ?? ""}`}
+      />
 
-      {/* Timeframe selector */}
-      <box flexDirection="row" paddingX={1} paddingY={0} gap={1}>
-        <text content="Timeframe:" fg={theme.textMuted} />
-        <For each={["daily", "weekly", "monthly", "allTime"] as const}>
+      {/* Tab + Timeframe row */}
+      <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
+        <box
+          paddingLeft={2}
+          paddingRight={2}
+          backgroundColor={activeTab() === "traders" ? theme.primary : undefined}
+          onMouseDown={() => setActiveTab("traders")}
+        >
+          <text content="Traders" fg={activeTab() === "traders" ? theme.highlightText : theme.textMuted} />
+        </box>
+        <box
+          paddingLeft={2}
+          paddingRight={2}
+          backgroundColor={activeTab() === "builders" ? theme.primary : undefined}
+          onMouseDown={() => setActiveTab("builders")}
+        >
+          <text content="Builders" fg={activeTab() === "builders" ? theme.highlightText : theme.textMuted} />
+        </box>
+
+        <text content="  │  " fg={theme.borderSubtle} />
+
+        <For each={TIMEFRAMES}>
           {(tf) => (
-            <text
-              content={tf === "allTime" ? "All" : tf.charAt(0).toUpperCase() + tf.slice(1)}
-              fg={timeframe() === tf ? theme.accent : theme.textMuted}
-            />
+            <box
+              paddingLeft={1}
+              paddingRight={1}
+              backgroundColor={timeframe() === tf.key ? theme.accent : undefined}
+              onMouseDown={() => setTimeframe(tf.key)}
+            >
+              <text
+                content={tf.label}
+                fg={timeframe() === tf.key ? theme.background : theme.textMuted}
+              />
+            </box>
           )}
         </For>
       </box>
 
       {/* Column headers */}
-      <box flexDirection="row" paddingX={1} paddingY={0} gap={1} backgroundColor={theme.primary}>
-        <text content="#" fg={theme.textMuted} width={3} />
-        <text content="Address" fg={theme.textMuted} width={14} />
-        <text content="Volume" fg={theme.textMuted} width={10} />
-        <text content="P&L" fg={theme.textMuted} width={10} />
-        <text content="Trades" fg={theme.textMuted} width={8} />
-        <text content="Win%" fg={theme.textMuted} width={6} />
+      <box height={1} width="100%" flexDirection="row" backgroundColor={theme.backgroundPanel} paddingLeft={1}>
+        <text content={" #".padEnd(5)}  fg={theme.textMuted} width={5} />
+        <text content={"ADDRESS / NAME".padEnd(16)} fg={theme.textMuted} width={17} />
+        <text content={"VOLUME".padStart(10)} fg={theme.textMuted} width={11} />
+        <Show when={activeTab() === "traders"}>
+          <text content={"P&L".padStart(10)}    fg={theme.textMuted} width={11} />
+          <text content={"TRADES".padStart(8)}  fg={theme.textMuted} width={9} />
+          <text content={"WIN%".padStart(6)}    fg={theme.textMuted} width={7} />
+        </Show>
+        <Show when={activeTab() === "builders"}>
+          <text content={"REVENUE".padStart(10)} fg={theme.textMuted} width={11} />
+          <text content={"TRADES".padStart(8)}  fg={theme.textMuted} width={9} />
+          <text content={"UNIQ.".padStart(6)}   fg={theme.textMuted} width={7} />
+        </Show>
       </box>
 
+      <Separator />
+
       {/* Data rows */}
-      <scrollbox flexGrow={1}>
-        <Show when={!loading()} fallback={<box padding={1}><text content="Loading..." fg={theme.textMuted} /></box>}>
+      <Show when={loading()}>
+        <LoadingState message="Fetching leaderboard data..." />
+      </Show>
+
+      <Show when={!loading()}>
+        <scrollbox flexGrow={1} width="100%">
           <Show when={activeTab() === "traders"}>
             <For each={traders()}>
               {(trader) => (
-                <box flexDirection="row" paddingX={1} gap={1}>
-                  <text content={`#${trader.rank}`} fg={theme.textMuted} width={3} />
-                  <text content={`${trader.address.slice(0, 10)}…`} fg={theme.text} width={14} />
-                  <text content={fmtVol(trader.volume)} fg={theme.text} width={10} />
+                <box flexDirection="row" width="100%" paddingLeft={1}>
                   <text
-                    content={fmtPnl(trader.realizedPnl)}
-                    fg={trader.realizedPnl >= 0 ? theme.success : theme.error}
-                    width={10}
+                    content={rankMedal(trader.rank)}
+                    fg={rankMedalColor(trader.rank)}
+                    width={2}
                   />
-                  <text content={String(trader.tradeCount)} fg={theme.text} width={8} />
                   <text
-                    content={`${trader.winRate.toFixed(0)}%`}
-                    fg={trader.winRate >= 50 ? theme.success : theme.error}
-                    width={6}
+                    content={`${trader.rank}`.padStart(2)}
+                    fg={trader.rank <= 3 ? theme.warning : theme.textMuted}
+                    width={3}
+                  />
+                  <text
+                    content={`${trader.address.slice(0, 8)}…${trader.address.slice(-4)}`.padEnd(16)}
+                    fg={theme.text}
+                    width={17}
+                  />
+                  <text
+                    content={fmtVol(trader.volume).padStart(10)}
+                    fg={theme.textMuted}
+                    width={11}
+                  />
+                  <text
+                    content={fmtPnl(trader.realizedPnl).padStart(10)}
+                    fg={trader.realizedPnl >= 0 ? theme.success : theme.error}
+                    width={11}
+                  />
+                  <text
+                    content={String(trader.tradeCount).padStart(8)}
+                    fg={theme.text}
+                    width={9}
+                  />
+                  <text
+                    content={`${trader.winRate.toFixed(0)}%`.padStart(6)}
+                    fg={trader.winRate >= 55 ? theme.success : trader.winRate >= 45 ? theme.warning : theme.error}
+                    width={7}
                   />
                 </box>
               )}
@@ -130,23 +211,57 @@ export function LeaderboardPanel() {
           <Show when={activeTab() === "builders"}>
             <For each={builders()}>
               {(builder) => (
-                <box flexDirection="row" paddingX={1} gap={1}>
-                  <text content={`#${builder.rank}`} fg={theme.textMuted} width={3} />
-                  <text content={builder.name || `${builder.address.slice(0, 8)}…`} fg={theme.text} width={14} />
-                  <text content={fmtVol(builder.volume)} fg={theme.text} width={10} />
-                  <text content={fmtVol(builder.revenue)} fg={theme.success} width={10} />
-                  <text content={String(builder.tradeCount)} fg={theme.text} width={8} />
-                  <text content={`${builder.uniqueTraders}`} fg={theme.text} width={6} />
+                <box flexDirection="row" width="100%" paddingLeft={1}>
+                  <text
+                    content={rankMedal(builder.rank)}
+                    fg={rankMedalColor(builder.rank)}
+                    width={2}
+                  />
+                  <text
+                    content={`${builder.rank}`.padStart(2)}
+                    fg={builder.rank <= 3 ? theme.warning : theme.textMuted}
+                    width={3}
+                  />
+                  <text
+                    content={(builder.name || `${builder.address.slice(0, 8)}…`).padEnd(16)}
+                    fg={theme.text}
+                    width={17}
+                  />
+                  <text
+                    content={fmtVol(builder.volume).padStart(10)}
+                    fg={theme.textMuted}
+                    width={11}
+                  />
+                  <text
+                    content={fmtVol(builder.revenue).padStart(10)}
+                    fg={theme.success}
+                    width={11}
+                  />
+                  <text
+                    content={String(builder.tradeCount).padStart(8)}
+                    fg={theme.text}
+                    width={9}
+                  />
+                  <text
+                    content={`${builder.uniqueTraders}`.padStart(6)}
+                    fg={theme.accent}
+                    width={7}
+                  />
                 </box>
               )}
             </For>
           </Show>
-        </Show>
-      </scrollbox>
+        </scrollbox>
+      </Show>
 
       {/* Footer */}
-      <box padding={1} backgroundColor={theme.primary}>
-        <text content="↑↓ Navigate  [T]ab  [D/W/M/A] Timeframe  [Esc] Close" fg={theme.textMuted} />
+      <Separator type="light" />
+      <box height={1} paddingLeft={2} flexDirection="row">
+        <text content="[↑↓] Navigate  " fg={theme.textMuted} />
+        <text content="[T] Traders  " fg={theme.textMuted} />
+        <text content="[B] Builders  " fg={theme.textMuted} />
+        <text content="[D/W/M/A] Timeframe  " fg={theme.textMuted} />
+        <text content="[ESC] Close" fg={theme.textMuted} />
       </box>
     </box>
   );

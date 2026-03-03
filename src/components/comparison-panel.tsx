@@ -59,9 +59,9 @@ export function ComparisonPanel(props: ComparisonPanelProps) {
     <box
       position="absolute"
       top={2}
-      left="4%"
-      width="92%"
-      height={28}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={160}
