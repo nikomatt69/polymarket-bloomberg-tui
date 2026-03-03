@@ -217,11 +217,14 @@ export function OrderHistory() {
         <text content="" />
 
         {/* Open Orders section */}
-        <text
-          content={orderHistorySection() === "open" ? "OPEN ORDERS [ACTIVE]" : "OPEN ORDERS"}
-          fg={orderHistorySection() === "open" ? theme.primary : theme.textMuted}
-        />
-        <text content="" />
+        <box flexDirection="row" height={1} paddingBottom={1}>
+          <text
+            content={orderHistorySection() === "open" ? "▶ OPEN ORDERS" : "  OPEN ORDERS"}
+            fg={orderHistorySection() === "open" ? theme.primary : theme.textMuted}
+          />
+          <text content={`  (${openOrders().length})`} fg={theme.textMuted} />
+          <text content="  [TAB] switch section" fg={theme.borderSubtle} />
+        </box>
 
         <Show
           when={openOrders().length > 0}
@@ -284,11 +287,14 @@ export function OrderHistory() {
         <text content="" />
 
         {/* Trade History section */}
-        <text
-          content={orderHistorySection() === "trades" ? "TRADE HISTORY (last 50) [ACTIVE]" : "TRADE HISTORY (last 50)"}
-          fg={orderHistorySection() === "trades" ? theme.primary : theme.textMuted}
-        />
-        <text content="" />
+        <box flexDirection="row" height={1} paddingBottom={1}>
+          <text
+            content={orderHistorySection() === "trades" ? "▶ TRADE HISTORY" : "  TRADE HISTORY"}
+            fg={orderHistorySection() === "trades" ? theme.primary : theme.textMuted}
+          />
+          <text content={`  (${tradeHistory().length})`} fg={theme.textMuted} />
+          <text content={`  Fill rate: ${fillRate().toFixed(1)}%`} fg={fillRate() >= 80 ? theme.success : fillRate() >= 50 ? theme.warning : theme.error} />
+        </box>
 
         <Show
           when={tradeHistory().length > 0}

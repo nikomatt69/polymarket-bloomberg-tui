@@ -219,7 +219,10 @@ export function AlertsPanel() {
         <Show when={alertsState.showHistory}>
           <box flexDirection="column" width="100%">
             <text content="" />
-            <text content="ALERT HISTORY" fg={theme.primary} />
+            <box flexDirection="row" height={1}>
+              <text content="◈ ALERT HISTORY" fg={theme.primary} />
+              <text content={`  (${alertsState.alertHistory.length} entries)`} fg={theme.textMuted} />
+            </box>
             <text content="" />
             <Show
               when={alertsState.alertHistory.length > 0}
@@ -331,6 +334,40 @@ export function AlertsPanel() {
             </Show>
             <text content="[ENTER] Save  [TAB] Focus  [M] Metric  [C] Condition  [+/-] Cooldown/Debounce  [ESC] Cancel" fg={theme.textMuted} />
           </box>
+        </Show>
+
+        {/* Proximity bar for selected alert */}
+        <Show when={!alertsState.adding && visibleAlerts().length > 0}>
+          {(() => {
+            const alert = visibleAlerts()[alertsState.selectedIdx];
+            if (!alert) return null;
+            const market = appState.markets.find(m => m.id === alert.marketId);
+            if (!market) return null;
+            let currentValue = 0;
+            switch (alert.metric) {
+              case "price": {
+                const outcome = market.outcomes.find(o => o.id === alert.outcomeId) ?? market.outcomes[0];
+                currentValue = outcome?.price ?? 0;
+                break;
+              }
+              case "change24h": currentValue = market.change24h; break;
+              case "volume24h": currentValue = market.volume24h; break;
+              case "liquidity": currentValue = market.liquidity; break;
+            }
+            const pct = Math.min(1, Math.max(0, currentValue / Math.max(0.0001, alert.threshold)));
+            const barWidth = 24;
+            const filled = Math.round(pct * barWidth);
+            const isApproaching = pct >= 0.85;
+            const barColor = isApproaching ? theme.warning : pct >= 1 ? theme.success : theme.textMuted;
+            return (
+              <box flexDirection="row" paddingTop={1}>
+                <text content="Proximity: [" fg={theme.textMuted} />
+                <text content={"█".repeat(Math.min(filled, barWidth))} fg={barColor} />
+                <text content={"░".repeat(Math.max(0, barWidth - filled))} fg={theme.borderSubtle} />
+                <text content={`] ${(pct * 100).toFixed(0)}% to threshold`} fg={barColor} />
+              </box>
+            );
+          })()}
         </Show>
 
         <Show when={!alertsState.adding}>

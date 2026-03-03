@@ -1214,6 +1214,13 @@ export const [skillsPanelMode, setSkillsPanelMode] = createSignal<"list" | "add"
 export const [skillsAddInput, setSkillsAddInput] = createSignal<{ name: string; description: string; systemPrompt: string }>({ name: "", description: "", systemPrompt: "" });
 export const [skillsAddField, setSkillsAddField] = createSignal<"name" | "description" | "systemPrompt">("name");
 
+// ─── Portfolio Panel Tab Signal ───────────────────────────────────────────────
+export type PortfolioTab = "overview" | "positions" | "analytics" | "history";
+export const [portfolioTab, setPortfolioTab] = createSignal<PortfolioTab>("overview");
+
+// ─── Market List Active Category Signal ───────────────────────────────────────
+export const [marketListCategoryId, setMarketListCategoryId] = createSignal("trending");
+
 // ─── Enterprise Chat Signals ──────────────────────────────────────────────────
 
 export interface StreamingTool {

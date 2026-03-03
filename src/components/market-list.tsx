@@ -17,6 +17,8 @@ import {
   navigateToIndex,
   setMarkets,
   appendMarkets,
+  marketListCategoryId,
+  setMarketListCategoryId,
 } from "../state";
 import { formatVolume, formatChange, truncateString } from "../utils/format";
 import { useTheme } from "../context/theme";
@@ -28,14 +30,18 @@ import {
   getLiveSportsMarkets,
 } from "../api/polymarket";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
 function generateMiniSparkline(change24h: number, width: number = 6): string {
   const chars = "▁▂▃▄▅▆▇█";
   if (change24h === 0) return "──────";
-  
+
   const normalized = Math.min(1, Math.max(-1, change24h / 20));
   const charIdx = Math.floor((normalized + 1) / 2 * (chars.length - 1));
   const char = chars[charIdx] || "─";
-  
+
   if (change24h > 0) {
     return "▲" + char.repeat(width - 1);
   } else {
@@ -43,14 +49,32 @@ function generateMiniSparkline(change24h: number, width: number = 6): string {
   }
 }
 
-function getLiquidityIndicator(liquidity: number, volume24h: number): string {
-  if (volume24h <= 0) return "·";
-  const ratio = liquidity / volume24h;
-  if (ratio > 5) return "●●●";
-  if (ratio > 3) return "●●○";
-  if (ratio > 2) return "●○○";
-  if (ratio > 1) return "○○○";
-  return "···";
+/** 3-letter category badge label */
+function getCategoryBadge(category: string | undefined): string {
+  const cat = (category ?? "").toLowerCase();
+  if (cat.includes("sport")) return "SPO";
+  if (cat.includes("polit")) return "POL";
+  if (cat.includes("crypto")) return "CRY";
+  if (cat.includes("business") || cat.includes("econ")) return "BIZ";
+  if (cat.includes("ai")) return " AI";
+  if (cat.includes("tech")) return "TEC";
+  if (cat.includes("science")) return "SCI";
+  if (cat.includes("entertain")) return "ENT";
+  return "GEN";
+}
+
+/** Expiry info for the Exp column */
+function formatExpiry(resolutionDate: Date | undefined): { text: string; level: "ok" | "warn" | "critical" } {
+  if (!resolutionDate) return { text: " ---", level: "ok" };
+  const diffMs = resolutionDate.getTime() - Date.now();
+  if (diffMs <= 0) return { text: "RES!", level: "critical" };
+  const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  if (days === 0) return { text: `${hours}h⚡`, level: "critical" };
+  if (days <= 2) return { text: `${days}d⚠ `, level: "warn" };
+  if (days <= 7) return { text: `  ${days}d `, level: "warn" };
+  if (days > 30) return { text: `${Math.floor(days / 30)}mo `, level: "ok" };
+  return { text: `${days.toString().padStart(2, " ")}d  `, level: "ok" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,25 +86,29 @@ const LOAD_MORE_SIZE = 20;
 /** Start prefetching when cursor is this many rows from the bottom */
 const PRELOAD_AHEAD = 10;
 
-interface CategoryDef {
+export interface CategoryDef {
   id: string;
   label: string;
   apiValue: string;
   /** True for live/real-time feeds that don't support pagination */
   live?: boolean;
+  /** True for client-side virtual categories (no separate API call needed) */
+  virtual?: boolean;
 }
 
-const CATEGORIES: CategoryDef[] = [
-  { id: "trending",      label: "Hot",      apiValue: "trending"       },
+export const CATEGORIES: CategoryDef[] = [
+  { id: "trending",      label: "Hot🔥",   apiValue: "trending"       },
   { id: "all",           label: "All",      apiValue: "all"            },
-  { id: "sports_live",   label: "Live ⚡",  apiValue: "sports_live", live: true },
+  { id: "closing_soon",  label: "Soon⚠",   apiValue: "all",  virtual: true },
+  { id: "watchlist_cat", label: "★Watch",  apiValue: "all",  virtual: true },
+  { id: "sports_live",   label: "Live⚡",  apiValue: "sports_live", live: true },
   { id: "Sports",        label: "Sports",   apiValue: "Sports"         },
   { id: "Politics",      label: "Politics", apiValue: "Politics"       },
   { id: "Crypto",        label: "Crypto",   apiValue: "Crypto"         },
   { id: "Business",      label: "Biz",      apiValue: "Business"       },
   { id: "AI",            label: "AI",       apiValue: "AI"             },
   { id: "Tech",          label: "Tech",     apiValue: "Tech"           },
-  { id: "Science",       label: "Science",  apiValue: "Science"        },
+  { id: "Science",       label: "Sci",      apiValue: "Science"        },
   { id: "Entertainment", label: "Ent",      apiValue: "Entertainment"  },
 ];
 
@@ -106,7 +134,7 @@ async function fetchForCategory(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// Helper
 // ─────────────────────────────────────────────────────────────────────────────
 
 function probLabel(price: number, title: string): string {
@@ -122,23 +150,44 @@ function probLabel(price: number, title: string): string {
 export function MarketList() {
   const { theme } = useTheme();
 
-  const [activeCategory, setActiveCategory] = createSignal("trending");
-  const [loading, setLoading] = createSignal(false);
+  const activeCategory = marketListCategoryId;
+  const setActiveCategory = setMarketListCategoryId;
+
+  const [localLoading, setLocalLoading] = createSignal(false);
   const [loadingMore, setLoadingMore] = createSignal(false);
   const [hasMore, setHasMore] = createSignal(true);
-  /** How many items have been fetched for each category so far */
   const [offsets, setOffsets] = createSignal<Record<string, number>>({});
 
-  // Respects search + watchlist on top of the category-scoped loaded set
-  const displayMarkets = createMemo(() => getFilteredMarkets());
+  // Virtual category filters applied on top of getFilteredMarkets()
+  const displayMarkets = createMemo(() => {
+    const base = getFilteredMarkets();
+    const cat = activeCategory();
+
+    if (cat === "closing_soon") {
+      const cutoff = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      return base.filter(m => m.resolutionDate && m.resolutionDate.getTime() < cutoff && !m.closed);
+    }
+
+    if (cat === "watchlist_cat") {
+      return base.filter(m => isWatched(m.id));
+    }
+
+    return base;
+  });
 
   // ── Category switch ────────────────────────────────────────────────────────
   createEffect(on(activeCategory, (category) => {
     const cat = CATEGORIES.find((c) => c.id === category);
     if (!cat) return;
 
+    // Virtual categories only filter already-loaded data — no fresh fetch needed
+    if (cat.virtual) {
+      setHasMore(false);
+      return;
+    }
+
     let cancelled = false;
-    setLoading(true);
+    setLocalLoading(true);
     setHasMore(true);
     setOffsets((prev) => ({ ...prev, [category]: 0 }));
 
@@ -148,19 +197,18 @@ export function MarketList() {
         if (cancelled) return;
         setMarkets(markets);
         setOffsets((prev) => ({ ...prev, [category]: markets.length }));
-        // Live feeds don't support cursor pagination
         setHasMore(!cat.live && markets.length >= PAGE_SIZE);
       } catch {
         // Keep existing data on error
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setLocalLoading(false);
       }
     })();
 
     return () => { cancelled = true; };
   }));
 
-  // ── Infinite scroll: auto-load next page when cursor nears the end ─────────
+  // ── Infinite scroll ────────────────────────────────────────────────────────
   createEffect(() => {
     const idx = highlightedIndex();
     const total = displayMarkets().length;
@@ -168,7 +216,7 @@ export function MarketList() {
       total > 0
       && idx >= total - PRELOAD_AHEAD
       && !loadingMore()
-      && !loading()
+      && !localLoading()
       && hasMore()
     ) {
       void loadMore();
@@ -178,7 +226,7 @@ export function MarketList() {
   async function loadMore() {
     const category = activeCategory();
     const cat = CATEGORIES.find((c) => c.id === category);
-    if (!cat || cat.live || loadingMore()) return;
+    if (!cat || cat.live || cat.virtual || loadingMore()) return;
 
     setLoadingMore(true);
     const currentOffset = offsets()[category] ?? 0;
@@ -206,39 +254,46 @@ export function MarketList() {
       {/* ── Category bar ──────────────────────────────────────────────────── */}
       <box width="100%" flexDirection="row" height={1}>
         <For each={CATEGORIES}>
-          {(cat) => {
+          {(cat, catIdx) => {
             const active = () => activeCategory() === cat.id;
+            const needsSep = () => catIdx() === 2 || catIdx() === 4 || catIdx() === 5;
             return (
-              <box
-                height={1}
-                paddingLeft={1}
-                paddingRight={1}
-                backgroundColor={active() ? theme.accent : theme.backgroundPanel}
-                onMouseDown={() => setActiveCategory(cat.id)}
-              >
-                <text
-                  content={cat.label}
-                  fg={active() ? theme.background : cat.live ? theme.error : theme.textMuted}
-                />
-              </box>
+              <>
+                <Show when={needsSep()}>
+                  <text content="│" fg={theme.borderSubtle} />
+                </Show>
+                <box
+                  height={1}
+                  paddingLeft={1}
+                  paddingRight={1}
+                  backgroundColor={active() ? theme.accent : theme.backgroundPanel}
+                  onMouseDown={() => setActiveCategory(cat.id)}
+                >
+                  <text
+                    content={cat.label}
+                    fg={active() ? theme.background : cat.live ? theme.error : cat.virtual ? theme.warning : theme.textMuted}
+                  />
+                </box>
+              </>
             );
           }}
         </For>
         <box flexGrow={1} />
-        <Show when={loading() || loadingMore()}>
+        <Show when={localLoading() || loadingMore()}>
           <text content="◌ " fg={theme.textMuted} />
         </Show>
       </box>
 
-      {/* ── Column headers ────────────────────────────────────────────────── */}
+      {/* ── Column headers ─────────────────────────────────────────────────── */}
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
-        <text content="   #" fg={theme.textMuted} width={4} />
-        <text content="  Market" fg={theme.textMuted} width={22} />
-        <text content="Prob  " fg={theme.textMuted} width={7} />
-        <text content=" Trend" fg={theme.textMuted} width={7} />
-        <text content=" Volume" fg={theme.textMuted} width={9} />
-        <text content="  24h%" fg={theme.textMuted} width={7} />
-        <text content=" Liq" fg={theme.textMuted} width={5} />
+        <text content="  #" fg={theme.textMuted} width={4} />
+        <text content=" Market" fg={theme.textMuted} width={19} />
+        <text content="Cat" fg={theme.textMuted} width={4} />
+        <text content=" Prob " fg={theme.textMuted} width={7} />
+        <text content="Trend " fg={theme.textMuted} width={7} />
+        <text content="Volume " fg={theme.textMuted} width={9} />
+        <text content=" 24h%" fg={theme.textMuted} width={7} />
+        <text content="Exp" fg={theme.textMuted} width={5} />
       </box>
 
       {/* ── Separator ─────────────────────────────────────────────────────── */}
@@ -259,10 +314,10 @@ export function MarketList() {
       {/* ── Market rows ───────────────────────────────────────────────────── */}
       <scrollbox flexGrow={1} width="100%">
         <Show
-          when={!appState.loading && !loading()}
+          when={!appState.loading && !localLoading()}
           fallback={
             <box padding={1}>
-              <text content="Loading markets…" fg={theme.textMuted} />
+              <text content="◌ Loading markets…" fg={theme.textMuted} />
             </box>
           }
         >
@@ -270,7 +325,16 @@ export function MarketList() {
             when={displayMarkets().length > 0}
             fallback={
               <box padding={1}>
-                <text content="No markets found" fg={theme.textMuted} />
+                <text
+                  content={
+                    activeCategory() === "closing_soon"
+                      ? "No markets closing within 7 days"
+                      : activeCategory() === "watchlist_cat"
+                        ? "No markets in watchlist (X to add)"
+                        : "No markets found"
+                  }
+                  fg={theme.textMuted}
+                />
               </box>
             }
           >
@@ -279,7 +343,6 @@ export function MarketList() {
                 const isHighlighted = () => index() === highlightedIndex();
                 const watched = () => isWatched(market.id);
 
-                // Leading outcome (highest price) — for probability display
                 const lead = market.outcomes.length > 0
                   ? market.outcomes.reduce((b, o) => (o.price > b.price ? o : b))
                   : null;
@@ -298,11 +361,25 @@ export function MarketList() {
                   activeCategory() === "sports_live"
                   || (market.category ?? "").toLowerCase().includes("sport");
 
+                const expiry = () => formatExpiry(market.resolutionDate);
+
+                // Tint rows closing within 3 days
+                const rowBg = () => {
+                  if (isHighlighted()) return theme.highlight;
+                  if (market.resolutionDate) {
+                    const msLeft = market.resolutionDate.getTime() - Date.now();
+                    if (msLeft > 0 && msLeft < 3 * 24 * 60 * 60 * 1000) return theme.warningMuted;
+                  }
+                  return undefined;
+                };
+
+                const catBadge = getCategoryBadge(market.category);
+
                 return (
                   <box
                     width="100%"
                     flexDirection="row"
-                    backgroundColor={isHighlighted() ? theme.highlight : undefined}
+                    backgroundColor={rowBg()}
                     onMouseDown={() => navigateToIndex(index())}
                   >
                     {/* Selection / watchlist indicator */}
@@ -319,30 +396,30 @@ export function MarketList() {
                       width={3}
                     />
 
-                    {/* Live badge */}
-                    <text
-                      content={isLiveSports && activeCategory() === "sports_live" ? "⚡" : " "}
-                      fg={theme.error}
-                      width={2}
-                    />
-
                     {/* Title */}
                     <text
-                      content={truncateString(market.title, 19)}
+                      content={truncateString(market.title, 18)}
                       fg={isHighlighted() ? theme.highlightText : theme.text}
-                      width={20}
+                      width={19}
+                    />
+
+                    {/* Category badge */}
+                    <text
+                      content={catBadge}
+                      fg={isHighlighted() ? theme.highlightText : theme.primary}
+                      width={4}
                     />
 
                     {/* Probability */}
                     <text
-                      content={probStr.padStart(7)}
+                      content={probStr.padStart(6)}
                       fg={probFg()}
                       width={7}
                     />
 
                     {/* Trend sparkline */}
                     <text
-                      content={generateMiniSparkline(market.change24h)}
+                      content={isLiveSports && activeCategory() === "sports_live" ? "⚡" + generateMiniSparkline(market.change24h, 5) : generateMiniSparkline(market.change24h)}
                       fg={isHighlighted() ? theme.highlightText : market.change24h > 0 ? theme.success : market.change24h < 0 ? theme.error : theme.textMuted}
                       width={7}
                     />
@@ -367,17 +444,17 @@ export function MarketList() {
                       width={7}
                     />
 
-                    {/* Liquidity indicator */}
+                    {/* Expiry */}
                     <text
-                      content={getLiquidityIndicator(market.liquidity, market.volume24h)}
+                      content={expiry().text}
                       fg={
                         isHighlighted()
                           ? theme.highlightText
-                          : market.liquidity / (market.volume24h || 1) > 2
-                            ? theme.success
-                            : market.liquidity / (market.volume24h || 1) > 1
+                          : expiry().level === "critical"
+                            ? theme.error
+                            : expiry().level === "warn"
                               ? theme.warning
-                              : theme.error
+                              : theme.textMuted
                       }
                       width={5}
                     />
