@@ -4,6 +4,7 @@
 
 import { For, Show, createEffect } from "solid-js";
 import { useTheme } from "../context/theme";
+import { PanelHeader, Separator, DataRow, LoadingState } from "./ui/panel-components";
 import {
   profilePanelOpen,
   setProfilePanelOpen,
@@ -164,33 +165,26 @@ export function ProfilePanel() {
       zIndex={160}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
-        <text content=" ◈ USER PROFILE " fg={theme.highlightText} />
-        <box flexGrow={1} />
+      <PanelHeader
+        title="USER PROFILE"
+        icon="◈"
+        subtitle={profileViewMode() === "edit" ? "EDIT MODE" : profileViewMode() === "search" ? "USER SEARCH" : undefined}
+        onClose={handleClose}
+      >
         <Show when={profileViewMode() === "view"}>
           <box onMouseDown={() => setProfileViewMode("edit")}>
-            <text content=" [E] Edit " fg={theme.highlightText} />
+            <text content=" [E] Edit " fg={theme.primaryMuted} />
           </box>
           <box onMouseDown={() => { setProfileViewMode("search"); loadContacts(); }}>
-            <text content=" [S] Search " fg={theme.highlightText} />
+            <text content=" [S] Search " fg={theme.primaryMuted} />
           </box>
           <box onMouseDown={handleLogout}>
             <text content=" [L] Logout " fg={theme.error} />
           </box>
         </Show>
-        <Show when={profileViewMode() === "edit"}>
-          <text content=" EDIT MODE " fg={theme.warning} />
-        </Show>
-        <Show when={profileViewMode() === "search"}>
-          <text content=" USER SEARCH " fg={theme.success} />
-        </Show>
-        <box onMouseDown={handleClose}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
-        </box>
-      </box>
+      </PanelHeader>
 
-      {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.primaryMuted} />
+      <Separator type="heavy" />
 
       <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
         <Show when={profileViewMode() === "view" || profileViewMode() === "edit"}>
@@ -234,144 +228,119 @@ function ProfileViewEdit(props: {
   return (
     <box flexDirection="column" width="100%">
       <Show when={!props.profile}>
-        <text content="Loading profile..." fg={theme.textMuted} />
-        <text content="" />
-        <box onMouseDown={loadCurrentUserProfile}>
-          <text content="[R] Refresh" fg={theme.accent} />
+        <LoadingState message="Loading profile…" />
+        <box paddingLeft={2} paddingTop={1} onMouseDown={loadCurrentUserProfile}>
+          <text content="[R] Retry" fg={theme.accent} />
         </box>
-        <text content="" />
       </Show>
 
       <Show when={props.profile}>
-        {/* Profile Header */}
-        <box flexDirection="row" width="100%">
-          <box flexDirection="column" width="30%">
-            <text content="AVATAR" fg={theme.textMuted} />
-            <text content="" />
-            <box
-              width={12}
-              height={6}
-              backgroundColor={theme.highlight}
-              flexDirection="column"
-              justifyContent="center"
-              alignItems="center"
-            >
-              <text content="👤" />
-            </box>
+        {/* Profile Info */}
+        <text content="─── IDENTITY ────────────────────────────────────────────────────" fg={theme.borderSubtle} />
+        <box flexDirection="row" width="100%" gap={2}>
+          {/* Avatar Block */}
+          <box
+            width={12}
+            height={5}
+            backgroundColor={theme.highlight}
+            flexDirection="column"
+          >
+            <text content="  ◈   " fg={theme.primary} />
+            <text content={`  ${(props.profile!.username || "?").slice(0, 2).toUpperCase()}  `} fg={theme.highlightText} />
+            <text content="      " />
             <Show when={props.isEditing}>
-              <text content="" />
               <box onMouseDown={() => props.onStartEdit("avatar")}>
-                <text content="[C] Change" fg={theme.accent} />
+                <text content=" [C]hg " fg={theme.accent} />
               </box>
             </Show>
           </box>
 
-          <box flexDirection="column" width="70%" flexGrow={1}>
+          <box flexDirection="column" flexGrow={1}>
             <box flexDirection="row">
-              <text content="USERNAME" fg={theme.textMuted} width={12} />
+              <text content="Username: " fg={theme.textMuted} />
               <Show when={!props.isEditing || editingField() !== "username"}>
-                <text content={props.profile?.username || "—"} fg={theme.textBright} />
+                <text content={props.profile!.username || "—"} fg={theme.accent} />
                 <Show when={props.isEditing}>
                   <text content="  " />
                   <box onMouseDown={() => props.onStartEdit("username")}>
-                    <text content="[E]dit" fg={theme.accent} />
+                    <text content="[E] Edit" fg={theme.accent} />
                   </box>
                 </Show>
               </Show>
               <Show when={props.isEditing && editingField() === "username"}>
-                <input
-                  width={20}
-                  value={editValue()}
-                  focused={true}
-                />
+                <input width={20} value={editValue()} focused={true} />
                 <text content="  " />
                 <box onMouseDown={props.onSaveEdit}>
-                  <text content="[Enter]Save" fg={theme.success} />
+                  <text content="[Enter] Save" fg={theme.success} />
                 </box>
               </Show>
             </box>
 
-            <text content="" />
-
             <box flexDirection="row">
-              <text content="EMAIL" fg={theme.textMuted} width={12} />
-              <text content={props.profile?.email || "—"} fg={theme.text} />
+              <text content="Email   : " fg={theme.textMuted} />
+              <text content={props.profile!.email || "—"} fg={theme.text} />
             </box>
-
-            <text content="" />
-
             <box flexDirection="row">
-              <text content="MEMBER SINCE" fg={theme.textMuted} width={12} />
-              <text content={props.profile?.createdAt ? formatDate(props.profile.createdAt) : "—"} fg={theme.text} />
+              <text content="Joined  : " fg={theme.textMuted} />
+              <text content={props.profile!.createdAt ? formatDate(props.profile!.createdAt) : "—"} fg={theme.text} />
             </box>
-
-            <text content="" />
-
             <box flexDirection="row">
-              <text content="LAST SEEN" fg={theme.textMuted} width={12} />
-              <text content={props.profile?.lastSeen ? formatDate(props.profile.lastSeen) : "—"} fg={theme.text} />
+              <text content="Last    : " fg={theme.textMuted} />
+              <text content={props.profile!.lastSeen ? formatDate(props.profile!.lastSeen) : "—"} fg={theme.textMuted} />
             </box>
           </box>
         </box>
 
-        <text content="" />
-        <text content={SEPARATOR} fg={theme.textMuted} />
-        <text content="" />
-
         {/* Bio Section */}
-        <text content="BIO" fg={theme.textMuted} />
-        <text content="" />
+        <text content="─── BIO ─────────────────────────────────────────────────────────" fg={theme.borderSubtle} />
         <Show when={!props.isEditing || editingField() !== "bio"}>
-          <text content={props.profile?.bio || "No bio set"} fg={theme.text} />
+          <box paddingLeft={1}>
+            <text content={props.profile!.bio || "○ No bio set"} fg={props.profile!.bio ? theme.text : theme.textMuted} />
+          </box>
           <Show when={props.isEditing}>
-            <text content="" />
-            <box onMouseDown={() => props.onStartEdit("bio")}>
-              <text content="[E]dit bio" fg={theme.accent} />
+            <box paddingLeft={1} paddingTop={0} onMouseDown={() => props.onStartEdit("bio")}>
+              <text content="[E] Edit Bio" fg={theme.accent} />
             </box>
           </Show>
         </Show>
         <Show when={props.isEditing && editingField() === "bio"}>
-          <input
-            width={50}
-            value={editValue()}
-            focused={true}
-          />
-          <text content="" />
-          <box onMouseDown={props.onSaveEdit}>
+          <box paddingLeft={1}>
+            <input width={50} value={editValue()} focused={true} />
+          </box>
+          <box paddingLeft={1} paddingTop={0} onMouseDown={props.onSaveEdit}>
             <text content="[Enter] Save  [ESC] Cancel" fg={theme.success} />
           </box>
         </Show>
 
-        <text content="" />
-        <text content={SEPARATOR} fg={theme.textMuted} />
-        <text content="" />
-
         {/* Contacts Section */}
-        <text content="CONTACTS" fg={theme.textMuted} />
-        <text content="" />
-        <Show when={props.contacts.length === 0}>
-          <text content="No contacts yet. Press [S] to search for users." fg={theme.textMuted} />
-        </Show>
-        <Show when={props.contacts.length > 0}>
-          <scrollbox height={6} width="100%">
-            <For each={props.contacts}>
-              {(contact) => (
-                <box flexDirection="row" width="100%">
-                  <text content="👤 " fg={theme.accent} />
-                  <text content={contact.username.padEnd(20)} fg={theme.text} width={21} />
-                  <text content={formatDate(contact.addedAt)} fg={theme.textMuted} />
-                  <text content="  " />
-                  <box onMouseDown={() => props.onRemoveContact(contact.id)}>
-                    <text content="[X] Remove" fg={theme.error} />
+        <text content={`─── CONTACTS (${props.contacts.length}) ──────────────────────────────────────────`} fg={theme.borderSubtle} />
+        <Show
+          when={props.contacts.length === 0}
+          fallback={
+            <scrollbox height={5} width="100%" paddingLeft={1}>
+              <For each={props.contacts}>
+                {(contact) => (
+                  <box flexDirection="row" width="100%">
+                    <text content="◈ " fg={theme.accent} />
+                    <text content={contact.username.padEnd(20)} fg={theme.text} width={21} />
+                    <text content={formatDate(contact.addedAt)} fg={theme.textMuted} width={14} />
+                    <box onMouseDown={() => props.onRemoveContact(contact.id)}>
+                      <text content=" [X] Remove" fg={theme.error} />
+                    </box>
                   </box>
-                </box>
-              )}
-            </For>
-          </scrollbox>
+                )}
+              </For>
+            </scrollbox>
+          }
+        >
+          <box paddingLeft={1}>
+            <text content="○ No contacts yet — press [S] to search for users." fg={theme.textMuted} />
+          </box>
         </Show>
 
-        <text content="" />
-        <text content="[↑↓] Navigate  [ESC] Close" fg={theme.textMuted} />
+        <box paddingLeft={1} paddingTop={0}>
+          <text content="[E] Edit profile   [S] Search users   [ESC] Close" fg={theme.textMuted} />
+        </box>
       </Show>
     </box>
   );
@@ -392,13 +361,11 @@ function UserSearchView(props: { onSelectUser: (profile: UserProfile) => void })
 
   return (
     <box flexDirection="column" width="100%">
-      <text content="Search for users by username" fg={theme.textMuted} />
-      <text content="" />
-      
-      <box flexDirection="row">
-        <text content="Search: " fg={theme.text} />
+      <text content="─── USER SEARCH ─────────────────────────────────────────────────" fg={theme.borderSubtle} />
+      <box flexDirection="row" paddingLeft={1}>
+        <text content="Query: " fg={theme.textMuted} />
         <input
-          width={30}
+          width={32}
           value={userSearchQuery()}
           focused={true}
         />
@@ -408,34 +375,36 @@ function UserSearchView(props: { onSelectUser: (profile: UserProfile) => void })
         </box>
       </box>
 
-      <text content="" />
-
       <Show when={userSearchLoading()}>
-        <text content="Searching..." fg={theme.warning} />
+        <LoadingState message="Searching users…" />
       </Show>
 
       <Show when={!userSearchLoading() && userSearchResults().length > 0}>
-        <text content={"Found " + userSearchResults().length + " user(s):"} fg={theme.textMuted} />
-        <text content="" />
+        <text content={`─── RESULTS (${userSearchResults().length}) ──────────────────────────────────────`} fg={theme.borderSubtle} />
+        <box flexDirection="row" paddingLeft={1} backgroundColor={theme.backgroundPanel}>
+          <text content={"◈ ".padEnd(3)} fg={theme.textMuted} width={3} />
+          <text content={"USERNAME".padEnd(20)} fg={theme.textMuted} width={21} />
+          <text content="BIO" fg={theme.textMuted} />
+        </box>
         <scrollbox height={10} width="100%">
           <For each={userSearchResults()}>
             {(profile) => (
               <box
                 flexDirection="row"
                 width="100%"
+                paddingLeft={1}
                 onMouseDown={() => props.onSelectUser(profile)}
               >
-                <text content="👤 " fg={theme.accent} />
+                <text content="◈ " fg={theme.accent} width={3} />
                 <text content={profile.username.padEnd(20)} fg={theme.text} width={21} />
-                <text content={truncate(profile.bio || "No bio", 30)} fg={theme.textMuted} width={31} />
-                <text content="  " />
+                <text content={truncate(profile.bio || "—", 30)} fg={theme.textMuted} width={31} />
                 <Show when={!isContact(profile.id)}>
                   <box onMouseDown={(e: { stopPropagation: () => void }) => { e.stopPropagation(); addContact(profile); }}>
-                    <text content="[A] Add" fg={theme.success} />
+                    <text content=" [A] Add" fg={theme.success} />
                   </box>
                 </Show>
                 <Show when={isContact(profile.id)}>
-                  <text content="[In contacts]" fg={theme.textMuted} />
+                  <text content=" ✓ Contact" fg={theme.textMuted} />
                 </Show>
               </box>
             )}
@@ -444,11 +413,20 @@ function UserSearchView(props: { onSelectUser: (profile: UserProfile) => void })
       </Show>
 
       <Show when={!userSearchLoading() && userSearchQuery().length >= 2 && userSearchResults().length === 0}>
-        <text content="No users found. Try a different search." fg={theme.textMuted} />
+        <box paddingLeft={1} paddingTop={1}>
+          <text content="✗ No users found — try a different query." fg={theme.textMuted} />
+        </box>
       </Show>
 
-      <text content="" />
-      <text content="[ESC] Back to profile  [S] Search users" fg={theme.textMuted} />
+      <Show when={userSearchQuery().length < 2 && !userSearchLoading()}>
+        <box paddingLeft={1} paddingTop={1}>
+          <text content="Type at least 2 characters to search." fg={theme.textMuted} />
+        </box>
+      </Show>
+
+      <box paddingLeft={1} paddingTop={1}>
+        <text content="[ESC] Back  [S] New Search  [A] Add to Contacts" fg={theme.textMuted} />
+      </box>
     </box>
   );
 }

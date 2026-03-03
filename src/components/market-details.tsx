@@ -1,7 +1,7 @@
 import { Show, createSignal, createEffect, createMemo, For } from "solid-js";
-import { appState, getSelectedMarket } from "../state";
+import { appState, getSelectedMarket, setTimeframe } from "../state";
 import { usePriceHistory } from "../hooks/useMarketData";
-import { PriceHistory, Market } from "../types/market";
+import { PriceHistory, Market, Timeframe } from "../types/market";
 import { Chart } from "./chart";
 import { OutcomeTable } from "./outcome-table";
 import { formatVolume, formatPrice } from "../utils/format";
@@ -47,37 +47,28 @@ function computeRange(prices: number[]): { min: number; max: number; avg: number
   return { min, max, avg };
 }
 
-// Compute fear/greed style indicator (0-100)
 function computeFearGreed(outcomes: { price: number; volume: number; liquidity: number }[]): number {
   if (outcomes.length === 0) return 50;
   if (outcomes.length === 1) {
-    // Binary: if price > 0.5, greed; if < 0.5, fear
-    return outcomes[0].price > 0.5 
-      ? 50 + (outcomes[0].price - 0.5) * 100 
+    return outcomes[0].price > 0.5
+      ? 50 + (outcomes[0].price - 0.5) * 100
       : 50 - (0.5 - outcomes[0].price) * 100;
   }
-  
-  // For multi-outcome: factor in volume concentration and price spread
+
   const totalVolume = outcomes.reduce((sum, o) => sum + o.volume, 0);
   const totalLiquidity = outcomes.reduce((sum, o) => sum + o.liquidity, 0);
-  
+
   if (totalVolume === 0) return 50;
-  
-  // Volume-weighted price
+
   const weightedPrice = outcomes.reduce((sum, o) => sum + o.price * o.volume, 0) / totalVolume;
-  
-  // Liquidity concentration (Herfindahl index)
   const liquidityWeights = outcomes.map(o => o.liquidity / totalLiquidity);
   const hhi = liquidityWeights.reduce((sum, w) => sum + w * w, 0);
-  
-  // Combine: higher weighted price = greed, lower = fear; higher HHI = more certain
-  const priceComponent = weightedPrice * 100; // 0-100
-  const certaintyComponent = (hhi - 0.33) / 0.67 * 50; // Normalize to 0-50 based on concentration
-  
+  const priceComponent = weightedPrice * 100;
+  const certaintyComponent = (hhi - 0.33) / 0.67 * 50;
+
   return Math.max(0, Math.min(100, priceComponent + certaintyComponent));
 }
 
-// Get fear/greed label
 function getFearGreedLabel(value: number): string {
   if (value >= 80) return "EXTREME GREED";
   if (value >= 65) return "GREED";
@@ -88,14 +79,11 @@ function getFearGreedLabel(value: number): string {
   return "EXTREME FEAR";
 }
 
-// Compute smart money indicator (volume/liquidity ratio)
 function computeSmartMoney(volume24h: number, liquidity: number): number {
   if (liquidity === 0) return 0;
-  // Ratio > 1 means high trading activity relative to liquidity (smart money active)
   return (volume24h / liquidity) * 100;
 }
 
-// Get smart money label
 function getSmartMoneyLabel(value: number): string {
   if (value >= 30) return "VERY HIGH";
   if (value >= 15) return "HIGH";
@@ -103,6 +91,21 @@ function getSmartMoneyLabel(value: number): string {
   if (value >= 2) return "LOW";
   return "MINIMAL";
 }
+
+/** Build an ASCII probability bar: fills 10 chars proportionally */
+function probBar(price: number): string {
+  const filled = Math.round(Math.max(0, Math.min(1, price)) * 10);
+  return "█".repeat(filled) + "░".repeat(10 - filled);
+}
+
+/** Labeled section divider: ─── LABEL ────────── */
+function sectionLine(label: string, totalWidth: number = 50): string {
+  const prefix = `─── ${label} `;
+  const remaining = Math.max(0, totalWidth - prefix.length);
+  return prefix + "─".repeat(remaining);
+}
+
+const TIMEFRAMES: Timeframe[] = ["1h", "4h", "1d", "5d", "1w", "1M", "all"];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
@@ -142,60 +145,64 @@ export function MarketDetails() {
     return orderBooks()[lead.id] ?? null;
   });
 
-  // Implied volatility proxy: range / avg
   const impliedVol = createMemo(() => {
     const p = marketPulse();
     if (!p || p.range.avg <= 0) return null;
     return ((p.range.max - p.range.min) / p.range.avg) * 100;
   });
 
-  // Fear/Greed indicator (0-100)
   const fearGreed = createMemo(() => {
     const market = selectedMarket();
     if (!market || market.outcomes.length === 0) return null;
     return computeFearGreed(market.outcomes);
   });
 
-  // Smart money indicator (volume/liquidity ratio)
   const smartMoney = createMemo(() => {
     const market = selectedMarket();
     if (!market) return null;
     return computeSmartMoney(market.volume24h, market.liquidity);
   });
 
-  // Resolution probability comparison (for binary markets)
   const resolutionComparison = createMemo(() => {
     const market = selectedMarket();
     if (!market || market.outcomes.length !== 2) return null;
-    
-    const yesOutcome = market.outcomes.find(o => 
+
+    const yesOutcome = market.outcomes.find(o =>
       o.title.toLowerCase() === "yes" || o.title.toLowerCase().includes("yes")
     );
-    const noOutcome = market.outcomes.find(o => 
+    const noOutcome = market.outcomes.find(o =>
       o.title.toLowerCase() === "no" || o.title.toLowerCase().includes("no")
     );
-    
+
     if (!yesOutcome || !noOutcome) return null;
-    
+
     const currentYes = yesOutcome.price;
     const currentNo = noOutcome.price;
-    const impliedYes = currentYes / (currentYes + currentNo) * 100; // Normalized probability
+    const impliedYes = currentYes / (currentYes + currentNo) * 100;
     const spread = Math.abs(100 - (currentYes * 100 + currentNo * 100));
-    
+
     return { currentYes, currentNo, impliedYes, spread };
   });
 
-  // Probability distribution for outcomes
   const probabilityDistribution = createMemo(() => {
     const market = selectedMarket();
     if (!market || market.outcomes.length === 0) return null;
-    
+
     const total = market.outcomes.reduce((sum, o) => sum + o.price, 0);
     return market.outcomes.map(o => ({
       title: o.title,
       price: o.price,
-      percentage: total > 0 ? (o.price / total) * 100 : 0
+      percentage: total > 0 ? (o.price / total) * 100 : 0,
     }));
+  });
+
+  /** Hours until resolution (for closing soon warning) */
+  const hoursToClose = createMemo(() => {
+    const market = selectedMarket();
+    if (!market?.resolutionDate || market.closed) return null;
+    const diffMs = market.resolutionDate.getTime() - Date.now();
+    if (diffMs <= 0) return null;
+    return diffMs / (1000 * 60 * 60);
   });
 
   // ── Data fetching ──────────────────────────────────────────────────────────
@@ -249,6 +256,23 @@ export function MarketDetails() {
         {(market: () => Market) => (
           <box flexDirection="column" width="100%" gap={0}>
 
+            {/* ── Closing Soon Warning ────────────────────────────────────── */}
+            <Show when={hoursToClose() !== null && hoursToClose()! <= 72}>
+              <box flexDirection="row" width="100%" backgroundColor={theme.warningMuted} paddingLeft={1}>
+                <text content="⚠ " fg={theme.warning} />
+                <text
+                  content={
+                    hoursToClose()! < 1
+                      ? `MARKET CLOSES IN ${Math.round(hoursToClose()! * 60)}m — URGENT`
+                      : hoursToClose()! < 24
+                        ? `MARKET CLOSES IN ${Math.round(hoursToClose()!)}h — Consider position before resolution`
+                        : `MARKET CLOSES IN ${Math.floor(hoursToClose()! / 24)}d ${Math.round(hoursToClose()! % 24)}h — Closing soon`
+                  }
+                  fg={theme.warning}
+                />
+              </box>
+            </Show>
+
             {/* ── Title + badges ─────────────────────────────────────────── */}
             <text content={market().title} fg={theme.textBright} />
 
@@ -268,12 +292,22 @@ export function MarketDetails() {
               <Show when={market().resolutionDate && !market().closed}>
                 <text
                   content={`Expires ${formatClockTime(market().resolutionDate!)}  (${formatCountdown(market().resolutionDate!)})`}
-                  fg={theme.warning}
+                  fg={hoursToClose() !== null && hoursToClose()! <= 72 ? theme.warning : theme.textMuted}
                 />
               </Show>
             </box>
 
-            {/* ── Stat row ───────────────────────────────────────────────── */}
+            {/* ── Description ────────────────────────────────────────────── */}
+            <Show when={(market() as any).description}>
+              <text
+                content={((market() as any).description as string).slice(0, 160)}
+                fg={theme.textMuted}
+              />
+            </Show>
+
+            {/* ── OVERVIEW section ───────────────────────────────────────── */}
+            <text content={sectionLine("OVERVIEW")} fg={theme.borderSubtle} />
+
             <box flexDirection="row" gap={3} height={1}>
               <text
                 content={`Vol(24h): ${formatVolume(market().volume24h)}`}
@@ -322,11 +356,47 @@ export function MarketDetails() {
               </box>
             </Show>
 
-            {/* ── Price pulse ────────────────────────────────────────────── */}
+            {/* ── PROBABILITIES section ───────────────────────────────────── */}
+            <Show when={probabilityDistribution() && probabilityDistribution()!.length > 0}>
+              <text content={sectionLine("PROBABILITIES")} fg={theme.borderSubtle} />
+              <For each={probabilityDistribution()!.slice(0, 4)}>
+                {(outcome) => {
+                  const isYes = outcome.title.toLowerCase().includes("yes") || outcome.price >= 0.5;
+                  const barColor = () => isYes ? theme.success : theme.error;
+                  return (
+                    <box flexDirection="row" height={1}>
+                      <text
+                        content={outcome.title.toUpperCase().slice(0, 8).padEnd(8, " ")}
+                        fg={theme.text}
+                        width={9}
+                      />
+                      <text content={probBar(outcome.price)} fg={barColor()} width={11} />
+                      <text
+                        content={` ${outcome.percentage.toFixed(1)}%`}
+                        fg={barColor()}
+                        width={7}
+                      />
+                      <text
+                        content={`  ${formatCents(outcome.price)}`}
+                        fg={theme.textMuted}
+                        width={8}
+                      />
+                    </box>
+                  );
+                }}
+              </For>
+              <Show when={probabilityDistribution()!.length > 4}>
+                <text content={`  …and ${probabilityDistribution()!.length - 4} more outcomes`} fg={theme.textMuted} />
+              </Show>
+            </Show>
+
+            {/* ── MARKET ANALYSIS section ─────────────────────────────────── */}
+            <text content={sectionLine("MARKET ANALYSIS")} fg={theme.borderSubtle} />
+
             <Show when={marketPulse()}>
               <box flexDirection="row" gap={2} height={1}>
                 <text
-                  content={`Pulse: ${marketPulse()!.regime}`}
+                  content={`Regime: ${marketPulse()!.regime}`}
                   fg={
                     marketPulse()!.regime === "BULLISH"
                       ? theme.success
@@ -348,14 +418,13 @@ export function MarketDetails() {
                 <Show when={impliedVol() !== null}>
                   <text content="│" fg={theme.borderSubtle} />
                   <text
-                    content={`Volatility: ${impliedVol()!.toFixed(1)}%`}
+                    content={`Vol: ${impliedVol()!.toFixed(1)}%`}
                     fg={impliedVol()! > 20 ? theme.warning : theme.textMuted}
                   />
                 </Show>
               </box>
             </Show>
 
-            {/* ── Fear/Greed & Smart Money Indicators ────────────────────── */}
             <Show when={fearGreed() !== null || smartMoney() !== null}>
               <box flexDirection="row" gap={2} height={1}>
                 <Show when={fearGreed() !== null}>
@@ -375,7 +444,7 @@ export function MarketDetails() {
                   <text content="│" fg={theme.borderSubtle} />
                 </Show>
                 <Show when={smartMoney() !== null}>
-                  <text content="Smart Money:" fg={theme.textMuted} />
+                  <text content="Smart$:" fg={theme.textMuted} />
                   <text
                     content={`${getSmartMoneyLabel(smartMoney()!)} (${smartMoney()!.toFixed(1)}%)`}
                     fg={
@@ -390,30 +459,11 @@ export function MarketDetails() {
               </box>
             </Show>
 
-            {/* ── Probability Distribution ────────────────────────────────── */}
-            <Show when={probabilityDistribution() && probabilityDistribution()!.length > 0}>
-              <box flexDirection="row" gap={1} height={1}>
-                <text content="Probabilities:" fg={theme.textMuted} />
-                <For each={probabilityDistribution()}>
-                  {(outcome) => (
-                    <>
-                      <text
-                        content={`${outcome.title.toUpperCase().slice(0,4)} ${outcome.percentage.toFixed(1)}%`}
-                        fg={outcome.title.toLowerCase().includes("yes") ? theme.success : theme.error}
-                      />
-                      <text content="│" fg={theme.borderSubtle} />
-                    </>
-                  )}
-                </For>
-              </box>
-            </Show>
-
-            {/* ── Resolution Probability vs Current Price ─────────────────── */}
             <Show when={resolutionComparison()}>
               <box flexDirection="row" gap={2} height={1}>
-                <text content="Implied vs Actual:" fg={theme.textMuted} />
+                <text content="Implied:" fg={theme.textMuted} />
                 <text
-                  content={`Yes: ${formatPrice(resolutionComparison()!.currentYes)} (implied ${resolutionComparison()!.impliedYes.toFixed(1)}%)`}
+                  content={`YES ${formatPrice(resolutionComparison()!.currentYes)} (${resolutionComparison()!.impliedYes.toFixed(1)}%)`}
                   fg={theme.success}
                 />
                 <text content="│" fg={theme.borderSubtle} />
@@ -424,10 +474,30 @@ export function MarketDetails() {
               </box>
             </Show>
 
-            {/* ── Timeframe hint ─────────────────────────────────────────── */}
-            <box flexDirection="row" gap={2} height={1}>
-              <text content={`Timeframe: ${appState.timeframe.toUpperCase()}`} fg={theme.textMuted} />
-              <text content="[1] 1h  [2] 4h  [3] 1d  [4] 5d  [5] 1w  [6] 1M  [7] all" fg={theme.borderSubtle} />
+            {/* ── PRICE HISTORY section ───────────────────────────────────── */}
+            <text content={sectionLine("PRICE HISTORY")} fg={theme.borderSubtle} />
+
+            {/* Timeframe as visual clickable tabs */}
+            <box flexDirection="row" height={1} gap={1}>
+              <For each={TIMEFRAMES}>
+                {(tf) => {
+                  const isActive = () => appState.timeframe === tf;
+                  return (
+                    <box
+                      paddingLeft={1}
+                      paddingRight={1}
+                      backgroundColor={isActive() ? theme.accent : theme.backgroundPanel}
+                      onMouseDown={() => setTimeframe(tf)}
+                    >
+                      <text
+                        content={tf.toUpperCase()}
+                        fg={isActive() ? theme.background : theme.textMuted}
+                      />
+                    </box>
+                  );
+                }}
+              </For>
+              <text content="  [1-7] to switch" fg={theme.borderSubtle} />
             </box>
 
             <text content="" />
@@ -437,7 +507,8 @@ export function MarketDetails() {
 
             <text content="" />
 
-            {/* ── Outcomes ───────────────────────────────────────────────── */}
+            {/* ── OUTCOMES section ────────────────────────────────────────── */}
+            <text content={sectionLine("OUTCOMES")} fg={theme.borderSubtle} />
             <OutcomeTable market={market()} orderBooks={orderBooks()} />
           </box>
         )}

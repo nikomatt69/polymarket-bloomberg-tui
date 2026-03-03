@@ -253,37 +253,20 @@ export function SettingsPanel() {
       />
 
       {/* Tab bar */}
-      <box height={1} backgroundColor={theme.backgroundPanel} flexDirection="row" paddingLeft={2}>
-        <box onMouseDown={() => setSettingsPanelTab("theme")}>
-          <text
-            content={settingsPanelTab() === "theme" ? "> THEME <" : "  THEME  "}
-            fg={settingsPanelTab() === "theme" ? theme.accent : theme.textMuted}
-          />
-        </box>
-        <box onMouseDown={() => setSettingsPanelTab("account")}>
-          <text
-            content={settingsPanelTab() === "account" ? "> ACCOUNT <" : "  ACCOUNT  "}
-            fg={settingsPanelTab() === "account" ? theme.accent : theme.textMuted}
-          />
-        </box>
-        <box onMouseDown={() => setSettingsPanelTab("providers")}>
-          <text
-            content={settingsPanelTab() === "providers" ? "> PROVIDERS <" : "  PROVIDERS  "}
-            fg={settingsPanelTab() === "providers" ? theme.accent : theme.textMuted}
-          />
-        </box>
-        <box onMouseDown={() => setSettingsPanelTab("display")}>
-          <text
-            content={settingsPanelTab() === "display" ? "> DISPLAY <" : "  DISPLAY  "}
-            fg={settingsPanelTab() === "display" ? theme.accent : theme.textMuted}
-          />
-        </box>
-        <box onMouseDown={() => setSettingsPanelTab("keys")}>
-          <text
-            content={settingsPanelTab() === "keys" ? "> KEYS <" : "  KEYS  "}
-            fg={settingsPanelTab() === "keys" ? theme.accent : theme.textMuted}
-          />
-        </box>
+      <box height={1} backgroundColor={theme.backgroundPanel} flexDirection="row">
+        {(["theme", "account", "providers", "display", "keys"] as const).map((tab) => (
+          <box
+            paddingLeft={2}
+            paddingRight={2}
+            backgroundColor={settingsPanelTab() === tab ? theme.primary : undefined}
+            onMouseDown={() => setSettingsPanelTab(tab)}
+          >
+            <text
+              content={` ${tab.toUpperCase()} `}
+              fg={settingsPanelTab() === tab ? theme.highlightText : theme.textMuted}
+            />
+          </box>
+        ))}
       </box>
 
       {/* Separator */}
@@ -294,23 +277,31 @@ export function SettingsPanel() {
 
         {/* THEME tab */}
         <Show when={settingsPanelTab() === "theme"}>
+          <text content="─── CURRENT THEME ──────────────────────────────────────────────" fg={theme.borderSubtle} />
           <box flexDirection="row" gap={1}>
-            <text content="Mode:" fg={theme.textMuted} />
+            <text content="Mode  :" fg={theme.textMuted} />
             <text content={ctx.mode.toUpperCase()} fg={theme.primary} />
-            <text content="  Theme:" fg={theme.textMuted} />
-            <text content={`${ctx.themeName} (${themePosition()}/${themeCount()})`} fg={theme.accent} />
+            <text content="   Theme  :" fg={theme.textMuted} />
+            <text content={`${ctx.themeName}`} fg={theme.accent} />
+            <text content={`  (${themePosition()}/${themeCount()})`} fg={theme.textMuted} />
+          </box>
+          <box flexDirection="row" gap={1}>
+            <text content="Prev  :" fg={theme.textMuted} />
+            <text content={prevThemeName()} fg={theme.text} />
+            <text content="   Next  :" fg={theme.textMuted} />
+            <text content={nextThemeName()} fg={theme.text} />
           </box>
           <box flexDirection="row" gap={1}>
             <text content="Search:" fg={theme.textMuted} />
             <text
-              content={settingsThemeSearchEditing() ? `${settingsThemeQuery()}▌` : (settingsThemeQuery() || "(none)")}
-              fg={settingsThemeSearchEditing() ? theme.warning : theme.text}
+              content={settingsThemeSearchEditing() ? `${settingsThemeQuery()}▌` : (settingsThemeQuery() || "(press / to search)")}
+              fg={settingsThemeSearchEditing() ? theme.warning : theme.textMuted}
             />
             <text content={`  Matches: ${matchedThemeNames().length}`} fg={theme.textMuted} />
           </box>
-          <box flexDirection="row" gap={3}>
+          <box flexDirection="row" gap={3} paddingTop={0}>
             <box onMouseDown={() => toggleMode()}>
-              <text content="[T/Enter] Mode" fg={theme.text} />
+              <text content="[T] Toggle Mode" fg={theme.text} />
             </box>
             <box onMouseDown={() => ctx.cycleTheme(1)}>
               <text content="[N/↓] Next" fg={theme.text} />
@@ -322,34 +313,27 @@ export function SettingsPanel() {
               <text content="[R] Reload" fg={theme.textMuted} />
             </box>
           </box>
-          <box flexDirection="row" gap={1}>
-            <text content="Prev:" fg={theme.textMuted} />
-            <text content={prevThemeName()} fg={theme.text} />
-            <text content="  Next:" fg={theme.textMuted} />
-            <text content={nextThemeName()} fg={theme.text} />
-          </box>
-          <box flexDirection="row" gap={1}>
-            <text content="Source:" fg={theme.textMuted} />
-            <text content="nikcli/src/cli/cmd/tui/context/theme" fg={theme.textMuted} />
-          </box>
-          <text content="" />
-          <text content="Theme list (click to apply):" fg={theme.textMuted} />
-          <Show when={matchedThemeNames().length > 0} fallback={<text content="No themes match current search" fg={theme.error} />}>
-          <box flexDirection="column">
-            <For each={visibleThemeEntries()}>
-              {(entry) => (
-                <box onMouseDown={() => ctx.setTheme(entry.name)}>
-                  <text
-                    content={`${entry.active ? ">" : " "} ${String(entry.index + 1).padStart(themeIndexPad(), "0")} ${entry.name}`}
-                    fg={entry.active ? theme.highlight : theme.text}
-                  />
-                </box>
-              )}
-            </For>
-          </box>
+
+          <text content="─── THEME LIST (click to apply) ─────────────────────────────────" fg={theme.borderSubtle} />
+          <Show when={matchedThemeNames().length > 0} fallback={<text content="✗ No themes match current search" fg={theme.error} />}>
+            <box flexDirection="column">
+              <For each={visibleThemeEntries()}>
+                {(entry) => (
+                  <box
+                    onMouseDown={() => ctx.setTheme(entry.name)}
+                    backgroundColor={entry.active ? theme.primary : undefined}
+                  >
+                    <text
+                      content={`${entry.active ? " ▶ " : "   "}${String(entry.index + 1).padStart(themeIndexPad(), "0")} ${entry.name}`}
+                      fg={entry.active ? theme.highlightText : theme.text}
+                    />
+                  </box>
+                )}
+              </For>
+            </box>
           </Show>
-          <text content="" />
-          <text content="Color palette:" fg={theme.textMuted} />
+
+          <text content="─── COLOR PALETTE ───────────────────────────────────────────────" fg={theme.borderSubtle} />
           <box flexDirection="row" gap={2}>
             <text content="Primary" fg={theme.textMuted} />
             <text content="███" fg={theme.primary} />
@@ -368,8 +352,7 @@ export function SettingsPanel() {
         <Show when={settingsPanelTab() === "providers"}>
           <box flexDirection="row" width="100%" gap={3}>
             <box flexDirection="column" width={34}>
-              <text content="AI Providers" fg={theme.primary} />
-              <text content="Select provider:" fg={theme.textMuted} />
+              <text content="─── AI PROVIDERS ────────────────" fg={theme.borderSubtle} />
               <For each={aiProviderState.providers}>
                 {(provider) => (
                   <box onMouseDown={() => setSettingsSelectedProviderId(provider.id)}>
@@ -503,8 +486,9 @@ export function SettingsPanel() {
 
         {/* ACCOUNT tab */}
         <Show when={settingsPanelTab() === "account"}>
+          <text content="─── WALLET STATUS ───────────────────────────────────────────────" fg={theme.borderSubtle} />
           <box flexDirection="row" gap={1}>
-            <text content="Status:  " fg={theme.textMuted} />
+            <text content="Status :" fg={theme.textMuted} />
             <Show
               when={walletState.connected}
               fallback={<text content="○ NOT CONNECTED" fg={theme.error} />}
@@ -514,31 +498,31 @@ export function SettingsPanel() {
           </box>
           <Show when={walletState.connected && walletState.address}>
             <box flexDirection="row" gap={1}>
-              <text content="Address: " fg={theme.textMuted} />
+              <text content="Address:" fg={theme.textMuted} />
               <text content={truncateAddress(walletState.address!)} fg={theme.primary} />
             </box>
             <box flexDirection="row" gap={1}>
-              <text content="Balance: " fg={theme.textMuted} />
+              <text content="Balance:" fg={theme.textMuted} />
               <text
-                content={`${walletState.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`}
+                content={`$${walletState.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`}
                 fg={theme.success}
               />
             </box>
             <box flexDirection="row" gap={1}>
-              <text content="API Creds:" fg={theme.textMuted} />
+              <text content="API Key :" fg={theme.textMuted} />
               <text
-                content={walletState.apiKey ? "Configured" : "Not configured"}
-                fg={walletState.apiKey ? theme.success : theme.textMuted}
+                content={walletState.apiKey ? "✓ Configured" : "✗ Not configured"}
+                fg={walletState.apiKey ? theme.success : theme.error}
               />
             </box>
             <box flexDirection="row" gap={1}>
-              <text content="Proxy Wlt:" fg={theme.textMuted} />
+              <text content="Proxy   :" fg={theme.textMuted} />
               <Show
                 when={settingsFunderEditing()}
                 fallback={
                   <box flexDirection="row" gap={1}>
                     <text
-                      content={walletState.funderAddress ? truncateAddress(walletState.funderAddress) : "Not set — [F] to configure"}
+                      content={walletState.funderAddress ? truncateAddress(walletState.funderAddress) : "○ Not set — press [F] to configure"}
                       fg={walletState.funderAddress ? theme.accent : theme.textMuted}
                     />
                   </box>
@@ -554,35 +538,33 @@ export function SettingsPanel() {
               </Show>
             </box>
           </Show>
-          <text content="" />
 
-          {/* Connection Health */}
-          <text content="── Connection Health ──" fg={theme.textMuted} />
+          <text content="─── CONNECTION HEALTH ───────────────────────────────────────────" fg={theme.borderSubtle} />
           <box flexDirection="row" gap={2}>
-            <text content="Gamma API:" fg={theme.textMuted} />
+            <text content="Gamma API  :" fg={theme.textMuted} />
             <text
-              content={apiLatency() === null ? "pinging…" : apiLatency()! < 0 ? "ERROR" : `${apiLatency()}ms`}
+              content={apiLatency() === null ? "● pinging…" : apiLatency()! < 0 ? "✗ ERROR" : `● ${apiLatency()}ms`}
               fg={latencyColor()}
             />
           </box>
           <box flexDirection="row" gap={2}>
-            <text content="Markets loaded:" fg={theme.textMuted} />
-            <text content={`${appState.markets.length}`} fg={theme.text} />
-            <text content="Last refresh:" fg={theme.textMuted} />
+            <text content="Markets    :" fg={theme.textMuted} />
+            <text content={`${appState.markets.length} loaded`} fg={theme.text} />
+            <text content="   Last refresh:" fg={theme.textMuted} />
             <text content={appState.lastRefresh ? appState.lastRefresh.toLocaleTimeString() : "never"} fg={theme.text} />
           </box>
 
-          <text content="" />
+          <text content="─── ACTIONS ─────────────────────────────────────────────────────" fg={theme.borderSubtle} />
           <box flexDirection="row" gap={3}>
             <box onMouseDown={() => { setSettingsPanelOpen(false); setWalletModalOpen(true); }}>
-              <text content="[W] Wallet Modal" fg={theme.primary} />
+              <text content="[W] Wallet" fg={theme.primary} />
             </box>
             <Show when={walletState.connected}>
               <box onMouseDown={() => void refreshWalletBalance()}>
-                <text content="[R] Refresh Bal" fg={theme.textMuted} />
+                <text content="[R] Refresh Balance" fg={theme.textMuted} />
               </box>
               <box onMouseDown={() => { setSettingsFunderEditing(true); setSettingsFunderInput(walletState.funderAddress ?? ""); }}>
-                <text content="[F] Set Proxy" fg={theme.accent} />
+                <text content="[F] Set Proxy Wallet" fg={theme.accent} />
               </box>
               <box onMouseDown={() => disconnectWalletHook()}>
                 <text content="[D] Disconnect" fg={theme.error} />
@@ -593,6 +575,7 @@ export function SettingsPanel() {
 
         {/* DISPLAY tab */}
         <Show when={settingsPanelTab() === "display"}>
+          <text content="─── SORTING ─────────────────────────────────────────────────────" fg={theme.borderSubtle} />
           <box flexDirection="row" gap={1}>
             <text content="Sort:      " fg={theme.textMuted} />
             <box onMouseDown={() => setSortBy("volume")}>
@@ -614,7 +597,7 @@ export function SettingsPanel() {
               />
             </box>
           </box>
-          <text content="" />
+          <text content="─── TIMEFRAME ───────────────────────────────────────────────────" fg={theme.borderSubtle} />
           <box flexDirection="row" gap={1}>
             <text content="Timeframe: " fg={theme.textMuted} />
             <box onMouseDown={() => setTimeframe("1h")}>
@@ -660,7 +643,7 @@ export function SettingsPanel() {
               />
             </box>
           </box>
-          <text content="" />
+          <text content="─── WATCHLIST ───────────────────────────────────────────────────" fg={theme.borderSubtle} />
           <box flexDirection="row" gap={1}>
             <text content="Watchlist: " fg={theme.textMuted} />
             <box onMouseDown={toggleWatchlistFilter}>

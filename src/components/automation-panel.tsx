@@ -21,6 +21,7 @@ import {
 import { saveRules } from "../automation/rules";
 import type { TradingRule } from "../automation/rules";
 import type { ScanResult } from "../automation/scanner";
+import { PanelHeader, Separator } from "./ui/panel-components";
 
 function fmtDate(ts: number): string {
   if (!ts) return "never";
@@ -88,60 +89,68 @@ export function AutomationPanel() {
       zIndex={160}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.warning} flexDirection="row">
-        <text content=" ◈ AUTOMATION ENGINE " fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <text content={`${rules().length} rules · ${alerts().length} alerts `} fg={theme.highlightText} />
-        <box onMouseDown={() => setAutomationPanelOpen(false)}>
-          <text content=" [B] ✕ " fg={theme.highlightText} />
-        </box>
-      </box>
+      <PanelHeader
+        title="AUTOMATION ENGINE"
+        icon="◈"
+        subtitle={`${rules().length} rules  │  ${alerts().length} scanner alerts`}
+        onClose={() => setAutomationPanelOpen(false)}
+      />
 
       {/* Tab bar */}
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
         <box
+          paddingLeft={2}
+          paddingRight={2}
+          backgroundColor={automationTab() === "rules" ? theme.warning : undefined}
           onMouseDown={() => { setAutomationTab("rules"); setAutomationSelectedIdx(0); }}
-          paddingLeft={1}
-          paddingRight={1}
         >
           <text
-            content={`[1] RULES (${rules().length})`}
-            fg={automationTab() === "rules" ? theme.warning : theme.textMuted}
+            content={` RULES (${rules().length}) `}
+            fg={automationTab() === "rules" ? theme.background : theme.textMuted}
           />
         </box>
-        <text content="  │  " fg={theme.border} />
         <box
+          paddingLeft={2}
+          paddingRight={2}
+          backgroundColor={automationTab() === "alerts" ? theme.warning : undefined}
           onMouseDown={() => { setAutomationTab("alerts"); setAutomationSelectedIdx(0); }}
-          paddingRight={1}
         >
           <text
-            content={`[2] SCANNER ALERTS (${alerts().length})`}
-            fg={automationTab() === "alerts" ? theme.warning : theme.textMuted}
+            content={` SCANNER (${alerts().length}) `}
+            fg={automationTab() === "alerts" ? theme.background : theme.textMuted}
           />
         </box>
+        <Show when={alerts().filter(a => a.severity === "high").length > 0}>
+          <box paddingLeft={2}>
+            <text content={`⚠ ${alerts().filter(a => a.severity === "high").length} high sev`} fg={theme.error} />
+          </box>
+        </Show>
       </box>
 
       {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
+      <Separator type="heavy" />
 
       {/* Rules tab */}
       <Show when={automationTab() === "rules"}>
         <box flexGrow={1} flexDirection="column" paddingLeft={1}>
           {/* Column headers */}
-          <box flexDirection="row" width="100%">
+          <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
             <text content="   " width={3} fg={theme.textMuted} />
-            <text content="EN " width={4} fg={theme.textMuted} />
-            <text content="NAME                 " width={22} fg={theme.textMuted} />
-            <text content="TRIGGER      " width={14} fg={theme.textMuted} />
-            <text content="ACTION       " width={14} fg={theme.textMuted} />
+            <text content={"EN".padEnd(4)} width={4} fg={theme.textMuted} />
+            <text content={"NAME".padEnd(22)} width={22} fg={theme.textMuted} />
+            <text content={"TRIGGER".padEnd(14)} width={14} fg={theme.textMuted} />
+            <text content={"ACTION".padEnd(14)} width={14} fg={theme.textMuted} />
             <text content="LAST FIRED" fg={theme.textMuted} />
           </box>
 
           <Show
             when={rules().length > 0}
             fallback={
-              <box flexGrow={1} paddingTop={1} paddingLeft={1}>
-                <text content="No automation rules. Edit ~/.polymarket-tui/rules.json to add rules." fg={theme.textMuted} />
+              <box flexGrow={1} paddingTop={2} paddingLeft={2}>
+                <text content="No automation rules configured." fg={theme.textMuted} />
+                <text content="" />
+                <text content="Edit ~/.polymarket-tui/rules.json to add rules." fg={theme.textMuted} />
+                <text content="Rules run automatically on each market refresh." fg={theme.textMuted} />
               </box>
             }
           >
@@ -158,7 +167,7 @@ export function AutomationPanel() {
                     >
                       <text content={isSelected() ? " ▶ " : "   "} fg={theme.warning} width={3} />
                       <text
-                        content={rule.enabled ? "✓  " : "✗  "}
+                        content={rule.enabled ? " ✓  " : " ✗  "}
                         fg={rule.enabled ? theme.success : theme.error}
                         width={4}
                       />
@@ -179,7 +188,7 @@ export function AutomationPanel() {
                       />
                       <text
                         content={fmtDate(rule.lastTriggered ?? 0)}
-                        fg={theme.textMuted}
+                        fg={rule.lastTriggered ? theme.success : theme.textMuted}
                       />
                     </box>
                   );
@@ -190,11 +199,12 @@ export function AutomationPanel() {
         </box>
 
         {/* Rules footer */}
+        <Separator type="light" />
         <box height={1} width="100%" backgroundColor={theme.backgroundPanel} paddingLeft={2} flexDirection="row">
-          <text content="Space/Enter: toggle  " fg={theme.textMuted} />
-          <text content="d: delete  " fg={theme.textMuted} />
-          <text content="Tab: alerts tab  " fg={theme.textMuted} />
-          <text content="[B] close" fg={theme.textMuted} />
+          <text content="[Space/Enter] Toggle  " fg={theme.textMuted} />
+          <text content="[D] Delete  " fg={theme.textMuted} />
+          <text content="[Tab] Scanner Alerts  " fg={theme.textMuted} />
+          <text content="[B] Close" fg={theme.textMuted} />
         </box>
       </Show>
 
@@ -202,19 +212,22 @@ export function AutomationPanel() {
       <Show when={automationTab() === "alerts"}>
         <box flexGrow={1} flexDirection="column" paddingLeft={1}>
           {/* Column headers */}
-          <box flexDirection="row" width="100%">
+          <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
             <text content="   " width={3} fg={theme.textMuted} />
-            <text content="TYPE        " width={12} fg={theme.textMuted} />
-            <text content="SEV    " width={8} fg={theme.textMuted} />
-            <text content="MARKET                  " width={25} fg={theme.textMuted} />
+            <text content={"TYPE".padEnd(12)} width={12} fg={theme.textMuted} />
+            <text content={"SEV".padEnd(8)} width={8} fg={theme.textMuted} />
+            <text content={"MARKET".padEnd(25)} width={25} fg={theme.textMuted} />
             <text content="MESSAGE" fg={theme.textMuted} />
           </box>
 
           <Show
             when={alerts().length > 0}
             fallback={
-              <box flexGrow={1} paddingTop={1} paddingLeft={1}>
-                <text content="No scanner alerts. Alerts appear after market refresh." fg={theme.textMuted} />
+              <box flexGrow={1} paddingTop={2} paddingLeft={2}>
+                <text content="No scanner alerts triggered yet." fg={theme.textMuted} />
+                <text content="" />
+                <text content="Alerts appear after each market data refresh." fg={theme.textMuted} />
+                <text content="The scanner watches for: volume spikes, price moves, arbitrage, low liquidity." fg={theme.textMuted} />
               </box>
             }
           >
@@ -226,13 +239,13 @@ export function AutomationPanel() {
                     <box
                       flexDirection="row"
                       width="100%"
-                      backgroundColor={isSelected() ? theme.highlight : undefined}
+                      backgroundColor={isSelected() ? theme.highlight : alert.severity === "high" ? theme.errorMuted : undefined}
                       onMouseDown={() => setAutomationSelectedIdx(i())}
                     >
                       <text content={isSelected() ? " ▶ " : "   "} fg={theme.warning} width={3} />
                       <text
                         content={typeLabel(alert.type).padEnd(11, " ")}
-                        fg={severityColor(alert.severity)}
+                        fg={isSelected() ? theme.highlightText : severityColor(alert.severity)}
                         width={12}
                       />
                       <text
@@ -246,7 +259,7 @@ export function AutomationPanel() {
                         width={25}
                       />
                       <text
-                        content={truncate(alert.message, 60)}
+                        content={truncate(alert.message, 58)}
                         fg={isSelected() ? theme.highlightText : theme.textMuted}
                       />
                     </box>
@@ -258,11 +271,12 @@ export function AutomationPanel() {
         </box>
 
         {/* Alerts footer */}
+        <Separator type="light" />
         <box height={1} width="100%" backgroundColor={theme.backgroundPanel} paddingLeft={2} flexDirection="row">
-          <text content="c: clear all  " fg={theme.textMuted} />
-          <text content="d: delete selected  " fg={theme.textMuted} />
-          <text content="Tab: rules tab  " fg={theme.textMuted} />
-          <text content="[B] close" fg={theme.textMuted} />
+          <text content="[C] Clear All  " fg={theme.textMuted} />
+          <text content="[D] Delete Selected  " fg={theme.textMuted} />
+          <text content="[Tab] Rules Tab  " fg={theme.textMuted} />
+          <text content="[B] Close" fg={theme.textMuted} />
         </box>
       </Show>
     </box>

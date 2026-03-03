@@ -353,6 +353,27 @@ export function OrderForm() {
         </Show>
       </box>
 
+      {/* Balance usage bar */}
+      <Show when={walletState.connected && estimatedCost() !== null}>
+        <box flexDirection="column" paddingLeft={2} paddingRight={2} paddingTop={1}>
+          {(() => {
+            const pct = Math.min(1, (estimatedCost() ?? 0) / Math.max(1, walletState.balance));
+            const barWidth = 30;
+            const filled = Math.round(pct * barWidth);
+            const empty = barWidth - filled;
+            const barColor = pct > 0.9 ? theme.error : pct > 0.6 ? theme.warning : theme.success;
+            return (
+              <box flexDirection="row">
+                <text content="Bal usage: [" fg={theme.textMuted} />
+                <text content={"█".repeat(filled)} fg={barColor} />
+                <text content={"░".repeat(empty)} fg={theme.borderSubtle} />
+                <text content={`] ${(pct * 100).toFixed(0)}%`} fg={barColor} />
+              </box>
+            );
+          })()}
+        </box>
+      </Show>
+
       {/* Breakeven / Kelly / Post-trade */}
       <Show when={walletState.connected}>
         <box flexDirection="row" paddingLeft={2} gap={4}>

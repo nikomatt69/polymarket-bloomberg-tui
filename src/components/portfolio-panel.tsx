@@ -2,11 +2,14 @@ import { For, Show, createMemo } from "solid-js";
 import { positionsState } from "../hooks/usePositions";
 import { ordersState } from "../hooks/useOrders";
 import { calculatePortfolioSummary } from "../api/positions";
-import { walletState, appState } from "../state";
+import { walletState, appState, portfolioTab, setPortfolioTab } from "../state";
 import { calculateMonthlyStats, calculateTradeStats, calculateMarketConcentration, calculateSharpeRatio, calculateMaxDrawdown, calculatePnLTimeSeries, calculatePositionRisk } from "../utils/analytics";
 import { sparkline } from "../utils/charts";
 import { useTheme } from "../context/theme";
-import { PanelHeader, SectionTitle, DataRow, Separator, StatusBadge, PriceChange, ProgressBar } from "./ui/panel-components";
+import { PanelHeader, SectionTitle, DataRow, Separator, StatusBadge, TabBar } from "./ui/panel-components";
+
+const PORTFOLIO_TABS = ["OVERVIEW", "POSITIONS", "ANALYTICS", "HISTORY"] as const;
+type PortfolioTabLabel = typeof PORTFOLIO_TABS[number];
 
 function truncate(str: string, len: number): string {
   return str.length > len ? str.slice(0, len - 1) + "…" : str.padEnd(len, " ");
@@ -35,16 +38,8 @@ function fmtValue(val: number): string {
 
 function fmtExposure(shares: number, price: number): string {
   const exp = shares * price;
-  if (exp >= 1000) {
-    return `$${(exp / 1000).toFixed(1)}K`;
-  }
+  if (exp >= 1000) return `$${(exp / 1000).toFixed(1)}K`;
   return `$${exp.toFixed(0)}`;
-}
-
-function getLeverageIndicator(pnlPct: number): string {
-  if (pnlPct > 50) return "HIGH";
-  if (pnlPct > 20) return "MED";
-  return "LOW";
 }
 
 interface AccountStats {
@@ -73,11 +68,10 @@ function calcAccountStats(positions: Array<{ cashPnl: number; currentValue: numb
   const best = pnls[0] ?? 0;
   const worst = pnls[pnls.length - 1] ?? 0;
 
-  // Calculate streak
   const sortedByRecent = [...positions].sort((a, b) => b.cashPnl - a.cashPnl);
   let currentStreak = 0;
   let streakType: "win" | "loss" | "none" = "none";
-  
+
   if (sortedByRecent.length > 0) {
     const firstPnl = sortedByRecent[0]!.cashPnl;
     if (firstPnl > 0) {
@@ -112,6 +106,19 @@ function calcAccountStats(positions: Array<{ cashPnl: number; currentValue: numb
 export function PortfolioPanel() {
   const { theme } = useTheme();
 
+  const activeTab = createMemo(() => {
+    const t = portfolioTab();
+    if (t === "overview") return "OVERVIEW";
+    if (t === "positions") return "POSITIONS";
+    if (t === "analytics") return "ANALYTICS";
+    return "HISTORY";
+  });
+
+  const handleTabChange = (tab: string) => {
+    const t = tab.toLowerCase() as "overview" | "positions" | "analytics" | "history";
+    setPortfolioTab(t);
+  };
+
   const summary = () => calculatePortfolioSummary(positionsState.positions);
 
   const accountStats = createMemo(() =>
@@ -128,50 +135,36 @@ export function PortfolioPanel() {
   const weeklyPnl = createMemo(() => {
     const now = Date.now();
     const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-    const filledOrders = ordersState.tradeHistory.filter(
-      (o) => (o.status === "FILLED" || o.status === "MATCHED") && o.createdAt >= weekAgo
-    );
-    return filledOrders.reduce((sum, o) => sum + o.price * o.sizeMatched, 0);
+    return ordersState.tradeHistory
+      .filter((o) => (o.status === "FILLED" || o.status === "MATCHED") && o.createdAt >= weekAgo)
+      .reduce((sum, o) => sum + o.price * o.sizeMatched, 0);
   });
 
   const dailyPnl = createMemo(() => {
     const now = Date.now();
     const dayAgo = now - 24 * 60 * 60 * 1000;
-    const filledOrders = ordersState.tradeHistory.filter(
-      (o) => (o.status === "FILLED" || o.status === "MATCHED") && o.createdAt >= dayAgo
-    );
-    return filledOrders.reduce((sum, o) => sum + o.price * o.sizeMatched, 0);
+    return ordersState.tradeHistory
+      .filter((o) => (o.status === "FILLED" || o.status === "MATCHED") && o.createdAt >= dayAgo)
+      .reduce((sum, o) => sum + o.price * o.sizeMatched, 0);
   });
 
-  const realizedPnl = createMemo(() => {
-    return positionsState.positions.reduce((sum, p) => {
-      return p.initialValue > 0 ? sum + p.cashPnl : sum;
-    }, 0);
-  });
+  const realizedPnl = createMemo(() =>
+    positionsState.positions.reduce((sum, p) => p.initialValue > 0 ? sum + p.cashPnl : sum, 0)
+  );
 
-  const unrealizedPnl = createMemo(() => {
-    return summary().totalCashPnl - realizedPnl();
-  });
+  const unrealizedPnl = createMemo(() => summary().totalCashPnl - realizedPnl());
 
   const lastFetchStr = () => {
     const d = positionsState.lastFetch;
     return d ? new Date(d).toLocaleTimeString() : "never";
   };
 
-  // Analytics from positionsState
   const analytics = () => positionsState.positionsAnalytics;
 
-  // Market concentration risk
-  const concentrationRisk = createMemo(() => 
+  const concentrationRisk = createMemo(() =>
     calculateMarketConcentration(positionsState.positions)
   );
 
-  // Total exposure calculation
-  const totalExposure = createMemo(() => {
-    return positionsState.positions.reduce((sum, p) => sum + (p.size * p.curPrice), 0);
-  });
-
-  // Trade stats
   const tradeStats = createMemo(() => {
     const filledOrders = ordersState.tradeHistory.filter(
       (o) => o.status === "FILLED" || o.status === "MATCHED"
@@ -192,7 +185,7 @@ export function PortfolioPanel() {
   );
 
   const equitySparkline = createMemo(() =>
-    sparkline(pnlTimeSeries().map(e => e.value), 14)
+    sparkline(pnlTimeSeries().map(e => e.value), 16)
   );
 
   const positionRisks = createMemo(() =>
@@ -212,7 +205,6 @@ export function PortfolioPanel() {
       />
 
       <Separator type="light" />
-      <text content="" />
 
       <Show
         when={!walletState.connected}
@@ -221,7 +213,7 @@ export function PortfolioPanel() {
             when={!positionsState.loading}
             fallback={
               <box padding={1}>
-                <text content="Fetching positions..." fg={theme.textMuted} />
+                <text content="◌ Fetching positions…" fg={theme.textMuted} />
               </box>
             }
           >
@@ -233,274 +225,354 @@ export function PortfolioPanel() {
                 </box>
               }
             >
-              {/* Summary row */}
-              <box flexDirection="row" width="100%" gap={2}>
-                <text content={`Value: $${summary().totalValue.toFixed(2)}`} fg={theme.textBright} />
-                <text
-                  content={`P&L: ${fmtUsd(summary().totalCashPnl)}`}
-                  fg={summary().totalCashPnl >= 0 ? theme.success : theme.error}
-                />
-                <text
-                  content={fmtPct(summary().totalPercentPnl)}
-                  fg={summary().totalPercentPnl >= 0 ? theme.success : theme.error}
-                />
-                <text content={`Positions: ${summary().positionCount}`} fg={theme.textMuted} />
-              </box>
+              {/* ── Tab bar ───────────────────────────────────────────────── */}
+              <TabBar
+                tabs={["OVERVIEW", "POSITIONS", "ANALYTICS", "HISTORY"]}
+                activeTab={activeTab()}
+                onTabChange={handleTabChange}
+              />
+              <Separator type="light" />
 
-              {/* Summary row 2: Sharpe / MaxDD / PF / equity sparkline */}
-              <box flexDirection="row" width="100%" gap={2}>
-                <text content={`Sharpe: ${Number.isFinite(sharpeRatio()) ? sharpeRatio().toFixed(2) : "N/A"}`} fg={sharpeRatio() >= 1 ? theme.success : sharpeRatio() >= 0 ? theme.warning : theme.error} />
-                <text content={`MaxDD: ${maxDrawdown().toFixed(1)}%`} fg={maxDrawdown() > 20 ? theme.error : maxDrawdown() > 10 ? theme.warning : theme.success} />
-                <text content={`PF: ${tradeStats().profitFactor === Infinity ? "∞" : tradeStats().profitFactor.toFixed(2)}`} fg={theme.textMuted} />
-                <Show when={equitySparkline().length > 0}>
-                  <text content={equitySparkline()} fg={summary().totalCashPnl >= 0 ? theme.success : theme.error} />
-                </Show>
-              </box>
-
-              {/* Risk Metrics Summary */}
-              <box flexDirection="row" width="100%" gap={2}>
-                <text content={`Exposure: ${fmtExposure(positionsState.positions.reduce((s, p) => s + p.size, 0), 1)}`} fg={theme.textMuted} />
-                <text content={`Avg Entry: ${fmtPrice(analytics().weightedAvgEntry)}`} fg={theme.textMuted} />
-                <text
-                  content={`Risk: ${concentrationRisk().riskLevel.toUpperCase()}`}
-                  fg={concentrationRisk().riskLevel === "high" ? theme.error : concentrationRisk().riskLevel === "medium" ? theme.warning : theme.success}
-                />
-              </box>
-
-              <text content="" />
-
-              {/* Column headers */}
-              <box flexDirection="row" width="100%">
-                <text content="MARKET" fg={theme.textMuted} width={24} />
-                <text content="OUT" fg={theme.textMuted} width={5} />
-                <text content="SHR" fg={theme.textMuted} width={7} />
-                <text content="ENTRY" fg={theme.textMuted} width={7} />
-                <text content="CUR" fg={theme.textMuted} width={7} />
-                <text content="P&L $" fg={theme.textMuted} width={9} />
-                <text content="ROI" fg={theme.textMuted} width={7} />
-                <text content="RSK" fg={theme.textMuted} width={5} />
-                <text content="TREND" fg={theme.textMuted} width={8} />
-              </box>
-
-              <Show
-                when={positionsState.positions.length > 0}
-                fallback={
-                  <box padding={1}>
-                    <text content="No positions found" fg={theme.textMuted} />
+              {/* ══════════════════════════════════════════════════════════ */}
+              {/* OVERVIEW tab                                               */}
+              {/* ══════════════════════════════════════════════════════════ */}
+              <Show when={portfolioTab() === "overview"}>
+                <box flexDirection="column" width="100%">
+                  {/* Key metrics row */}
+                  <box flexDirection="row" width="100%" gap={2} paddingTop={1}>
+                    <text content={`Value: $${summary().totalValue.toFixed(2)}`} fg={theme.textBright} />
+                    <text
+                      content={`P&L: ${fmtUsd(summary().totalCashPnl)}`}
+                      fg={summary().totalCashPnl >= 0 ? theme.success : theme.error}
+                    />
+                    <text
+                      content={fmtPct(summary().totalPercentPnl)}
+                      fg={summary().totalPercentPnl >= 0 ? theme.success : theme.error}
+                    />
+                    <text content={`${summary().positionCount} positions`} fg={theme.textMuted} />
                   </box>
-                }
-              >
-                <scrollbox flexGrow={1} width="100%">
-                  <For each={positionsState.positions}>
-                    {(position) => {
-                      const riskScore = () => positionRisks().find(r => r.positionId === position.asset)?.score ?? 0;
-                      const riskColor = () => riskScore() > 70 ? theme.error : riskScore() > 40 ? theme.warning : theme.success;
-                      const market = () => appState.markets.find(m => m.id === position.asset || (m as any).conditionId === position.conditionId);
-                      const trendSpark = () => {
-                        const m = market();
-                        if (!m) return "──────";
-                        return sparkline(m.outcomes.map(o => o.price), 6);
-                      };
-                      const rowBg = () => position.cashPnl > 0 ? theme.successMuted : position.cashPnl < 0 ? theme.errorMuted : undefined;
-                      return (
-                        <box flexDirection="row" width="100%" backgroundColor={rowBg()}>
-                          <text content={truncate(position.title, 23)} fg={theme.text} width={24} />
-                          <text content={position.outcome.slice(0, 4).padEnd(4, " ")} fg={theme.accent} width={5} />
-                          <text content={position.size.toFixed(1).padStart(6, " ")} fg={theme.text} width={7} />
-                          <text content={fmtPrice(position.avgPrice).padStart(6, " ")} fg={theme.textMuted} width={7} />
-                          <text content={fmtPrice(position.curPrice).padStart(6, " ")} fg={theme.text} width={7} />
-                          <text
-                            content={fmtUsd(position.cashPnl).padStart(8, " ")}
-                            fg={position.cashPnl >= 0 ? theme.success : theme.error}
-                            width={9}
-                          />
-                          <text
-                            content={fmtPct(position.percentPnl).padStart(6, " ")}
-                            fg={position.percentPnl >= 0 ? theme.success : theme.error}
-                            width={7}
-                          />
-                          <text
-                            content={riskScore().toString().padStart(4, " ")}
-                            fg={riskColor()}
-                            width={5}
-                          />
-                          <text content={trendSpark()} fg={theme.textMuted} width={8} />
-                        </box>
-                      );
-                    }}
-                  </For>
-                </scrollbox>
-              </Show>
 
-              {/* Account Analytics section */}
-              <text content="" />
-              <text content="ACCOUNT ANALYTICS" fg={theme.primary} />
-              <text content="" />
-              <box flexDirection="row" width="100%" gap={3}>
-                <text content={`Positions: ${accountStats().tradeCount}`} fg={theme.text} />
-                <text content={`Wins: ${accountStats().winCount}`} fg={theme.success} />
-                <text content={`Win Rate: ${accountStats().winRate}`} fg={
-                  (() => {
-                    const r = parseFloat(accountStats().winRate);
-                    return r >= 50 ? theme.success : theme.error;
-                  })()
-                } />
-              </box>
-              <box flexDirection="row" width="100%" gap={3}>
-                <text content={`Avg Size: ${accountStats().avgSize} shares`} fg={theme.textMuted} />
-                <text content={`Avg P&L: ${accountStats().avgPnl}`} fg={theme.textMuted} />
-              </box>
-              <box flexDirection="row" width="100%" gap={3}>
-                <text content={`Best: ${accountStats().bestTrade}`} fg={theme.success} />
-                <text content={`Worst: ${accountStats().worstTrade}`} fg={theme.error} />
-                <text content={`Total Value: ${accountStats().totalVolume}`} fg={theme.textMuted} />
-              </box>
-              <box flexDirection="row" width="100%" gap={3}>
-                <text content={`Streak: ${accountStats().streakType === "none" ? "N/A" : `${accountStats().currentStreak} ${accountStats().streakType.toUpperCase()}(S)`}`} 
-                  fg={accountStats().streakType === "win" ? theme.success : accountStats().streakType === "loss" ? theme.error : theme.textMuted} />
-                <text content={`PF: ${tradeStats().profitFactor === Infinity ? "∞" : tradeStats().profitFactor.toFixed(2)}`} fg={theme.textMuted} />
-                <text content={`Largest Pos: ${analytics().largestPosition ? fmtValue(analytics().largestPosition!.currentValue) : "N/A"}`} fg={theme.textMuted} />
-              </box>
-
-              {/* Sector Allocation section */}
-              <Show when={analytics().sectorAllocations.length > 0}>
-                <text content="" />
-                <text content="SECTOR ALLOCATION" fg={theme.primary} />
-                <text content="" />
-                <box flexDirection="row" width="100%">
-                  <text content="SECTOR" fg={theme.textMuted} width={14} />
-                  <text content="VALUE" fg={theme.textMuted} width={10} />
-                  <text content="ALLOC" fg={theme.textMuted} width={8} />
-                  <text content="POS" fg={theme.textMuted} width={5} />
-                  <text content="P&L" fg={theme.textMuted} width={10} />
-                </box>
-                <For each={analytics().sectorAllocations.slice(0, 6)}>
-                  {(sector) => (
-                    <box flexDirection="row" width="100%">
-                      <text content={sector.sector.padEnd(13, " ")} fg={theme.text} width={14} />
-                      <text content={fmtValue(sector.value).padStart(9, " ")} fg={theme.textMuted} width={10} />
-                      <text content={`${sector.percentage.toFixed(1)}%`.padStart(7, " ")} fg={theme.accent} width={8} />
-                      <text content={sector.positionCount.toString().padStart(4, " ")} fg={theme.textMuted} width={5} />
-                      <text 
-                        content={fmtUsd(sector.pnl).padStart(9, " ")} 
-                        fg={sector.pnl >= 0 ? theme.success : theme.error}
-                        width={10}
-                      />
+                  {/* Equity sparkline */}
+                  <Show when={equitySparkline().length > 0}>
+                    <box flexDirection="row" gap={2} paddingTop={1}>
+                      <text content="Equity: " fg={theme.textMuted} />
+                      <text content={equitySparkline()} fg={summary().totalCashPnl >= 0 ? theme.success : theme.error} />
                     </box>
-                  )}
-                </For>
-              </Show>
+                  </Show>
 
-              {/* Best/Worst Performers section */}
-              <Show when={analytics().topPerformers.length > 0 || analytics().bottomPerformers.length > 0}>
-                <text content="" />
-                <text content="PERFORMANCE LEADERS" fg={theme.primary} />
-                <text content="" />
-                <box flexDirection="row" width="100%">
-                  <text content="TOP WINNERS" fg={theme.success} width={20} />
-                  <text content="TOP LOSERS" fg={theme.error} width={20} />
-                </box>
-                <For each={[0, 1, 2]}>
-                  {(idx) => (
-                    <box flexDirection="row" width="100%">
-                      <Show when={analytics().topPerformers[idx]}>
-                        <text 
-                          content={`${truncate(analytics().topPerformers[idx]!.title, 17)} ${fmtUsd(analytics().topPerformers[idx]!.pnl)}`} 
-                          fg={theme.success} 
-                          width={20} 
+                  {/* Metrics 2×3 grid */}
+                  <box flexDirection="column" paddingTop={1}>
+                    <box flexDirection="row" width="100%" gap={4}>
+                      <box width={22}>
+                        <DataRow
+                          label="Sharpe Ratio"
+                          value={Number.isFinite(sharpeRatio()) ? sharpeRatio().toFixed(2) : "N/A"}
+                          valueColor={sharpeRatio() >= 1 ? "success" : sharpeRatio() >= 0 ? "warning" : "error"}
                         />
-                      </Show>
-                      <Show when={!analytics().topPerformers[idx]}>
-                        <text content="-" fg={theme.textMuted} width={20} />
-                      </Show>
-                      <Show when={analytics().bottomPerformers[idx]}>
-                        <text 
-                          content={`${truncate(analytics().bottomPerformers[idx]!.title, 17)} ${fmtUsd(analytics().bottomPerformers[idx]!.pnl)}`} 
-                          fg={theme.error} 
-                          width={20} 
-                        />
-                      </Show>
-                      <Show when={!analytics().bottomPerformers[idx]}>
-                        <text content="-" fg={theme.textMuted} width={20} />
-                      </Show>
-                    </box>
-                  )}
-                </For>
-              </Show>
-
-              {/* Historical Performance section */}
-              <text content="" />
-              <text content="HISTORICAL PERFORMANCE" fg={theme.primary} />
-              <text content="" />
-              <box flexDirection="row" width="100%" gap={3}>
-                <text content={`Realized: ${fmtUsd(realizedPnl())}`} fg={realizedPnl() >= 0 ? theme.success : theme.error} />
-                <text content={`Unrealized: ${fmtUsd(unrealizedPnl())}`} fg={unrealizedPnl() >= 0 ? theme.success : theme.error} />
-              </box>
-              <box flexDirection="row" width="100%" gap={3}>
-                <text content={`Daily Vol: ${fmtUsd(dailyPnl())}`} fg={theme.textMuted} />
-                <text content={`Weekly Vol: ${fmtUsd(weeklyPnl())}`} fg={theme.textMuted} />
-              </box>
-              <Show when={monthlyStats().length > 0}>
-                <text content="" />
-                <text content="MONTHLY P&L" fg={theme.textMuted} />
-                <box flexDirection="row" width="100%">
-                  <text content="MONTH" fg={theme.textMuted} width={10} />
-                  <text content="TRADES" fg={theme.textMuted} width={9} />
-                  <text content="VOLUME" fg={theme.textMuted} width={12} />
-                  <text content="P&L" fg={theme.textMuted} width={12} />
-                </box>
-                <For each={monthlyStats()}>
-                  {(stat) => (
-                    <box flexDirection="row" width="100%">
-                      <text content={stat.month.padEnd(9, " ")} fg={theme.text} width={10} />
-                      <text content={stat.tradeCount.toString().padStart(8, " ")} fg={theme.textMuted} width={9} />
-                      <text content={`$${stat.volume.toFixed(0)}`.padStart(11, " ")} fg={theme.textMuted} width={12} />
-                      <text
-                        content={fmtUsd(stat.pnl).padStart(11, " ")}
-                        fg={stat.pnl >= 0 ? theme.success : theme.error}
-                        width={12}
-                      />
-                    </box>
-                  )}
-                </For>
-              </Show>
-
-              {/* Recent filled orders */}
-              <Show when={ordersState.tradeHistory.length > 0}>
-                <text content="" />
-                <text content="RECENT FILLS" fg={theme.primary} />
-                <text content="" />
-                <box flexDirection="row" width="100%">
-                  <text content="MARKET" fg={theme.textMuted} width={32} />
-                  <text content="SIDE" fg={theme.textMuted} width={5} />
-                  <text content="PRICE" fg={theme.textMuted} width={7} />
-                  <text content="FILLED" fg={theme.textMuted} width={9} />
-                  <text content="STATUS" fg={theme.textMuted} width={10} />
-                </box>
-                <scrollbox width="100%">
-                  <For each={ordersState.tradeHistory.slice(0, 10)}>
-                    {(order) => (
-                      <box flexDirection="row" width="100%">
-                        <text content={truncate(order.marketTitle ?? "—", 31)} fg={theme.text} width={32} />
-                        <text
-                          content={order.side.padEnd(4, " ")}
-                          fg={order.side === "BUY" ? theme.success : theme.error}
-                          width={5}
-                        />
-                        <text content={fmtPrice(order.price).padStart(6, " ")} fg={theme.text} width={7} />
-                        <text content={order.sizeMatched.toFixed(1).padStart(8, " ")} fg={theme.textMuted} width={9} />
-                        <text content={order.status} fg={theme.textMuted} width={10} />
                       </box>
-                    )}
-                  </For>
-                </scrollbox>
+                      <box width={22}>
+                        <DataRow
+                          label="Max Drawdown"
+                          value={`${maxDrawdown().toFixed(1)}%`}
+                          valueColor={maxDrawdown() > 20 ? "error" : maxDrawdown() > 10 ? "warning" : "success"}
+                        />
+                      </box>
+                    </box>
+                    <box flexDirection="row" width="100%" gap={4}>
+                      <box width={22}>
+                        <DataRow
+                          label="Win Rate"
+                          value={accountStats().winRate}
+                          valueColor={parseFloat(accountStats().winRate) >= 50 ? "success" : "error"}
+                        />
+                      </box>
+                      <box width={22}>
+                        <DataRow
+                          label="Profit Factor"
+                          value={tradeStats().profitFactor === Infinity ? "∞" : tradeStats().profitFactor.toFixed(2)}
+                          valueColor="muted"
+                        />
+                      </box>
+                    </box>
+                    <box flexDirection="row" width="100%" gap={4}>
+                      <box width={22}>
+                        <DataRow
+                          label="Exposure"
+                          value={fmtExposure(positionsState.positions.reduce((s, p) => s + p.size, 0), 1)}
+                          valueColor="muted"
+                        />
+                      </box>
+                      <box width={22}>
+                        <DataRow
+                          label="Risk Level"
+                          value={concentrationRisk().riskLevel.toUpperCase()}
+                          valueColor={concentrationRisk().riskLevel === "high" ? "error" : concentrationRisk().riskLevel === "medium" ? "warning" : "success"}
+                        />
+                      </box>
+                    </box>
+                    <box flexDirection="row" width="100%" gap={4}>
+                      <box width={22}>
+                        <DataRow
+                          label="Realized P&L"
+                          value={fmtUsd(realizedPnl())}
+                          valueColor={realizedPnl() >= 0 ? "success" : "error"}
+                        />
+                      </box>
+                      <box width={22}>
+                        <DataRow
+                          label="Unrealized P&L"
+                          value={fmtUsd(unrealizedPnl())}
+                          valueColor={unrealizedPnl() >= 0 ? "success" : "error"}
+                        />
+                      </box>
+                    </box>
+                  </box>
+
+                  {/* Streak + best/worst quick view */}
+                  <box flexDirection="row" width="100%" gap={3} paddingTop={1}>
+                    <text
+                      content={`Streak: ${accountStats().streakType === "none" ? "N/A" : `${accountStats().currentStreak} ${accountStats().streakType.toUpperCase()}(S)`}`}
+                      fg={accountStats().streakType === "win" ? theme.success : accountStats().streakType === "loss" ? theme.error : theme.textMuted}
+                    />
+                    <text content={`Best: ${accountStats().bestTrade}`} fg={theme.success} />
+                    <text content={`Worst: ${accountStats().worstTrade}`} fg={theme.error} />
+                  </box>
+
+                  <box flexDirection="row" width="100%" gap={3}>
+                    <text content={`Avg Entry: ${fmtPrice(analytics().weightedAvgEntry)}`} fg={theme.textMuted} />
+                    <text content={`Avg P&L: ${accountStats().avgPnl}`} fg={theme.textMuted} />
+                    <text content={`Avg Size: ${accountStats().avgSize} shr`} fg={theme.textMuted} />
+                  </box>
+
+                  <text content="" />
+                  <text content="[Tab] switch to POSITIONS  [Shift+Tab] HISTORY" fg={theme.borderSubtle} />
+                </box>
               </Show>
+
+              {/* ══════════════════════════════════════════════════════════ */}
+              {/* POSITIONS tab                                              */}
+              {/* ══════════════════════════════════════════════════════════ */}
+              <Show when={portfolioTab() === "positions"}>
+                <box flexDirection="column" width="100%">
+                  {/* Column headers */}
+                  <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel} paddingTop={1}>
+                    <text content="MARKET" fg={theme.textMuted} width={23} />
+                    <text content="OUT" fg={theme.textMuted} width={5} />
+                    <text content="SHR" fg={theme.textMuted} width={7} />
+                    <text content="ENTRY" fg={theme.textMuted} width={7} />
+                    <text content="CUR" fg={theme.textMuted} width={7} />
+                    <text content="P&L $" fg={theme.textMuted} width={9} />
+                    <text content="ROI" fg={theme.textMuted} width={7} />
+                    <text content="RSK" fg={theme.textMuted} width={5} />
+                    <text content="TREND" fg={theme.textMuted} width={7} />
+                  </box>
+                  <Separator type="light" />
+
+                  <Show
+                    when={positionsState.positions.length > 0}
+                    fallback={
+                      <box padding={1}>
+                        <text content="No positions found" fg={theme.textMuted} />
+                      </box>
+                    }
+                  >
+                    <scrollbox flexGrow={1} width="100%">
+                      <For each={positionsState.positions}>
+                        {(position) => {
+                          const riskScore = () => positionRisks().find(r => r.positionId === position.asset)?.score ?? 0;
+                          const riskColor = () => riskScore() > 70 ? theme.error : riskScore() > 40 ? theme.warning : theme.success;
+                          const market = () => appState.markets.find(m => m.id === position.asset || (m as any).conditionId === position.conditionId);
+                          const trendSpark = () => {
+                            const m = market();
+                            if (!m) return "──────";
+                            return sparkline(m.outcomes.map(o => o.price), 6);
+                          };
+                          const rowBg = () => position.cashPnl > 0 ? theme.successMuted : position.cashPnl < 0 ? theme.errorMuted : undefined;
+                          return (
+                            <box flexDirection="row" width="100%" backgroundColor={rowBg()}>
+                              <text content={truncate(position.title, 22)} fg={theme.text} width={23} />
+                              <text content={position.outcome.slice(0, 4).padEnd(4, " ")} fg={theme.accent} width={5} />
+                              <text content={position.size.toFixed(1).padStart(6, " ")} fg={theme.text} width={7} />
+                              <text content={fmtPrice(position.avgPrice).padStart(6, " ")} fg={theme.textMuted} width={7} />
+                              <text content={fmtPrice(position.curPrice).padStart(6, " ")} fg={theme.text} width={7} />
+                              <text
+                                content={fmtUsd(position.cashPnl).padStart(8, " ")}
+                                fg={position.cashPnl >= 0 ? theme.success : theme.error}
+                                width={9}
+                              />
+                              <text
+                                content={fmtPct(position.percentPnl).padStart(6, " ")}
+                                fg={position.percentPnl >= 0 ? theme.success : theme.error}
+                                width={7}
+                              />
+                              <text
+                                content={riskScore().toString().padStart(4, " ")}
+                                fg={riskColor()}
+                                width={5}
+                              />
+                              <text content={trendSpark()} fg={theme.textMuted} width={7} />
+                            </box>
+                          );
+                        }}
+                      </For>
+                    </scrollbox>
+                  </Show>
+                </box>
+              </Show>
+
+              {/* ══════════════════════════════════════════════════════════ */}
+              {/* ANALYTICS tab                                              */}
+              {/* ══════════════════════════════════════════════════════════ */}
+              <Show when={portfolioTab() === "analytics"}>
+                <box flexDirection="column" width="100%">
+                  {/* Sector Allocation */}
+                  <Show when={analytics().sectorAllocations.length > 0}>
+                    <SectionTitle title="Sector Allocation" icon="◉" />
+                    <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
+                      <text content="SECTOR" fg={theme.textMuted} width={14} />
+                      <text content="VALUE" fg={theme.textMuted} width={10} />
+                      <text content="ALLOC" fg={theme.textMuted} width={8} />
+                      <text content="POS" fg={theme.textMuted} width={5} />
+                      <text content="P&L" fg={theme.textMuted} width={10} />
+                    </box>
+                    <For each={analytics().sectorAllocations.slice(0, 8)}>
+                      {(sector) => (
+                        <box flexDirection="row" width="100%">
+                          <text content={sector.sector.padEnd(13, " ")} fg={theme.text} width={14} />
+                          <text content={fmtValue(sector.value).padStart(9, " ")} fg={theme.textMuted} width={10} />
+                          <text content={`${sector.percentage.toFixed(1)}%`.padStart(7, " ")} fg={theme.accent} width={8} />
+                          <text content={sector.positionCount.toString().padStart(4, " ")} fg={theme.textMuted} width={5} />
+                          <text
+                            content={fmtUsd(sector.pnl).padStart(9, " ")}
+                            fg={sector.pnl >= 0 ? theme.success : theme.error}
+                            width={10}
+                          />
+                        </box>
+                      )}
+                    </For>
+                  </Show>
+
+                  {/* Concentration Risk */}
+                  <SectionTitle title="Risk Profile" icon="⚡" />
+                  <DataRow label="Concentration Risk" value={concentrationRisk().riskLevel.toUpperCase()} valueColor={concentrationRisk().riskLevel === "high" ? "error" : concentrationRisk().riskLevel === "medium" ? "warning" : "success"} />
+                  <DataRow label="Weighted Avg Entry" value={fmtPrice(analytics().weightedAvgEntry)} valueColor="muted" />
+                  <DataRow label="Profit Factor" value={tradeStats().profitFactor === Infinity ? "∞" : tradeStats().profitFactor.toFixed(2)} valueColor="muted" />
+
+                  {/* Performance Leaders */}
+                  <Show when={analytics().topPerformers.length > 0 || analytics().bottomPerformers.length > 0}>
+                    <SectionTitle title="Performance Leaders" icon="★" />
+                    <box flexDirection="row" width="100%">
+                      <text content="TOP WINNERS" fg={theme.success} width={22} />
+                      <text content="TOP LOSERS" fg={theme.error} width={22} />
+                    </box>
+                    <For each={[0, 1, 2]}>
+                      {(idx) => (
+                        <box flexDirection="row" width="100%">
+                          <Show when={analytics().topPerformers[idx]}>
+                            <text
+                              content={`${truncate(analytics().topPerformers[idx]!.title, 16)} ${fmtUsd(analytics().topPerformers[idx]!.pnl)}`}
+                              fg={theme.success}
+                              width={22}
+                            />
+                          </Show>
+                          <Show when={!analytics().topPerformers[idx]}>
+                            <text content="─" fg={theme.textMuted} width={22} />
+                          </Show>
+                          <Show when={analytics().bottomPerformers[idx]}>
+                            <text
+                              content={`${truncate(analytics().bottomPerformers[idx]!.title, 16)} ${fmtUsd(analytics().bottomPerformers[idx]!.pnl)}`}
+                              fg={theme.error}
+                              width={22}
+                            />
+                          </Show>
+                          <Show when={!analytics().bottomPerformers[idx]}>
+                            <text content="─" fg={theme.textMuted} width={22} />
+                          </Show>
+                        </box>
+                      )}
+                    </For>
+                  </Show>
+                </box>
+              </Show>
+
+              {/* ══════════════════════════════════════════════════════════ */}
+              {/* HISTORY tab                                                */}
+              {/* ══════════════════════════════════════════════════════════ */}
+              <Show when={portfolioTab() === "history"}>
+                <box flexDirection="column" width="100%">
+                  {/* Realized / Unrealized summary */}
+                  <SectionTitle title="P&L Summary" icon="◈" />
+                  <box flexDirection="row" width="100%" gap={3}>
+                    <text content={`Realized: ${fmtUsd(realizedPnl())}`} fg={realizedPnl() >= 0 ? theme.success : theme.error} />
+                    <text content={`Unrealized: ${fmtUsd(unrealizedPnl())}`} fg={unrealizedPnl() >= 0 ? theme.success : theme.error} />
+                  </box>
+                  <box flexDirection="row" width="100%" gap={3}>
+                    <text content={`Daily Vol: ${fmtUsd(dailyPnl())}`} fg={theme.textMuted} />
+                    <text content={`Weekly Vol: ${fmtUsd(weeklyPnl())}`} fg={theme.textMuted} />
+                  </box>
+
+                  {/* Monthly P&L */}
+                  <Show when={monthlyStats().length > 0}>
+                    <SectionTitle title="Monthly P&L" icon="📅" />
+                    <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
+                      <text content="MONTH" fg={theme.textMuted} width={10} />
+                      <text content="TRADES" fg={theme.textMuted} width={9} />
+                      <text content="VOLUME" fg={theme.textMuted} width={12} />
+                      <text content="P&L" fg={theme.textMuted} width={12} />
+                    </box>
+                    <For each={monthlyStats()}>
+                      {(stat) => (
+                        <box flexDirection="row" width="100%">
+                          <text content={stat.month.padEnd(9, " ")} fg={theme.text} width={10} />
+                          <text content={stat.tradeCount.toString().padStart(8, " ")} fg={theme.textMuted} width={9} />
+                          <text content={`$${stat.volume.toFixed(0)}`.padStart(11, " ")} fg={theme.textMuted} width={12} />
+                          <text
+                            content={fmtUsd(stat.pnl).padStart(11, " ")}
+                            fg={stat.pnl >= 0 ? theme.success : theme.error}
+                            width={12}
+                          />
+                        </box>
+                      )}
+                    </For>
+                  </Show>
+
+                  {/* Recent fills */}
+                  <Show when={ordersState.tradeHistory.length > 0}>
+                    <SectionTitle title="Recent Fills" icon="⬛" />
+                    <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
+                      <text content="MARKET" fg={theme.textMuted} width={28} />
+                      <text content="SIDE" fg={theme.textMuted} width={5} />
+                      <text content="PRICE" fg={theme.textMuted} width={7} />
+                      <text content="FILLED" fg={theme.textMuted} width={9} />
+                      <text content="STATUS" fg={theme.textMuted} width={10} />
+                    </box>
+                    <scrollbox width="100%">
+                      <For each={ordersState.tradeHistory.slice(0, 20)}>
+                        {(order) => (
+                          <box flexDirection="row" width="100%">
+                            <text content={truncate(order.marketTitle ?? "—", 27)} fg={theme.text} width={28} />
+                            <text
+                              content={order.side.padEnd(4, " ")}
+                              fg={order.side === "BUY" ? theme.success : theme.error}
+                              width={5}
+                            />
+                            <text content={`${(order.price * 100).toFixed(1)}¢`.padStart(6, " ")} fg={theme.text} width={7} />
+                            <text content={order.sizeMatched.toFixed(1).padStart(8, " ")} fg={theme.textMuted} width={9} />
+                            <text content={order.status} fg={theme.textMuted} width={10} />
+                          </box>
+                        )}
+                      </For>
+                    </scrollbox>
+                  </Show>
+                </box>
+              </Show>
+
             </Show>
           </Show>
         }
       >
         <box padding={1}>
-          <text content="Connect wallet (W) to view positions" fg={theme.textMuted} />
+          <text content="Connect wallet (W) to view portfolio" fg={theme.textMuted} />
         </box>
       </Show>
     </box>

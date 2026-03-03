@@ -75,7 +75,12 @@ import {
   highlightedIndex,
   navigateToIndex,
   walletState,
+  portfolioTab,
+  setPortfolioTab,
+  marketListCategoryId,
+  setMarketListCategoryId,
 } from "./state";
+import { CATEGORIES } from "./components/market-list";
 import { useMarketsFetch, useRefreshInterval, manualRefresh } from "./hooks/useMarketData";
 import { initializeWallet, connectWallet, disconnectWalletHook, saveFunderAddress } from "./hooks/useWallet";
 import {
@@ -1275,6 +1280,32 @@ function AppContent() {
       || skillsPanelOpen();
 
     if (anyOverlayOpen) {
+      return;
+    }
+
+    // Portfolio sub-tab navigation: Tab / Shift+Tab when portfolio is open
+    if (portfolioOpen() && e.name === "tab") {
+      const tabs = ["overview", "positions", "analytics", "history"] as const;
+      const cur = tabs.indexOf(portfolioTab());
+      if (e.shift) {
+        setPortfolioTab(tabs[(cur - 1 + tabs.length) % tabs.length]);
+      } else {
+        setPortfolioTab(tabs[(cur + 1) % tabs.length]);
+      }
+      return;
+    }
+
+    // Market list category cycling: [ and ]
+    if (!portfolioOpen() && (e.name === "[" || e.sequence === "[")) {
+      const ids = CATEGORIES.map(c => c.id);
+      const cur = ids.indexOf(marketListCategoryId());
+      setMarketListCategoryId(ids[(cur - 1 + ids.length) % ids.length]!);
+      return;
+    }
+    if (!portfolioOpen() && (e.name === "]" || e.sequence === "]")) {
+      const ids = CATEGORIES.map(c => c.id);
+      const cur = ids.indexOf(marketListCategoryId());
+      setMarketListCategoryId(ids[(cur + 1) % ids.length]!);
       return;
     }
 
