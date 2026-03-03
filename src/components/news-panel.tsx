@@ -16,6 +16,7 @@ import {
 } from "../state";
 import { fetchAllNews, filterNewsForMarket } from "../api/news";
 import type { Market } from "../types/market";
+import { Separator, LoadingState } from "./ui/panel-components";
 
 function fmtAge(ts: number): string {
   const mins = Math.floor((Date.now() - ts) / 60000);
@@ -72,7 +73,7 @@ export function NewsPanel() {
       <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
         <text content=" ◈ BLOOMBERG NEWS " fg={theme.highlightText} />
         <Show when={selectedMarket()}>
-          {(m: () => Market) => <text content={`| ${truncate(m().title, 40)} `} fg={theme.primaryMuted} />}
+          {(m: () => Market) => <text content={`│ ${truncate(m().title, 38)} `} fg={theme.primaryMuted} />}
         </Show>
         <box flexGrow={1} />
         <text content={`${newsItems().length} articles `} fg={theme.primaryMuted} />
@@ -81,30 +82,35 @@ export function NewsPanel() {
         </box>
       </box>
 
-      {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
+      {/* Sub-header */}
+      <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row" paddingLeft={1}>
+        <text content={"   SOURCE    ".padEnd(12)} fg={theme.textMuted} width={12} />
+        <text content={"TIME     ".padEnd(9)} fg={theme.textMuted} width={9} />
+        <text content="HEADLINE" fg={theme.textMuted} />
+        <box flexGrow={1} />
+        <text content="● Related to market " fg={theme.success} />
+      </box>
+
+      <Separator type="heavy" />
 
       <Show when={loadingNews()}>
         <box flexGrow={1} flexDirection="column" paddingLeft={2} paddingTop={1}>
-          <text content="Loading news feeds…" fg={theme.textMuted} />
+          <LoadingState message="Fetching news feeds…" />
         </box>
       </Show>
 
       <Show when={!loadingNews()}>
-        {/* News list — top 70% */}
-        <box height={18} width="100%" flexDirection="column" paddingLeft={1}>
-          {/* Column headers */}
-          <box flexDirection="row" width="100%" paddingTop={0}>
-            <text content="  SOURCE    " fg={theme.textMuted} width={12} />
-            <text content="TIME     " fg={theme.textMuted} width={9} />
-            <text content="HEADLINE" fg={theme.textMuted} />
-          </box>
-
+        {/* News list */}
+        <box height={17} width="100%" flexDirection="column">
           <Show
             when={newsItems().length > 0}
-            fallback={<text content="No news available — check network connection" fg={theme.textMuted} />}
+            fallback={
+              <box paddingLeft={2} paddingTop={1}>
+                <text content="No news available — check network connection" fg={theme.textMuted} />
+              </box>
+            }
           >
-            <scrollbox height={16} width="100%">
+            <scrollbox height={17} width="100%">
               <For each={newsItems()}>
                 {(item, i) => {
                   const isSelected = () => selectedNewsIndex() === i();
@@ -121,7 +127,7 @@ export function NewsPanel() {
                     >
                       <text content={isSelected() ? " ▶ " : "   "} fg={theme.primary} width={3} />
                       <text
-                        content={item.source.padEnd(9, " ")}
+                        content={item.source.slice(0, 8).padEnd(9, " ")}
                         fg={isSelected() ? theme.highlightText : theme.accent}
                         width={10}
                       />
@@ -131,7 +137,7 @@ export function NewsPanel() {
                         width={9}
                       />
                       <text
-                        content={truncate(item.title, 90)}
+                        content={truncate(item.title, 88)}
                         fg={
                           isSelected()
                             ? theme.highlightText
@@ -148,19 +154,24 @@ export function NewsPanel() {
           </Show>
         </box>
 
-        {/* Separator */}
-        <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
+        <Separator type="heavy" />
 
-        {/* Detail view — bottom 30% */}
+        {/* Detail view */}
         <box flexGrow={1} flexDirection="column" paddingLeft={2} paddingTop={1} paddingRight={2}>
-          <Show when={selected()} fallback={<text content="Select an article with ↑/↓" fg={theme.textMuted} />}>
+          <Show
+            when={selected()}
+            fallback={
+              <text content="Select an article with ↑/↓ or click to view details" fg={theme.textMuted} />
+            }
+          >
             {(item: () => NewsItem) => (
               <>
-                <text content={item().title} fg={theme.text} />
-                <box height={1} />
-                <text content={item().summary || "(no summary)"} fg={theme.textMuted} />
-                <box height={1} />
-                <text content={`URL: ${item().url}`} fg={theme.primary} />
+                <text content={`─── ${item().source.toUpperCase()} ──`} fg={theme.borderSubtle} />
+                <text content={item().title} fg={theme.accent} />
+                <text content="" />
+                <text content={item().summary || "(no summary available)"} fg={theme.textMuted} />
+                <text content="" />
+                <text content={`◈ ${item().url}`} fg={theme.primary} />
               </>
             )}
           </Show>
@@ -169,10 +180,11 @@ export function NewsPanel() {
 
       {/* Footer */}
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row" paddingLeft={2}>
-        <text content="↑/↓ navigate  " fg={theme.textMuted} />
-        <text content="[N] close" fg={theme.textMuted} />
+        <text content="[↑↓] Navigate  " fg={theme.textMuted} />
+        <text content="[N] Close  " fg={theme.textMuted} />
+        <text content="[Enter] Open URL  " fg={theme.textMuted} />
         <box flexGrow={1} />
-        <text content="Green = related to current market  " fg={theme.textMuted} />
+        <text content="● Green = related to selected market  " fg={theme.success} />
       </box>
     </box>
   );

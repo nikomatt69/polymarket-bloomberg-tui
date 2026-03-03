@@ -1,7 +1,7 @@
 import { Show, createSignal, createEffect, createMemo, For } from "solid-js";
 import { RGBA } from "@opentui/core";
 import { useTheme } from "../context/theme";
-import { PanelHeader, SectionTitle, Separator, ProgressBar } from "./ui/panel-components";
+import { PanelHeader, SectionTitle, Separator, ProgressBar, DataRow, LoadingState } from "./ui/panel-components";
 import { appState, analyticsPanelOpen, setAnalyticsPanelOpen, getFilteredMarkets, highlightedIndex } from "../state";
 import { usePriceHistory } from "../hooks/useMarketData";
 import { sparkline, volumeBar, barChart, histogram } from "../utils/charts";
@@ -326,162 +326,182 @@ export function AnalyticsPanel() {
     return markets().filter(m => m.id !== current?.id).slice(0, 10);
   });
   
+  const sectionLine = (label: string) => {
+    const prefix = `─── ${label} `;
+    const fill = "─".repeat(Math.max(2, 30 - prefix.length));
+    return prefix + fill;
+  };
+
   const renderVolumeTab = () => (
-    <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
+    <box flexDirection="column" flexGrow={1} paddingTop={1}>
       <Show when={selectedMarket()}>
-        <text content="Volume Analysis" fg={theme.textBright} />
-        <text content="" />
-        
-        <box flexDirection="row" gap={4}>
-          <box flexDirection="column">
-            <text content="Volume Profile:" fg={theme.textMuted} />
-            <text content={volumeProfile()?.level || "N/A"} fg={volumeProfile()?.level === "Very High" || volumeProfile()?.level === "High" ? theme.success : theme.warning} />
-            <text content={`Score: ${volumeProfile()?.score || 0}/100`} fg={theme.textMuted} />
-          </box>
-          
-          <box flexDirection="column">
-            <text content="24h Volume:" fg={theme.textMuted} />
-            <text content={`$${(selectedMarket()!.volume24h / 1000).toFixed(1)}K`} fg={theme.text} />
-            <text content={`Total: $${(selectedMarket()!.volume / 1000000).toFixed(2)}M`} fg={theme.textMuted} />
-          </box>
+        <box paddingLeft={2}>
+          <text content={sectionLine("VOLUME PROFILE")} fg={theme.borderSubtle} />
         </box>
-        
-        <text content="" />
-        
-        <box flexDirection="column">
-          <text content="Activity:" fg={theme.textMuted} />
-          <text 
-            content={unusualVolume().message} 
-            fg={unusualVolume().alert ? theme.warning : theme.text} 
-          />
-        </box>
-        
-        <text content="" />
-        
-        <box flexDirection="column">
-          <text content="Vol Bar:" fg={theme.textMuted} />
-          <text content={volumeBar(volumeProfile()?.score ?? 0, 100, 24)} fg={volumeProfile()?.level === "Very High" || volumeProfile()?.level === "High" ? theme.success : theme.warning} />
-          <text content="Price Trend:" fg={theme.textMuted} />
-          <text content={priceSparkline()} fg={trendStrength().direction === "up" ? theme.success : trendStrength().direction === "down" ? theme.error : theme.textMuted} />
-        </box>
-        
-        <text content="" />
-        <text content="[1] Volume  [2] Liquidity  [3] Momentum  [4] Correlation" fg={theme.textMuted} />
-      </Show>
-      
-      <Show when={!selectedMarket()}>
-        <text content="Select a market to view analytics" fg={theme.textMuted} />
-      </Show>
-    </box>
-  );
-  
-  const renderLiquidityTab = () => (
-    <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
-      <Show when={selectedMarket()}>
-        <text content="Liquidity Analysis" fg={theme.textBright} />
-        <text content="" />
-        
-        <box flexDirection="row" gap={4}>
-          <box flexDirection="column">
-            <text content="Bid-Ask Spread:" fg={theme.textMuted} />
-            <text content={`${spreadScore().spread.toFixed(2)}%`} fg={spreadScore().spread < 3 ? theme.success : spreadScore().spread < 5 ? theme.warning : theme.error} />
-            <text content={`Rating: ${spreadScore().label}`} fg={theme.textMuted} />
-          </box>
-          
-          <box flexDirection="column">
-            <text content="Depth Score:" fg={theme.textMuted} />
-            <text content={`${depthScore().score}/100`} fg={depthScore().score > 60 ? theme.success : depthScore().score > 40 ? theme.warning : theme.error} />
-            <text content={depthScore().label} fg={theme.textMuted} />
-          </box>
-        </box>
-        
-        <text content="" />
-        
-        <box flexDirection="column">
-          <text content="Market Liquidity:" fg={theme.textMuted} />
-          <text content={`$${(selectedMarket()!.liquidity / 1000).toFixed(1)}K`} fg={theme.text} />
-          <text content={`Liquidity/Volume Ratio: ${(selectedMarket()!.liquidity / (selectedMarket()!.volume24h || 1)).toFixed(2)}x`} fg={theme.textMuted} />
-        </box>
-        
-        <text content="" />
-        
-        <box flexDirection="column">
-          <text content="Volatility:" fg={theme.textMuted} />
-          <text content={`${volatility().value.toFixed(2)}%`} fg={volatility().value > 5 ? theme.error : volatility().value > 2 ? theme.warning : theme.success} />
-          <text content={`Level: ${volatility().label}`} fg={theme.textMuted} />
-        </box>
-        
-        <text content="" />
-        <text content="[1] Volume  [2] Liquidity  [3] Momentum  [4] Correlation" fg={theme.textMuted} />
-      </Show>
-      
-      <Show when={!selectedMarket()}>
-        <text content="Select a market to view analytics" fg={theme.textMuted} />
-      </Show>
-    </box>
-  );
-  
-  const renderMomentumTab = () => (
-    <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
-      <Show when={selectedMarket()}>
-        <text content="Momentum Indicators" fg={theme.textBright} />
-        <text content="" />
-        
-        <box flexDirection="row" gap={4}>
-          <box flexDirection="column">
-            <text content="Trend Strength:" fg={theme.textMuted} />
-            <text 
-              content={trendStrength().label} 
-              fg={trendStrength().strength > 50 ? theme.success : trendStrength().strength > 25 ? theme.warning : theme.error} 
-            />
-            <text content={`Score: ${trendStrength().strength}/100`} fg={theme.textMuted} />
-          </box>
-          
-          <box flexDirection="column">
-            <text content="Momentum:" fg={theme.textMuted} />
-            <text 
-              content={`${momentumScore().signal} ${momentumScore().label}`} 
-              fg={momentumScore().score > 60 ? theme.success : momentumScore().score < 40 ? theme.error : theme.warning} 
-            />
-            <text content={`Score: ${momentumScore().score}/100`} fg={theme.textMuted} />
-          </box>
-        </box>
-        
-        <text content="" />
-        
-        <box flexDirection="column">
-          <text content="24h Change:" fg={theme.textMuted} />
-          <text 
-            content={`${selectedMarket()!.change24h >= 0 ? "+" : ""}${selectedMarket()!.change24h.toFixed(2)}%`} 
-            fg={selectedMarket()!.change24h >= 0 ? theme.success : theme.error} 
-          />
-        </box>
-        
-        <text content="" />
-        
-        <box flexDirection="column">
-          <text content="Direction:" fg={theme.textMuted} />
+        <DataRow
+          label="24h Volume"
+          value={`$${(selectedMarket()!.volume24h / 1000).toFixed(1)}K`}
+          valueColor="text"
+        />
+        <DataRow
+          label="Total Volume"
+          value={`$${(selectedMarket()!.volume / 1000000).toFixed(2)}M`}
+          valueColor="muted"
+        />
+        <DataRow
+          label="Profile"
+          value={volumeProfile()?.level || "N/A"}
+          valueColor={volumeProfile()?.level === "Very High" || volumeProfile()?.level === "High" ? "success" : "warning"}
+        />
+        <DataRow label="Score" value={`${volumeProfile()?.score || 0}/100`} valueColor="muted" />
+
+        <box paddingLeft={1} paddingTop={0}>
+          <text content="Vol  " fg={theme.textMuted} />
           <text
-            content={trendStrength().direction === "up" ? "▲ Bullish" : trendStrength().direction === "down" ? "▼ Bearish" : "─ Neutral"}
+            content={volumeBar(volumeProfile()?.score ?? 0, 100, 22)}
+            fg={volumeProfile()?.level === "Very High" || volumeProfile()?.level === "High" ? theme.success : theme.warning}
+          />
+        </box>
+        <box paddingLeft={1}>
+          <text content="Prc  " fg={theme.textMuted} />
+          <text
+            content={priceSparkline()}
             fg={trendStrength().direction === "up" ? theme.success : trendStrength().direction === "down" ? theme.error : theme.textMuted}
           />
         </box>
 
-        <text content="" />
-
-        <box flexDirection="column">
-          <text content="Momentum Bar:" fg={theme.textMuted} />
-          <text content={volumeBar(momentumScore().score, 100, 24)} fg={momentumScore().score > 60 ? theme.success : momentumScore().score < 40 ? theme.error : theme.warning} />
-          <text content="Price Trend:" fg={theme.textMuted} />
-          <text content={priceSparkline()} fg={trendStrength().direction === "up" ? theme.success : trendStrength().direction === "down" ? theme.error : theme.textMuted} />
+        <box paddingLeft={2} paddingTop={1}>
+          <text content={sectionLine("ACTIVITY")} fg={theme.borderSubtle} />
         </box>
+        <DataRow
+          label="Alert"
+          value={unusualVolume().message}
+          valueColor={unusualVolume().alert ? "warning" : "muted"}
+        />
 
-        <text content="" />
-        <text content="[1] Volume  [2] Liquidity  [3] Momentum  [4] Correlation" fg={theme.textMuted} />
+        <Separator type="light" />
+        <box flexDirection="row" paddingLeft={2} paddingTop={0}>
+          <text content="[1]Vol [2]Liq [3]Mom [4]Corr  [ESC]Close" fg={theme.textMuted} />
+        </box>
       </Show>
 
       <Show when={!selectedMarket()}>
-        <text content="Select a market to view analytics" fg={theme.textMuted} />
+        <box paddingLeft={2} paddingTop={1}>
+          <text content="Select a market to view analytics" fg={theme.textMuted} />
+        </box>
+      </Show>
+    </box>
+  );
+
+  const renderLiquidityTab = () => (
+    <box flexDirection="column" flexGrow={1} paddingTop={1}>
+      <Show when={selectedMarket()}>
+        <box paddingLeft={2}>
+          <text content={sectionLine("SPREAD & DEPTH")} fg={theme.borderSubtle} />
+        </box>
+        <DataRow
+          label="Bid-Ask Spread"
+          value={`${spreadScore().spread.toFixed(2)}%`}
+          valueColor={spreadScore().spread < 3 ? "success" : spreadScore().spread < 5 ? "warning" : "error"}
+        />
+        <DataRow label="Spread Rating" value={spreadScore().label} valueColor="muted" />
+        <DataRow
+          label="Depth Score"
+          value={`${depthScore().score}/100`}
+          valueColor={depthScore().score > 60 ? "success" : depthScore().score > 40 ? "warning" : "error"}
+        />
+        <DataRow label="Depth Rating" value={depthScore().label} valueColor="muted" />
+
+        <box paddingLeft={2} paddingTop={1}>
+          <text content={sectionLine("MARKET DEPTH")} fg={theme.borderSubtle} />
+        </box>
+        <DataRow
+          label="Liquidity"
+          value={`$${(selectedMarket()!.liquidity / 1000).toFixed(1)}K`}
+          valueColor="text"
+        />
+        <DataRow
+          label="Liq/Vol Ratio"
+          value={`${(selectedMarket()!.liquidity / (selectedMarket()!.volume24h || 1)).toFixed(2)}x`}
+          valueColor="muted"
+        />
+        <DataRow
+          label="Volatility"
+          value={`${volatility().value.toFixed(2)}% (${volatility().label})`}
+          valueColor={volatility().value > 5 ? "error" : volatility().value > 2 ? "warning" : "success"}
+        />
+
+        <Separator type="light" />
+        <box flexDirection="row" paddingLeft={2}>
+          <text content="[1]Vol [2]Liq [3]Mom [4]Corr  [ESC]Close" fg={theme.textMuted} />
+        </box>
+      </Show>
+
+      <Show when={!selectedMarket()}>
+        <box paddingLeft={2} paddingTop={1}>
+          <text content="Select a market to view analytics" fg={theme.textMuted} />
+        </box>
+      </Show>
+    </box>
+  );
+
+  const renderMomentumTab = () => (
+    <box flexDirection="column" flexGrow={1} paddingTop={1}>
+      <Show when={selectedMarket()}>
+        <box paddingLeft={2}>
+          <text content={sectionLine("TREND")} fg={theme.borderSubtle} />
+        </box>
+        <DataRow
+          label="Direction"
+          value={trendStrength().direction === "up" ? "▲ Bullish" : trendStrength().direction === "down" ? "▼ Bearish" : "─ Neutral"}
+          valueColor={trendStrength().direction === "up" ? "success" : trendStrength().direction === "down" ? "error" : "muted"}
+        />
+        <DataRow
+          label="Trend Strength"
+          value={`${trendStrength().label} (${trendStrength().strength}/100)`}
+          valueColor={trendStrength().strength > 50 ? "success" : trendStrength().strength > 25 ? "warning" : "error"}
+        />
+        <DataRow
+          label="24h Change"
+          value={`${selectedMarket()!.change24h >= 0 ? "+" : ""}${selectedMarket()!.change24h.toFixed(2)}%`}
+          valueColor={selectedMarket()!.change24h >= 0 ? "success" : "error"}
+        />
+
+        <box paddingLeft={2} paddingTop={1}>
+          <text content={sectionLine("MOMENTUM")} fg={theme.borderSubtle} />
+        </box>
+        <DataRow
+          label="Signal"
+          value={`${momentumScore().signal} ${momentumScore().label}`}
+          valueColor={momentumScore().score > 60 ? "success" : momentumScore().score < 40 ? "error" : "warning"}
+        />
+        <DataRow label="Score" value={`${momentumScore().score}/100`} valueColor="muted" />
+
+        <box paddingLeft={1}>
+          <text content="Mom  " fg={theme.textMuted} />
+          <text
+            content={volumeBar(momentumScore().score, 100, 22)}
+            fg={momentumScore().score > 60 ? theme.success : momentumScore().score < 40 ? theme.error : theme.warning}
+          />
+        </box>
+        <box paddingLeft={1}>
+          <text content="Prc  " fg={theme.textMuted} />
+          <text
+            content={priceSparkline()}
+            fg={trendStrength().direction === "up" ? theme.success : trendStrength().direction === "down" ? theme.error : theme.textMuted}
+          />
+        </box>
+
+        <Separator type="light" />
+        <box flexDirection="row" paddingLeft={2}>
+          <text content="[1]Vol [2]Liq [3]Mom [4]Corr  [ESC]Close" fg={theme.textMuted} />
+        </box>
+      </Show>
+
+      <Show when={!selectedMarket()}>
+        <box paddingLeft={2} paddingTop={1}>
+          <text content="Select a market to view analytics" fg={theme.textMuted} />
+        </box>
       </Show>
     </box>
   );
@@ -496,24 +516,31 @@ export function AnalyticsPanel() {
       return baseDir() === dir ? 1 : -1;
     };
     return (
-      <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
-        <text content="Market Correlation" fg={theme.textBright} />
-        <text content="" />
+      <box flexDirection="column" flexGrow={1} paddingTop={1}>
+        <box paddingLeft={2}>
+          <text content={sectionLine("PRIMARY MARKET")} fg={theme.borderSubtle} />
+        </box>
 
         <Show when={current}>
-          <box flexDirection="column">
-            <text content="Primary Market:" fg={theme.textMuted} />
+          <box paddingLeft={1} paddingRight={1}>
             <text content={current!.title.slice(0, 38)} fg={theme.text} />
           </box>
 
-          <text content="" />
+          <box paddingLeft={2} paddingTop={1}>
+            <text content={sectionLine("MARKET CORRELATION")} fg={theme.borderSubtle} />
+          </box>
 
-          <text content="MARKET                                 CHG24  CORR" fg={theme.textMuted} />
+          <box flexDirection="row" paddingLeft={1}>
+            <text content={"MARKET".padEnd(37)} fg={theme.textMuted} width={37} />
+            <text content={"CHG24".padStart(6)} fg={theme.textMuted} width={7} />
+            <text content={"CORR".padStart(5)} fg={theme.textMuted} />
+          </box>
+
           <For each={top5()}>
             {(m) => {
               const corr = proxyCorr(m);
               return (
-                <box flexDirection="row" width="100%">
+                <box flexDirection="row" width="100%" paddingLeft={1}>
                   <text content={m.title.slice(0, 36).padEnd(37, " ")} fg={theme.text} width={37} />
                   <text
                     content={`${m.change24h >= 0 ? "+" : ""}${m.change24h.toFixed(1)}%`.padStart(6)}
@@ -529,12 +556,16 @@ export function AnalyticsPanel() {
             }}
           </For>
 
-          <text content="" />
-          <text content="[ESC] Close" fg={theme.textMuted} />
+          <Separator type="light" />
+          <box flexDirection="row" paddingLeft={2}>
+            <text content="[1]Vol [2]Liq [3]Mom [4]Corr  [ESC]Close" fg={theme.textMuted} />
+          </box>
         </Show>
 
         <Show when={!current}>
-          <text content="Select a market to view analytics" fg={theme.textMuted} />
+          <box paddingLeft={2} paddingTop={1}>
+            <text content="Select a market to view analytics" fg={theme.textMuted} />
+          </box>
         </Show>
       </box>
     );
@@ -545,8 +576,8 @@ export function AnalyticsPanel() {
       position="absolute"
       top={2}
       left="5%"
-      width="35%"
-      height={22}
+      width="38%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={150}
@@ -554,36 +585,35 @@ export function AnalyticsPanel() {
       <PanelHeader
         title="MARKET ANALYTICS"
         icon="◈"
+        subtitle={selectedMarket() ? selectedMarket()!.title.slice(0, 20) : undefined}
         onClose={() => setAnalyticsPanelOpen(false)}
       />
-      
-      <box height={1} width="100%" backgroundColor={theme.accentMuted} />
-      
-      <box height={1} width="100%" flexDirection="row" paddingLeft={2}>
+
+      {/* Tab bar */}
+      <box height={1} width="100%" flexDirection="row" backgroundColor={theme.backgroundPanel}>
         <For each={ANALYTICS_TABS}>
           {(tab) => (
-            <box 
-              paddingLeft={1} 
+            <box
+              paddingLeft={1}
               paddingRight={1}
+              backgroundColor={activeTab() === tab.id ? theme.primary : undefined}
               onMouseDown={() => setActiveTab(tab.id)}
             >
-              <text 
-                content={activeTab() === tab.id ? `> ${tab.label.toUpperCase()} <` : ` ${tab.label.toUpperCase()} `}
-                fg={activeTab() === tab.id ? theme.accent : theme.textMuted}
+              <text
+                content={` ${tab.label.toUpperCase()} `}
+                fg={activeTab() === tab.id ? theme.highlightText : theme.textMuted}
               />
             </box>
           )}
         </For>
       </box>
-      
-      <Separator type="light" />
-      
+
+      <Separator type="heavy" />
+
       <Show when={loading()}>
-        <box padding={1}>
-          <text content="Loading analytics..." fg={theme.warning} />
-        </box>
+        <LoadingState message="Loading analytics data…" />
       </Show>
-      
+
       <Show when={!loading()}>
         <Show when={activeTab() === "volume"}>{renderVolumeTab()}</Show>
         <Show when={activeTab() === "liquidity"}>{renderLiquidityTab()}</Show>

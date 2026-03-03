@@ -2,6 +2,7 @@ import { Show, For, createSignal, createEffect } from "solid-js";
 import { useTheme } from "../context/theme";
 import { appState, setSentimentPanelOpen } from "../state";
 import { analyzeMarketSentiment, getSentimentProviderError, SentimentAnalysis } from "../api/sentiment";
+import { PanelHeader, Separator, LoadingState } from "./ui/panel-components";
 
 const [sentimentData, setSentimentData] = createSignal<SentimentAnalysis | null>(null);
 const [isLoading, setIsLoading] = createSignal(false);
@@ -67,67 +68,87 @@ export function SentimentPanel() {
     }
   };
 
+  const sentimentBar = (confidence: number, sentiment: "bullish" | "bearish" | "neutral") => {
+    const barWidth = 20;
+    const filled = Math.round((confidence / 100) * barWidth);
+    const color = sentimentColor(sentiment);
+    return { bar: "█".repeat(filled) + "░".repeat(barWidth - filled), color };
+  };
+
   return (
     <box
       position="absolute"
       top={2}
       left="8%"
-      width="40%"
-      height={20}
+      width="44%"
+      height={22}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={150}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
-        <text content=" ◈ AI SENTIMENT " fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <box onMouseDown={() => setSentimentPanelOpen(false)}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
-        </box>
-      </box>
+      <PanelHeader
+        title="AI MARKET SENTIMENT"
+        icon="◈"
+        subtitle={selectedMarket() ? selectedMarket()!.title.slice(0, 18) : undefined}
+        onClose={() => setSentimentPanelOpen(false)}
+      />
 
-      {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.primaryMuted} />
+      <Separator type="heavy" />
 
       <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
         <Show when={selectedMarket()}>
-          <text content={selectedMarket()!.title.slice(0, 44)} fg={theme.textBright} />
+          <text content={selectedMarket()!.title.slice(0, 50)} fg={theme.text} />
           <text content="" />
 
           <Show when={isLoading()}>
-            <text content="Analyzing market narrative..." fg={theme.warning} />
+            <LoadingState message="Analyzing market narrative with AI…" />
           </Show>
 
           <Show when={!isLoading() && errorMessage()}>
-            <text content={errorMessage()!} fg={theme.error} />
+            <text content={`✗ ${errorMessage()!}`} fg={theme.error} />
+            <text content="" />
+            <text content="Ensure an AI provider is configured in Settings [E]." fg={theme.textMuted} />
           </Show>
 
           <Show when={!isLoading() && !errorMessage() && sentimentData()}>
-            <box flexDirection="row" width="100%">
-              <text content="SENTIMENT: " fg={theme.textMuted} />
+            <text content="─── SENTIMENT SIGNAL ────────────────────────" fg={theme.borderSubtle} />
+
+            {/* Sentiment badge + bar */}
+            <box flexDirection="row" paddingTop={0}>
+              <text content="Signal : " fg={theme.textMuted} />
               <text
                 content={sentimentData()!.sentiment.toUpperCase()}
                 fg={sentimentColor(sentimentData()!.sentiment)}
               />
-              <text content={`  (${sentimentData()!.confidence.toFixed(0)}%)`} fg={theme.textMuted} />
+              <text content="  " fg={theme.textMuted} />
+              <text
+                content={sentimentBar(sentimentData()!.confidence, sentimentData()!.sentiment).bar}
+                fg={sentimentBar(sentimentData()!.confidence, sentimentData()!.sentiment).color}
+              />
+              <text content={`  ${sentimentData()!.confidence.toFixed(0)}%`} fg={theme.textMuted} />
             </box>
 
             <text content="" />
-            <text content="SUMMARY" fg={theme.primary} />
+            <text content="─── SUMMARY ─────────────────────────────────" fg={theme.borderSubtle} />
             <text content={sentimentData()!.summary} fg={theme.textMuted} width="96%" />
 
             <text content="" />
-            <text content="KEY FACTORS" fg={theme.primary} />
+            <text content="─── KEY FACTORS ─────────────────────────────" fg={theme.borderSubtle} />
             <For each={sentimentData()!.keyFactors.slice(0, 4)}>
-              {(factor) => <text content={`• ${factor}`} fg={theme.text} />}
+              {(factor) => (
+                <box flexDirection="row">
+                  <text content="▸ " fg={theme.accent} />
+                  <text content={factor} fg={theme.text} />
+                </box>
+              )}
             </For>
           </Show>
 
-          <text content="" />
+          <Separator type="light" />
           <box flexDirection="row" gap={3}>
             <box onMouseDown={() => { const m = selectedMarket(); if (m) loadSentiment(m.id); }}>
-              <text content="[R] Refresh" fg={theme.textMuted} />
+              <text content="[R] Refresh Analysis" fg={theme.accent} />
             </box>
             <box onMouseDown={() => setSentimentPanelOpen(false)}>
               <text content="[ESC] Close" fg={theme.textMuted} />
@@ -136,7 +157,9 @@ export function SentimentPanel() {
         </Show>
 
         <Show when={!selectedMarket()}>
-          <text content="Select a market to analyze" fg={theme.textMuted} />
+          <text content="Select a market from the list to run AI sentiment analysis." fg={theme.textMuted} />
+          <text content="" />
+          <text content="Requires an AI provider configured in Settings [E]." fg={theme.textMuted} />
         </Show>
       </box>
     </box>

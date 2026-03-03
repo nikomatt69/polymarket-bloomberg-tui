@@ -2,6 +2,7 @@ import { Show, createSignal, createEffect, createMemo, For } from "solid-js";
 import { RGBA } from "@opentui/core";
 import { useTheme } from "../context/theme";
 import { appState, setIndicatorsPanelOpen } from "../state";
+import { PanelHeader, Separator, DataRow, LoadingState } from "./ui/panel-components";
 import {
   calculateSMA,
   calculateRSI,
@@ -159,77 +160,111 @@ export function IndicatorsPanel() {
       top={2}
       left="32%"
       width="36%"
-      height={18}
+      height={20}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={150}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.accent} flexDirection="row">
-        <text content=" ◈ INDICATORS " fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <box onMouseDown={() => setIndicatorsPanelOpen(false)}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
-        </box>
+      <PanelHeader
+        title="TECHNICAL INDICATORS"
+        icon="◈"
+        subtitle={selectedMarket() ? selectedMarket()!.title.slice(0, 16) : undefined}
+        onClose={() => setIndicatorsPanelOpen(false)}
+      />
+
+      {/* Indicator type tab bar */}
+      <box height={1} width="100%" flexDirection="row" backgroundColor={theme.backgroundPanel}>
+        <For each={indicatorOptions}>
+          {(opt) => (
+            <box
+              paddingLeft={1}
+              paddingRight={1}
+              backgroundColor={selectedIndicator() === opt.id ? opt.color : undefined}
+              onMouseDown={() => setSelectedIndicator(opt.id)}
+            >
+              <text
+                content={` ${opt.label} `}
+                fg={selectedIndicator() === opt.id ? theme.background : theme.textMuted}
+              />
+            </box>
+          )}
+        </For>
       </box>
 
-      {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.accentMuted} />
+      <Separator type="heavy" />
 
-      <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
+      <box flexDirection="column" flexGrow={1} paddingTop={1}>
         <Show when={selectedMarket()}>
-          <text content={selectedMarket()!.title.slice(0, 48)} fg={theme.textBright} />
-          <text content="" />
-
-          {/* Indicator selector — mouse clickable */}
-          <box flexDirection="row" gap={2}>
-            <For each={indicatorOptions}>
-              {(opt) => (
-                <box onMouseDown={() => setSelectedIndicator(opt.id)}>
-                  <text
-                    content={selectedIndicator() === opt.id ? `[${opt.label}]` : ` ${opt.label} `}
-                    fg={selectedIndicator() === opt.id ? opt.color : theme.textMuted}
-                  />
-                </box>
-              )}
-            </For>
+          <box paddingLeft={2}>
+            <text content={selectedMarket()!.title.slice(0, 48)} fg={theme.text} />
           </box>
-
           <text content="" />
 
           <Show when={loading()}>
-            <text content="Loading price data..." fg={theme.warning} />
+            <LoadingState message="Loading price history…" />
           </Show>
 
           <Show when={!loading() && errorMessage()}>
-            <text content={errorMessage()!} fg={theme.error} />
+            <box paddingLeft={2}>
+              <text content={`✗ ${errorMessage()!}`} fg={theme.error} />
+            </box>
           </Show>
 
           <Show when={!loading() && !errorMessage() && validIndicator()}>
-            <box flexDirection="row" gap={3}>
-              <text content={validIndicator()!.name} fg={theme.primary} />
+            <box paddingLeft={2}>
               <text
-                content={validIndicator()!.current >= validIndicator()!.prev ? "↑ Rising" : "↓ Falling"}
-                fg={validIndicator()!.current >= validIndicator()!.prev ? theme.success : theme.error}
+                content={`─── ${validIndicator()!.name} ────────────────────────`}
+                fg={theme.borderSubtle}
               />
             </box>
-            <text content={`Current: ${validIndicator()!.current.toFixed(4)}`} fg={theme.text} />
+            <DataRow
+              label="Indicator"
+              value={validIndicator()!.name}
+              valueColor="accent"
+              highlight
+            />
+            <DataRow
+              label="Current"
+              value={validIndicator()!.current.toFixed(4)}
+              valueColor="text"
+            />
+            <DataRow
+              label="Direction"
+              value={validIndicator()!.current >= validIndicator()!.prev ? "↑ Rising" : "↓ Falling"}
+              valueColor={validIndicator()!.current >= validIndicator()!.prev ? "success" : "error"}
+            />
+            <DataRow
+              label="Prev"
+              value={validIndicator()!.prev.toFixed(4)}
+              valueColor="muted"
+            />
 
-            <text content="" />
-            <text content="Last values:" fg={theme.textMuted} />
-            <text content={validIndicator()!.values.map((v) => v.toFixed(3)).join("  ")} fg={theme.text} width="95%" />
+            <box paddingLeft={2} paddingTop={1}>
+              <text content="─── LAST VALUES ─────────────────────────" fg={theme.borderSubtle} />
+            </box>
+            <box paddingLeft={2}>
+              <text content={validIndicator()!.values.map((v) => v.toFixed(3)).join("  ")} fg={theme.text} width="95%" />
+            </box>
           </Show>
 
           <Show when={!loading() && !errorMessage() && !validIndicator()}>
-            <text content="Not enough price data" fg={theme.textMuted} />
+            <box paddingLeft={2}>
+              <text content="Insufficient price history for this indicator" fg={theme.textMuted} />
+              <text content="Try a different timeframe or indicator period" fg={theme.textMuted} />
+            </box>
           </Show>
 
-          <text content="" />
-          <text content="[1-4] Select  [+/=] Period  Click to select" fg={theme.textMuted} />
+          <Separator type="light" />
+          <box flexDirection="row" paddingLeft={2}>
+            <text content="[SMA/EMA/RSI/MACD/BB] Indicator   [+/-] Period   [ESC] Close" fg={theme.textMuted} />
+          </box>
         </Show>
 
         <Show when={!selectedMarket()}>
-          <text content="Select a market to view indicators" fg={theme.textMuted} />
+          <box paddingLeft={2}>
+            <text content="Select a market to view technical indicators" fg={theme.textMuted} />
+          </box>
         </Show>
       </box>
     </box>

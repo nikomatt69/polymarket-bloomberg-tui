@@ -1,6 +1,7 @@
 import { Show, For } from "solid-js";
 import { useTheme } from "../context/theme";
-import { walletState } from "../state";
+import { walletState, setAccountStatsOpen } from "../state";
+import { PanelHeader, Separator, DataRow } from "./ui/panel-components";
 import { positionsState } from "../hooks/usePositions";
 import { ordersState } from "../hooks/useOrders";
 import { 
@@ -74,205 +75,202 @@ export function AccountStatsPanel() {
     <box
       position="absolute"
       top={2}
-      left="15%"
-      width="70%"
-      height={22}
-      backgroundColor={theme.backgroundPanel}
+      left="8%"
+      width="84%"
+      height={26}
+      backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={160}
     >
-      <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
-        <text content=" ACCOUNT STATS " fg={theme.highlightText} width={16} />
-        <box flexGrow={1} />
-        <text 
-          content={` Health: ${healthScore()}% `} 
-          fg={healthScore() >= 70 ? theme.success : healthScore() >= 40 ? theme.warning : theme.error} 
-        />
-        <text 
-          content={` Risk: ${riskLevel().toUpperCase()} `} 
-          fg={riskLevel() === "low" ? theme.success : riskLevel() === "medium" ? theme.warning : theme.error} 
-        />
-        <text content=" [ESC] Close " fg={theme.highlightText} width={14} />
-      </box>
+      <PanelHeader
+        title="ACCOUNT STATISTICS"
+        icon="◈"
+        subtitle={`Health: ${healthScore()}%  Risk: ${riskLevel().toUpperCase()}`}
+        onClose={() => setAccountStatsOpen(false)}
+      />
+
+      <Separator type="heavy" />
 
       <Show
         when={walletState.connected}
         fallback={
-          <box flexGrow={1} justifyContent="center" alignItems="center">
-            <text content="Connect wallet to view account stats" fg={theme.textMuted} />
+          <box flexGrow={1} paddingLeft={2} paddingTop={2}>
+            <text content="○ Connect wallet to view account statistics" fg={theme.textMuted} />
+            <text content="" />
+            <text content="Press [W] to open wallet panel and connect." fg={theme.textMuted} />
           </box>
         }
       >
         <scrollbox flexGrow={1} width="100%">
-        <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingTop={1}>
-          <box flexDirection="row" width="100%" gap={4}>
-            <box flexDirection="column" width="25%">
-              <text content="BALANCE" fg={theme.textMuted} />
-              <text content={`$${walletState.balance.toFixed(2)}`} fg={theme.textBright} />
-              <text content="Available" fg={theme.textMuted} />
-            </box>
-            <box flexDirection="column" width="25%">
-              <text content="POSITIONS VALUE" fg={theme.textMuted} />
-              <text content={`$${portfolioSummary().totalValue.toFixed(2)}`} fg={theme.textBright} />
-              <text content={`${portfolioSummary().positionCount} positions`} fg={theme.textMuted} />
-            </box>
-            <box flexDirection="column" width="25%">
-              <text content="TOTAL P&L" fg={theme.textMuted} />
-              <text 
-                content={fmtUsd(portfolioSummary().totalCashPnl)} 
-                fg={portfolioSummary().totalCashPnl >= 0 ? theme.success : theme.error}
-              />
-              <text 
-                content={fmtPct(portfolioSummary().totalPercentPnl)} 
-                fg={portfolioSummary().totalPercentPnl >= 0 ? theme.success : theme.error} 
-              />
-            </box>
-            <box flexDirection="column" width="25%">
-              <text content="TOTAL BALANCE" fg={theme.textMuted} />
-              <text content={`$${totalBalance().toFixed(2)}`} fg={theme.textBright} />
-              <text content="Value + Available" fg={theme.textMuted} />
-            </box>
-          </box>
+          <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingTop={1}>
 
-          <text content="" />
-          <text content="────────────────────────────────────────────────────────" fg={theme.textMuted} />
+            {/* Summary row */}
+            <box paddingLeft={1}>
+              <text content="─── PORTFOLIO SUMMARY ──────────────────────────────────" fg={theme.borderSubtle} />
+            </box>
+            <box flexDirection="row" width="100%" gap={2}>
+              <box flexDirection="column" width="24%">
+                <DataRow label="Cash" value={`$${walletState.balance.toFixed(2)}`} valueColor="text" compact />
+                <DataRow label="Positions" value={`$${portfolioSummary().totalValue.toFixed(2)}`} valueColor="text" compact />
+                <DataRow label="Total" value={`$${totalBalance().toFixed(2)}`} valueColor="accent" compact />
+              </box>
+              <box flexDirection="column" width="24%">
+                <DataRow label="Open Pos" value={`${portfolioSummary().positionCount}`} compact />
+                <DataRow
+                  label="Total P&L"
+                  value={fmtUsd(portfolioSummary().totalCashPnl)}
+                  valueColor={portfolioSummary().totalCashPnl >= 0 ? "success" : "error"}
+                  compact
+                />
+                <DataRow
+                  label="P&L %"
+                  value={fmtPct(portfolioSummary().totalPercentPnl)}
+                  valueColor={portfolioSummary().totalPercentPnl >= 0 ? "success" : "error"}
+                  compact
+                />
+              </box>
+              <box flexDirection="column" width="24%">
+                <DataRow
+                  label="Health"
+                  value={`${healthScore()}%`}
+                  valueColor={healthScore() >= 70 ? "success" : healthScore() >= 40 ? "warning" : "error"}
+                  compact
+                />
+                <DataRow
+                  label="Risk Level"
+                  value={riskLevel().toUpperCase()}
+                  valueColor={riskLevel() === "low" ? "success" : riskLevel() === "medium" ? "warning" : "error"}
+                  compact
+                />
+                <DataRow label="Exposure" value={`${((portfolioSummary().totalValue / Math.max(1, totalBalance())) * 100).toFixed(1)}%`} compact />
+              </box>
+            </box>
 
-          <text content="TRADING STATS" fg={theme.primary} />
-
-          <box flexDirection="row" width="100%" gap={4}>
-            <box flexDirection="column">
-              <text content="Trades" fg={theme.textMuted} />
-              <text content={`${tradeStats().totalTrades}`} fg={theme.text} />
+            {/* Trading Stats */}
+            <box paddingLeft={1} paddingTop={1}>
+              <text content="─── TRADING STATISTICS ─────────────────────────────────" fg={theme.borderSubtle} />
             </box>
-            <box flexDirection="column">
-              <text content="Win Rate" fg={theme.textMuted} />
-              <text 
-                content={`${tradeStats().winRate.toFixed(1)}%`} 
-                fg={tradeStats().winRate >= 50 ? theme.success : theme.error} 
-              />
-            </box>
-            <box flexDirection="column">
-              <text content="Avg Size" fg={theme.textMuted} />
-              <text content={`$${tradeStats().avgTradeSize.toFixed(2)}`} fg={theme.text} />
-            </box>
-            <box flexDirection="column">
-              <text content="Profit Factor" fg={theme.textMuted} />
-              <text 
-                content={tradeStats().profitFactor === Infinity ? "∞" : tradeStats().profitFactor.toFixed(2)} 
-                fg={tradeStats().profitFactor >= 1.5 ? theme.success : theme.error} 
-              />
-            </box>
-          </box>
-
-          <box flexDirection="row" width="100%" gap={4}>
-            <box flexDirection="column">
-              <text content="Total Profit" fg={theme.textMuted} />
-              <text content={fmtUsd(tradeStats().totalProfit)} fg={theme.success} />
-            </box>
-            <box flexDirection="column">
-              <text content="Total Loss" fg={theme.textMuted} />
-              <text content={fmtUsd(-tradeStats().totalLoss)} fg={theme.error} />
-            </box>
-            <box flexDirection="column">
-              <text content="Net P&L" fg={theme.textMuted} />
-              <text 
-                content={fmtUsd(tradeStats().netPnl)} 
-                fg={tradeStats().netPnl >= 0 ? theme.success : theme.error} 
-              />
-            </box>
-            <box flexDirection="column">
-              <text content="Avg Win/Loss" fg={theme.textMuted} />
-              <text 
-                content={tradeStats().avgLoss !== 0 
-                  ? `${(tradeStats().avgWin / Math.abs(tradeStats().avgLoss)).toFixed(2)}R` 
-                  : "N/A"} 
-                fg={theme.text} 
-              />
-            </box>
-          </box>
-
-          <text content="" />
-          <text content="MONTHLY EXECUTION" fg={theme.primary} />
-          <Show
-            when={monthlyStats().length > 0}
-            fallback={<text content="No filled trades yet" fg={theme.textMuted} />}
-          >
             <box flexDirection="row" width="100%">
-              <text content="MONTH    " fg={theme.textMuted} width={9} />
-              <text content="TRADES " fg={theme.textMuted} width={7} />
-              <text content="VOLUME      " fg={theme.textMuted} width={12} />
-              <text content="REALIZED P&L" fg={theme.textMuted} />
+              <box flexDirection="column" width="33%">
+                <DataRow label="Total Trades" value={`${tradeStats().totalTrades}`} compact />
+                <DataRow
+                  label="Win Rate"
+                  value={`${tradeStats().winRate.toFixed(1)}%`}
+                  valueColor={tradeStats().winRate >= 50 ? "success" : "error"}
+                  compact
+                />
+                <DataRow label="Avg Size" value={`$${tradeStats().avgTradeSize.toFixed(2)}`} compact />
+              </box>
+              <box flexDirection="column" width="33%">
+                <DataRow label="Total Profit" value={fmtUsd(tradeStats().totalProfit)} valueColor="success" compact />
+                <DataRow label="Total Loss" value={fmtUsd(-tradeStats().totalLoss)} valueColor="error" compact />
+                <DataRow
+                  label="Net P&L"
+                  value={fmtUsd(tradeStats().netPnl)}
+                  valueColor={tradeStats().netPnl >= 0 ? "success" : "error"}
+                  compact
+                />
+              </box>
+              <box flexDirection="column" width="33%">
+                <DataRow
+                  label="Profit Factor"
+                  value={tradeStats().profitFactor === Infinity ? "∞" : tradeStats().profitFactor.toFixed(2)}
+                  valueColor={tradeStats().profitFactor >= 1.5 ? "success" : "error"}
+                  compact
+                />
+                <DataRow
+                  label="Avg Win/Loss"
+                  value={tradeStats().avgLoss !== 0
+                    ? `${(tradeStats().avgWin / Math.abs(tradeStats().avgLoss)).toFixed(2)}R`
+                    : "N/A"}
+                  compact
+                />
+              </box>
             </box>
-            <For each={monthlyStats()}>
-              {(row) => (
-                <box flexDirection="row" width="100%">
-                  <text content={row.month.padEnd(8, " ")} fg={theme.text} width={9} />
-                  <text content={String(row.tradeCount).padStart(6, " ")} fg={theme.text} width={7} />
-                  <text content={fmtCompactUsd(row.volume).padStart(11, " ")} fg={theme.textMuted} width={12} />
-                  <text content={fmtUsd(row.pnl)} fg={row.pnl >= 0 ? theme.success : theme.error} />
+
+            {/* Monthly Stats */}
+            <box paddingLeft={1} paddingTop={1}>
+              <text content="─── MONTHLY EXECUTION ──────────────────────────────────" fg={theme.borderSubtle} />
+            </box>
+            <Show
+              when={monthlyStats().length > 0}
+              fallback={
+                <box paddingLeft={1}>
+                  <text content="No filled trades recorded yet" fg={theme.textMuted} />
                 </box>
-              )}
-            </For>
-          </Show>
-
-          <text content="" />
-          <text content="MARKET CONCENTRATION" fg={theme.primary} />
-          <box flexDirection="row" width="100%" gap={4}>
-            <box flexDirection="column">
-              <text content="Top Exposure" fg={theme.textMuted} />
-              <text content={`${concentration().topExposurePct.toFixed(1)}%`} fg={concentrationColor()} />
-            </box>
-            <box flexDirection="column">
-              <text content="HHI" fg={theme.textMuted} />
-              <text content={concentration().hhi.toFixed(0)} fg={concentrationColor()} />
-            </box>
-            <box flexDirection="column">
-              <text content="Effective Mkts" fg={theme.textMuted} />
-              <text content={concentration().effectiveMarketCount.toFixed(1)} fg={theme.text} />
-            </box>
-            <box flexDirection="column">
-              <text content="Risk" fg={theme.textMuted} />
-              <text content={concentration().riskLevel.toUpperCase()} fg={concentrationColor()} />
-            </box>
-          </box>
-          <Show when={concentration().entries.length > 0}>
-            <box flexDirection="row" width="100%">
-              <text content="MARKET" fg={theme.textMuted} width={28} />
-              <text content="EXPO" fg={theme.textMuted} width={8} />
-              <text content="VALUE      " fg={theme.textMuted} width={11} />
-              <text content="P&L" fg={theme.textMuted} />
-            </box>
-            <For each={concentration().entries.slice(0, 3)}>
-              {(entry) => (
-                <box flexDirection="row" width="100%">
-                  <text content={entry.marketTitle.slice(0, 27).padEnd(27, " ")} fg={theme.text} width={28} />
-                  <text content={`${entry.percentage.toFixed(1)}%`.padStart(7, " ")} fg={theme.textMuted} width={8} />
-                  <text content={fmtCompactUsd(entry.value).padStart(10, " ")} fg={theme.textMuted} width={11} />
-                  <text content={fmtUsd(entry.pnl)} fg={entry.pnl >= 0 ? theme.success : theme.error} />
-                </box>
-              )}
-            </For>
-          </Show>
-
-          <Show when={assetAllocation().length > 0}>
-            <text content="" />
-            <text content="────────────────────────────────────────────────────────" fg={theme.textMuted} />
-            <text content="ASSET ALLOCATION" fg={theme.primary} />
-
-            <box flexDirection="row" width="100%" gap={3}>
-              <For each={assetAllocation().slice(0, 5)}>
-                {(asset) => (
-                  <box flexDirection="column" width="18%">
-                    <text content={asset.outcome.slice(0, 10)} fg={theme.textMuted} />
-                    <text content={`${asset.percentage.toFixed(1)}%`} fg={theme.text} />
-                    <text content={`$${asset.value.toFixed(2)}`} fg={theme.textMuted} />
+              }
+            >
+              <box flexDirection="row" paddingLeft={1}>
+                <text content={"MONTH".padEnd(9)} fg={theme.textMuted} width={9} />
+                <text content={"TRADES".padEnd(7)} fg={theme.textMuted} width={7} />
+                <text content={"VOLUME".padEnd(12)} fg={theme.textMuted} width={12} />
+                <text content="REALIZED P&L" fg={theme.textMuted} />
+              </box>
+              <For each={monthlyStats()}>
+                {(row) => (
+                  <box flexDirection="row" paddingLeft={1}>
+                    <text content={row.month.padEnd(8, " ")} fg={theme.text} width={9} />
+                    <text content={String(row.tradeCount).padStart(6, " ")} fg={theme.text} width={7} />
+                    <text content={fmtCompactUsd(row.volume).padStart(11, " ")} fg={theme.textMuted} width={12} />
+                    <text content={fmtUsd(row.pnl)} fg={row.pnl >= 0 ? theme.success : theme.error} />
                   </box>
                 )}
               </For>
-            </box>
-          </Show>
+            </Show>
 
-        </box>
+            {/* Concentration */}
+            <box paddingLeft={1} paddingTop={1}>
+              <text content="─── MARKET CONCENTRATION ───────────────────────────────" fg={theme.borderSubtle} />
+            </box>
+            <box flexDirection="row" paddingLeft={1}>
+              <DataRow label="Top Exposure" value={`${concentration().topExposurePct.toFixed(1)}%`} valueColor={concentration().riskLevel === "low" ? "success" : concentration().riskLevel === "medium" ? "warning" : "error"} compact />
+              <DataRow label="HHI Index" value={concentration().hhi.toFixed(0)} compact />
+              <DataRow label="Eff. Markets" value={concentration().effectiveMarketCount.toFixed(1)} compact />
+              <DataRow label="Conc. Risk" value={concentration().riskLevel.toUpperCase()} valueColor={concentration().riskLevel === "low" ? "success" : concentration().riskLevel === "medium" ? "warning" : "error"} compact />
+            </box>
+            <Show when={concentration().entries.length > 0}>
+              <box flexDirection="row" paddingLeft={1}>
+                <text content={"MARKET".padEnd(28)} fg={theme.textMuted} width={28} />
+                <text content={"EXPO".padEnd(8)} fg={theme.textMuted} width={8} />
+                <text content={"VALUE".padEnd(11)} fg={theme.textMuted} width={11} />
+                <text content="P&L" fg={theme.textMuted} />
+              </box>
+              <For each={concentration().entries.slice(0, 3)}>
+                {(entry) => (
+                  <box flexDirection="row" paddingLeft={1}>
+                    <text content={entry.marketTitle.slice(0, 27).padEnd(27, " ")} fg={theme.text} width={28} />
+                    <text content={`${entry.percentage.toFixed(1)}%`.padStart(7, " ")} fg={theme.textMuted} width={8} />
+                    <text content={fmtCompactUsd(entry.value).padStart(10, " ")} fg={theme.textMuted} width={11} />
+                    <text content={fmtUsd(entry.pnl)} fg={entry.pnl >= 0 ? theme.success : theme.error} />
+                  </box>
+                )}
+              </For>
+            </Show>
+
+            {/* Asset Allocation */}
+            <Show when={assetAllocation().length > 0}>
+              <box paddingLeft={1} paddingTop={1}>
+                <text content="─── ASSET ALLOCATION ───────────────────────────────────" fg={theme.borderSubtle} />
+              </box>
+              <box flexDirection="row" paddingLeft={1} gap={3}>
+                <For each={assetAllocation().slice(0, 5)}>
+                  {(asset) => (
+                    <box flexDirection="column" width="18%">
+                      <text content={asset.outcome.slice(0, 10)} fg={theme.textMuted} />
+                      <text content={`${asset.percentage.toFixed(1)}%`} fg={theme.text} />
+                      <text content={`$${asset.value.toFixed(2)}`} fg={theme.textMuted} />
+                    </box>
+                  )}
+                </For>
+              </box>
+            </Show>
+
+            {/* Footer */}
+            <text content="" />
+            <box flexDirection="row" paddingLeft={1}>
+              <text content="[↑↓] Scroll   [ESC] Close" fg={theme.textMuted} />
+            </box>
+          </box>
         </scrollbox>
       </Show>
     </box>

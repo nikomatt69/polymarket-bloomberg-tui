@@ -10,10 +10,17 @@ import {
   setComparisonSelectedMarketId,
   navigateToIndex,
 } from "../state";
+import { PanelHeader, Separator, DataRow } from "./ui/panel-components";
 
 function fmtPct(val: number): string {
   const sign = val >= 0 ? "+" : "";
   return `${sign}${val.toFixed(1)}%`;
+}
+
+function fmtVol(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(1)}K`;
+  return `$${n.toFixed(0)}`;
 }
 
 interface ComparisonPanelProps {
@@ -38,8 +45,8 @@ export function ComparisonPanel(props: ComparisonPanelProps) {
 
     return {
       volumeDiff: secondary.volume24h - primary.volume24h,
-      volumeDiffPct: primary.volume24h > 0 
-        ? ((secondary.volume24h - primary.volume24h) / primary.volume24h) * 100 
+      volumeDiffPct: primary.volume24h > 0
+        ? ((secondary.volume24h - primary.volume24h) / primary.volume24h) * 100
         : 0,
       priceChangeDiff: secondary.change24h - primary.change24h,
       liquidityDiff: (secondary.liquidity || 0) - (primary.liquidity || 0),
@@ -60,24 +67,20 @@ export function ComparisonPanel(props: ComparisonPanelProps) {
       zIndex={160}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.accent} flexDirection="row">
-        <text content=" ◈ MARKET COMPARISON " fg={theme.highlightText} />
-        <box flexGrow={1} />
-        <Show when={comparisonSelectMode()}>
-          <text content=" SELECT ↑↓ ENTER " fg={theme.highlightText} />
-        </Show>
+      <PanelHeader
+        title="MARKET COMPARISON"
+        icon="◈"
+        subtitle={comparisonSelectMode() ? "SELECT MODE — ↑↓ ENTER" : undefined}
+        onClose={handleClose}
+      >
         <Show when={!comparisonSelectMode()}>
           <box onMouseDown={() => setComparisonSelectMode(true)}>
-            <text content=" [C] Change " fg={theme.highlightText} />
+            <text content=" [C] Change Market " fg={theme.primaryMuted} />
           </box>
         </Show>
-        <box onMouseDown={handleClose}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
-        </box>
-      </box>
+      </PanelHeader>
 
-      {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.accentMuted} />
+      <Separator type="heavy" />
 
       <Show when={comparisonSelectMode()}>
         <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
@@ -111,29 +114,30 @@ export function ComparisonPanel(props: ComparisonPanelProps) {
       </Show>
 
       <Show when={!comparisonSelectMode()}>
-        <box flexDirection="column" flexGrow={1} width="100%" paddingLeft={1}>
+        <box flexDirection="column" flexGrow={1} width="100%" paddingLeft={1} paddingTop={1}>
           <box flexDirection="row" width="100%" flexGrow={1} gap={1}>
+            {/* Primary Market column */}
             <box flexDirection="column" width="50%" flexGrow={1}>
               <box height={1} width="100%" backgroundColor={theme.primary}>
-                <text content=" PRIMARY MARKET " fg={theme.highlightText} />
+                <text content=" ◈ PRIMARY MARKET " fg={theme.highlightText} />
               </box>
 
               <Show when={primaryMarket()} fallback={
-                <box flexGrow={1} justifyContent="center" alignItems="center">
-                  <text content="Select primary market (Enter)" fg={theme.textMuted} />
+                <box flexGrow={1} paddingLeft={2} paddingTop={1}>
+                  <text content="Select primary market (↑↓ to navigate)" fg={theme.textMuted} />
                 </box>
               }>
-                <box flexDirection="column" padding={1}>
-                  <text content={primaryMarket()!.title.slice(0, 50)} fg={theme.textBright} />
+                <box flexDirection="column" paddingLeft={1} paddingTop={1}>
+                  <text content={primaryMarket()!.title.slice(0, 50)} fg={theme.accent} />
                   <text content="" />
 
-                  <box flexDirection="row" gap={4}>
-                    <text content={`Vol: $${(primaryMarket()!.volume24h / 1000).toFixed(1)}K`} fg={theme.text} />
-                    <text
-                      content={fmtPct(primaryMarket()!.change24h)}
-                      fg={primaryMarket()!.change24h >= 0 ? theme.success : theme.error}
-                    />
-                  </box>
+                  <DataRow label="24h Volume" value={fmtVol(primaryMarket()!.volume24h)} />
+                  <DataRow
+                    label="24h Change"
+                    value={fmtPct(primaryMarket()!.change24h)}
+                    valueColor={primaryMarket()!.change24h >= 0 ? "success" : "error"}
+                  />
+                  <DataRow label="Liquidity" value={fmtVol(primaryMarket()!.liquidity || 0)} valueColor="muted" />
 
                   <text content="" />
                   <text content="OUTCOMES" fg={theme.primary} />
@@ -141,7 +145,10 @@ export function ComparisonPanel(props: ComparisonPanelProps) {
                     {(outcome) => (
                       <box flexDirection="row" gap={2}>
                         <text content={outcome.title.slice(0, 20)} fg={theme.textMuted} width={22} />
-                        <text content={`${(outcome.price * 100).toFixed(1)}¢`} fg={theme.text} />
+                        <text
+                          content={`${(outcome.price * 100).toFixed(1)}¢`}
+                          fg={outcome.price > 0.6 ? theme.success : outcome.price > 0.4 ? theme.warning : theme.error}
+                        />
                       </box>
                     )}
                   </For>
@@ -149,35 +156,39 @@ export function ComparisonPanel(props: ComparisonPanelProps) {
               </Show>
             </box>
 
+            {/* Secondary Market column */}
             <box flexDirection="column" width="50%" flexGrow={1}>
               <box height={1} width="100%" backgroundColor={theme.accent}>
-                <text content=" COMPARISON MARKET " fg={theme.highlightText} />
+                <text content=" ◈ COMPARISON MARKET " fg={theme.highlightText} />
               </box>
 
               <Show when={secondaryMarket()} fallback={
-                <box flexGrow={1} justifyContent="center" alignItems="center">
-                  <text content="Press [C] to select comparison" fg={theme.textMuted} />
+                <box flexGrow={1} paddingLeft={2} paddingTop={1}>
+                  <text content="Press [C] to select comparison market" fg={theme.textMuted} />
                 </box>
               }>
-                <box flexDirection="column" padding={1}>
-                  <text content={secondaryMarket()!.title.slice(0, 50)} fg={theme.textBright} />
+                <box flexDirection="column" paddingLeft={1} paddingTop={1}>
+                  <text content={secondaryMarket()!.title.slice(0, 50)} fg={theme.accent} />
                   <text content="" />
 
-                  <box flexDirection="row" gap={4}>
-                    <text content={`Vol: $${(secondaryMarket()!.volume24h / 1000).toFixed(1)}K`} fg={theme.text} />
-                    <text
-                      content={fmtPct(secondaryMarket()!.change24h)}
-                      fg={secondaryMarket()!.change24h >= 0 ? theme.success : theme.error}
-                    />
-                  </box>
+                  <DataRow label="24h Volume" value={fmtVol(secondaryMarket()!.volume24h)} />
+                  <DataRow
+                    label="24h Change"
+                    value={fmtPct(secondaryMarket()!.change24h)}
+                    valueColor={secondaryMarket()!.change24h >= 0 ? "success" : "error"}
+                  />
+                  <DataRow label="Liquidity" value={fmtVol(secondaryMarket()!.liquidity || 0)} valueColor="muted" />
 
                   <text content="" />
-                  <text content="OUTCOMES" fg={theme.primary} />
+                  <text content="OUTCOMES" fg={theme.accent} />
                   <For each={secondaryMarket()!.outcomes}>
                     {(outcome) => (
                       <box flexDirection="row" gap={2}>
                         <text content={outcome.title.slice(0, 20)} fg={theme.textMuted} width={22} />
-                        <text content={`${(outcome.price * 100).toFixed(1)}¢`} fg={theme.text} />
+                        <text
+                          content={`${(outcome.price * 100).toFixed(1)}¢`}
+                          fg={outcome.price > 0.6 ? theme.success : outcome.price > 0.4 ? theme.warning : theme.error}
+                        />
                       </box>
                     )}
                   </For>
@@ -186,21 +197,33 @@ export function ComparisonPanel(props: ComparisonPanelProps) {
             </box>
           </box>
 
+          {/* Comparison stats bar */}
           <Show when={comparisonStats()}>
-            <box height={3} width="100%" backgroundColor={theme.backgroundPanel}>
-              <box flexDirection="column" paddingLeft={1}>
-                <text content="COMPARISON" fg={theme.primary} />
-                <text
-                  content={`Volume: ${comparisonStats()!.volumeDiff >= 0 ? "+" : ""}$${(comparisonStats()!.volumeDiff / 1000).toFixed(1)}K (${fmtPct(comparisonStats()!.volumeDiffPct)})`}
-                  fg={comparisonStats()!.volumeDiff >= 0 ? theme.success : theme.error}
-                />
-                <text
-                  content={`24h Change: ${comparisonStats()!.priceChangeDiff >= 0 ? "+" : ""}${comparisonStats()!.priceChangeDiff.toFixed(1)}%`}
-                  fg={comparisonStats()!.priceChangeDiff >= 0 ? theme.success : theme.error}
-                />
-              </box>
+            <Separator type="heavy" />
+            <box flexDirection="row" paddingLeft={2} paddingRight={2} width="100%">
+              <text content="─── DIFFERENTIAL " fg={theme.borderSubtle} />
+              <box flexGrow={1} />
+              <text
+                content={`Vol: ${comparisonStats()!.volumeDiff >= 0 ? "+" : ""}${fmtVol(comparisonStats()!.volumeDiff)} (${fmtPct(comparisonStats()!.volumeDiffPct)})`}
+                fg={comparisonStats()!.volumeDiff >= 0 ? theme.success : theme.error}
+              />
+              <text content="  " />
+              <text
+                content={`Chg: ${fmtPct(comparisonStats()!.priceChangeDiff)}`}
+                fg={comparisonStats()!.priceChangeDiff >= 0 ? theme.success : theme.error}
+              />
+              <text content="  " />
+              <text
+                content={`Liq: ${comparisonStats()!.liquidityDiff >= 0 ? "+" : ""}${fmtVol(comparisonStats()!.liquidityDiff)}`}
+                fg={comparisonStats()!.liquidityDiff >= 0 ? theme.success : theme.error}
+              />
             </box>
           </Show>
+
+          {/* Footer hints */}
+          <box height={1} flexDirection="row" paddingLeft={2} backgroundColor={theme.backgroundPanel}>
+            <text content="[C] Select Market   [↑↓] Navigate   [ESC] Close" fg={theme.textMuted} />
+          </box>
         </box>
       </Show>
     </box>

@@ -2,6 +2,7 @@ import { For, Show, createSignal } from "solid-js";
 import { useTheme } from "../context/theme";
 import { watchlistState, removeFromWatchlist, toggleWatchlistFilter } from "../hooks/useWatchlist";
 import { appState, selectMarket, setWatchlistPanelOpen } from "../state";
+import { PanelHeader, Separator } from "./ui/panel-components";
 
 function truncate(str: string, len: number): string {
   return str.length > len ? str.slice(0, len - 1) + "…" : str;
@@ -28,42 +29,42 @@ export function WatchlistPanel() {
       zIndex={160}
     >
       {/* Header */}
-      <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
-        <text content=" ◈ WATCHLIST " fg={theme.highlightText} />
-        <box flexGrow={1} />
+      <PanelHeader
+        title="WATCHLIST"
+        icon="★"
+        subtitle={`${watchedMarkets().length} markets  │  Filter: ${watchlistState.filterActive ? "ON" : "OFF"}`}
+        onClose={handleClose}
+      >
         <box onMouseDown={toggleWatchlistFilter}>
           <text
-            content={watchlistState.filterActive ? " [FILTER ON] " : " [FILTER OFF] "}
+            content={watchlistState.filterActive ? " ● FILTER ON " : " ○ Filter off "}
             fg={watchlistState.filterActive ? theme.success : theme.textMuted}
           />
         </box>
-        <text content={` ${watchedMarkets().length} markets `} fg={theme.highlightText} />
-        <box onMouseDown={handleClose}>
-          <text content=" [ESC] ✕ " fg={theme.highlightText} />
-        </box>
+      </PanelHeader>
+
+      {/* Column headers */}
+      <box height={1} width="100%" flexDirection="row" backgroundColor={theme.backgroundPanel} paddingLeft={3}>
+        <text content={"MARKET".padEnd(42)} fg={theme.textMuted} width={42} />
+        <text content={"VOLUME".padStart(12)} fg={theme.textMuted} width={12} />
+        <text content={"24H %".padStart(10)} fg={theme.textMuted} width={10} />
+        <text content={"YES¢".padStart(7)} fg={theme.textMuted} width={7} />
       </box>
 
-      {/* Separator */}
-      <box height={1} width="100%" backgroundColor={theme.primaryMuted} />
+      <Separator type="heavy" />
 
-      <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
+      <box flexDirection="column" flexGrow={1}>
         <Show
           when={watchedMarkets().length > 0}
           fallback={
-            <box flexGrow={1}>
-              <text content="No markets in watchlist — press [X] on any market to add it" fg={theme.textMuted} />
+            <box flexGrow={1} paddingLeft={2} paddingTop={2}>
+              <text content="★ No markets in watchlist yet" fg={theme.textMuted} />
+              <text content="" />
+              <text content="Press [X] while browsing markets to add them here." fg={theme.textMuted} />
+              <text content="Press [F] to toggle watchlist filter mode." fg={theme.textMuted} />
             </box>
           }
         >
-          {/* Column headers */}
-          <box flexDirection="row" width="100%">
-            <text content="   " fg={theme.textMuted} width={3} />
-            <text content="MARKET" fg={theme.textMuted} width={42} />
-            <text content="VOLUME" fg={theme.textMuted} width={12} />
-            <text content="24H %" fg={theme.textMuted} width={10} />
-            <text content="YES¢" fg={theme.textMuted} width={7} />
-          </box>
-
           <scrollbox flexGrow={1} width="100%">
             <For each={watchedMarkets()}>
               {(market, i) => {
@@ -96,7 +97,7 @@ export function WatchlistPanel() {
                     />
                     <text
                       content={`${((market.outcomes?.[0]?.price ?? 0) * 100).toFixed(1)}¢`.padStart(6, " ")}
-                      fg={isSelected() ? theme.highlightText : theme.textMuted}
+                      fg={isSelected() ? theme.highlightText : (market.outcomes?.[0]?.price ?? 0) > 0.6 ? theme.success : theme.textMuted}
                       width={7}
                     />
                   </box>
@@ -105,26 +106,27 @@ export function WatchlistPanel() {
             </For>
           </scrollbox>
         </Show>
+      </box>
 
-        <text content="" />
-        <box flexDirection="row" gap={3}>
-          <text content="[↑↓] Navigate" fg={theme.textMuted} />
-          <text content="[ENTER/Click] Select" fg={theme.textMuted} />
-          <box onMouseDown={() => {
-            const market = watchedMarkets()[selectedIdx()];
-            if (market) {
-              removeFromWatchlist(market.id);
-              setSelectedIdx(i => Math.max(0, i - 1));
-            }
-          }}>
-            <text content="[D] Remove" fg={theme.error} />
-          </box>
-          <box onMouseDown={toggleWatchlistFilter}>
-            <text content="[F] Toggle Filter" fg={theme.textMuted} />
-          </box>
-          <box onMouseDown={handleClose}>
-            <text content="[ESC] Close" fg={theme.textMuted} />
-          </box>
+      {/* Footer */}
+      <Separator type="light" />
+      <box height={1} flexDirection="row" paddingLeft={2} backgroundColor={theme.backgroundPanel}>
+        <text content="[↑↓] Navigate   " fg={theme.textMuted} />
+        <text content="[Click] Select   " fg={theme.textMuted} />
+        <box onMouseDown={() => {
+          const market = watchedMarkets()[selectedIdx()];
+          if (market) {
+            removeFromWatchlist(market.id);
+            setSelectedIdx(i => Math.max(0, i - 1));
+          }
+        }}>
+          <text content="[D] Remove   " fg={theme.error} />
+        </box>
+        <box onMouseDown={toggleWatchlistFilter}>
+          <text content="[F] Toggle Filter   " fg={theme.textMuted} />
+        </box>
+        <box onMouseDown={handleClose}>
+          <text content="[ESC] Close" fg={theme.textMuted} />
         </box>
       </box>
     </box>
