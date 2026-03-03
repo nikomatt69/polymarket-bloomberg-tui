@@ -13,6 +13,7 @@ import { SocialPanel } from "./social-panel";
 import { AutomationPanel } from "./automation-panel";
 import { SkillsPanel } from "./skills-panel";
 import { EnterpriseChat } from "./enterprise-chat";
+import { SearchPanel } from "./search-panel";
 import { useTheme } from "../context/theme";
 import { Separator } from "./ui/panel-components";
 import {
@@ -40,6 +41,7 @@ import {
   automationPanelOpen,
   skillsPanelOpen,
   enterpriseChatOpen,
+  searchPanelOpen,
 } from "../state";
 import { alertsState } from "../hooks/useAlerts";
 import { AccountStatsPanel } from "./account-stats";
@@ -127,7 +129,7 @@ export function Layout() {
         comparisonPanelOpen() || watchlistPanelOpen() || settingsPanelOpen() || shortcutsPanelOpen() ||
         orderBookPanelOpen() || filterPanelOpen() || analyticsPanelOpen() || messagesPanelOpen() || authModalOpen() ||
         profilePanelOpen() || userSearchOpen() || newsPanelOpen() || socialPanelOpen() || automationPanelOpen() || skillsPanelOpen() ||
-        enterpriseChatOpen()
+        enterpriseChatOpen() || searchPanelOpen()
       }>
         <box
           position="absolute"
@@ -253,6 +255,11 @@ export function Layout() {
       {/* Enterprise Chat Overlay — full screen, highest zIndex */}
       <Show when={enterpriseChatOpen()}>
         <EnterpriseChat />
+      </Show>
+
+      {/* Search Panel Overlay */}
+      <Show when={searchPanelOpen()}>
+        <SearchPanel />
       </Show>
     </box>
   );

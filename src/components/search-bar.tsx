@@ -1,12 +1,10 @@
 import { createMemo } from "solid-js";
 import {
   appState,
-  updateSearchQuery,
   walletState,
-  searchInputFocused,
-  setSearchInputFocused,
   filterState,
   setFilterPanelOpen,
+  setSearchPanelOpen,
 } from "../state";
 import { useTheme } from "../context/theme";
 import { truncateAddress } from "../auth/wallet";
@@ -46,25 +44,21 @@ export function SearchBar() {
         fg={theme.primary}
         width={2}
       />
-      <box onMouseDown={() => setSearchInputFocused(true)}>
+      <box onMouseDown={() => setSearchPanelOpen(true)}>
         <text
-          content={searchInputFocused() ? "Search* " : "Search  "}
-          fg={searchInputFocused() ? theme.primary : theme.textBright}
+          content="Search  "
+          fg={theme.textBright}
           width={8}
         />
       </box>
       <text content="Markets " fg={theme.textBright} width={8} />
 
-      {/* Search Input */}
-      <box flexGrow={1} onMouseDown={() => setSearchInputFocused(true)}>
-        <input
+      {/* Search Input — click opens full search panel */}
+      <box flexGrow={1} onMouseDown={() => setSearchPanelOpen(true)}>
+        <text
+          content={appState.searchQuery ? appState.searchQuery : "  [/] Open search panel…"}
+          fg={appState.searchQuery ? theme.text : theme.textMuted}
           width="100%"
-          value={appState.searchQuery}
-          focused={searchInputFocused()}
-          onInput={(value: string) => {
-            setSearchInputFocused(true);
-            updateSearchQuery(value);
-          }}
         />
       </box>
 
@@ -81,7 +75,7 @@ export function SearchBar() {
       </box>
 
       <text
-        content={searchInputFocused() ? " [ESC] Done " : " [/ ] Focus "}
+        content=" [/] Search "
         fg={theme.textMuted}
       />
 
