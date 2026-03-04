@@ -117,6 +117,7 @@ export function StatusBar() {
       <Show when={dailyPnl() !== 0}>
         {sep()}
         <text content="Day:" fg={theme.textMuted} />
+        <text content={dailyPnl() >= 0 ? "▲" : "▼"} fg={dailyPnl() >= 0 ? theme.success : theme.error} />
         <text content={fmtPnl(dailyPnl())} fg={dailyPnl() >= 0 ? theme.success : theme.error} />
       </Show>
       {sep()}

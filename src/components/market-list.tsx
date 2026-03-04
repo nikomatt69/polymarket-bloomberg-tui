@@ -296,10 +296,10 @@ export function MarketList() {
         <text content="Exp" fg={theme.textMuted} width={5} />
       </box>
 
-      {/* ── Separator ─────────────────────────────────────────────────────── */}
+      {/* ── Separator with count ──────────────────────────────────────────── */}
       <box height={1} width="100%">
         <text
-          content="────────────────────────────────────────────────────────────────"
+          content={`─── ${displayMarkets().length} markets ` + "─".repeat(Math.max(0, 50 - displayMarkets().length.toString().length))}
           fg={theme.borderSubtle}
         />
       </box>

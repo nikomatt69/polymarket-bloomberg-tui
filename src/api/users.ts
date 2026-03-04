@@ -2,172 +2,192 @@
  * User API functions for profile management
  */
 
+import { mkdirSync, readFileSync, writeFileSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+import {
+  getCurrentSession,
+  getUserById as getAuthUserById,
+  listUsers,
+  type AuthPublicUser,
+} from "../auth/auth";
 import { UserProfile } from "../types/user";
 
-const MOCK_USER_API = true;
-
-let mockUsers: Map<string, UserProfile> = new Map();
-let currentUser: UserProfile | null = null;
-
-function generateMockUserId(): string {
-  return `user_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+interface StoredProfileEntry {
+  username?: string;
+  bio?: string;
+  avatar?: string;
+  lastSeen?: string;
+  updatedAt?: string;
 }
 
-function generateMockUser(username: string): UserProfile {
-  const now = new Date();
-  const createdAt = new Date(now.getTime() - Math.random() * 365 * 24 * 60 * 60 * 1000);
-  
+interface StoredProfileData {
+  profiles: Record<string, StoredProfileEntry>;
+}
+
+function getProfilesPath(): string {
+  const configDir = join(homedir(), ".polymarket-tui");
+  try {
+    mkdirSync(configDir, { recursive: true });
+  } catch {
+    // directory may already exist
+  }
+  return join(configDir, "user-profiles.json");
+}
+
+function loadProfileData(): StoredProfileData {
+  try {
+    const raw = readFileSync(getProfilesPath(), "utf-8");
+    const parsed = JSON.parse(raw) as Partial<StoredProfileData>;
+    if (parsed && typeof parsed === "object" && parsed.profiles && typeof parsed.profiles === "object") {
+      return { profiles: parsed.profiles as Record<string, StoredProfileEntry> };
+    }
+  } catch {
+    // file missing or invalid
+  }
+  return { profiles: {} };
+}
+
+function saveProfileData(data: StoredProfileData): void {
+  try {
+    writeFileSync(getProfilesPath(), JSON.stringify(data, null, 2), { mode: 0o600 });
+  } catch (error) {
+    console.error("Failed to save user profiles:", error);
+  }
+}
+
+function toUserProfile(user: AuthPublicUser, entry?: StoredProfileEntry): UserProfile {
+  const now = new Date().toISOString();
   return {
-    id: generateMockUserId(),
-    username,
-    email: `${username.toLowerCase()}@example.com`,
-    bio: `Trader and prediction market enthusiast. ${username}'s profile.`,
-    avatar: undefined,
-    createdAt: createdAt.toISOString(),
-    lastSeen: now.toISOString(),
+    id: user.id,
+    username: entry?.username || user.username,
+    email: user.email,
+    bio: entry?.bio || "",
+    avatar: entry?.avatar,
+    createdAt: new Date(user.createdAt).toISOString(),
+    lastSeen: entry?.lastSeen || now,
   };
 }
 
-function initializeMockUsers(): void {
-  if (mockUsers.size > 0) return;
-  
-  const defaultMockUsers: UserProfile[] = [
-    generateMockUser("CryptoKing"),
-    generateMockUser("MarketMaven"),
-    generateMockUser("PolymarketPro"),
-    generateMockUser("PredictionMaster"),
-    generateMockUser("TradingWizard"),
-    generateMockUser("AlphaSeeker"),
-    generateMockUser("BullishBob"),
-    generateMockUser("BearishBetty"),
-    generateMockUser("DataDriven"),
-    generateMockUser("VolatilityViking"),
-  ];
+function upsertProfileEntry(userId: string, updates: Partial<StoredProfileEntry>): StoredProfileEntry {
+  const data = loadProfileData();
+  const previous = data.profiles[userId] ?? {};
+  const next: StoredProfileEntry = {
+    ...previous,
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  };
+  data.profiles[userId] = next;
+  saveProfileData(data);
+  return next;
+}
 
-  defaultMockUsers.forEach((u) => mockUsers.set(u.id, u));
-  defaultMockUsers.forEach((u) => mockUsers.set(u.username.toLowerCase(), u));
+function getAllUserProfiles(): UserProfile[] {
+  const users = listUsers();
+  const data = loadProfileData();
+
+  return users.map((user) => toUserProfile(user, data.profiles[user.id]));
+}
+
+function touchLastSeen(userId: string): void {
+  upsertProfileEntry(userId, { lastSeen: new Date().toISOString() });
 }
 
 export async function getCurrentUser(): Promise<UserProfile | null> {
-  if (MOCK_USER_API) {
-    initializeMockUsers();
-    if (currentUser) return currentUser;
-    
-    currentUser = {
-      id: generateMockUserId(),
-      username: "You",
-      email: "you@example.com",
-      bio: "Polymarket trader",
-      createdAt: new Date().toISOString(),
-      lastSeen: new Date().toISOString(),
-    };
-    return currentUser;
-  }
-  
-  try {
-    const response = await fetch("/api/user/me", {
-      credentials: "include",
-    });
-    if (!response.ok) return null;
-    return await response.json() as UserProfile;
-  } catch {
-    return null;
-  }
+  const session = getCurrentSession();
+  if (!session) return null;
+
+  const authUser = getAuthUserById(session.userId);
+  if (!authUser) return null;
+
+  touchLastSeen(authUser.id);
+  const data = loadProfileData();
+  return toUserProfile(
+    {
+      id: authUser.id,
+      username: authUser.username,
+      email: authUser.email,
+      createdAt: authUser.createdAt,
+    },
+    data.profiles[authUser.id],
+  );
 }
 
 export async function updateProfile(updates: Partial<UserProfile>): Promise<UserProfile | null> {
-  if (MOCK_USER_API) {
-    const current = await getCurrentUser();
-    if (!current) return null;
-    
-    currentUser = {
-      ...current,
-      ...updates,
-      lastSeen: new Date().toISOString(),
-    };
-    
-    return currentUser;
-  }
-  
-  try {
-    const response = await fetch("/api/user/me", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(updates),
-    });
-    if (!response.ok) return null;
-    return await response.json() as UserProfile;
-  } catch {
-    return null;
-  }
+  const session = getCurrentSession();
+  if (!session) return null;
+
+  const authUser = getAuthUserById(session.userId);
+  if (!authUser) return null;
+
+  const entryUpdates: Partial<StoredProfileEntry> = {
+    lastSeen: new Date().toISOString(),
+  };
+
+  if (typeof updates.username === "string") entryUpdates.username = updates.username.trim();
+  if (typeof updates.bio === "string") entryUpdates.bio = updates.bio.trim();
+  if (typeof updates.avatar === "string") entryUpdates.avatar = updates.avatar.trim();
+
+  const entry = upsertProfileEntry(authUser.id, entryUpdates);
+  return toUserProfile(
+    {
+      id: authUser.id,
+      username: authUser.username,
+      email: authUser.email,
+      createdAt: authUser.createdAt,
+    },
+    entry,
+  );
 }
 
 export async function searchUsers(query: string): Promise<UserProfile[]> {
-  if (!query || query.length < 2) return [];
-  
-  if (MOCK_USER_API) {
-    initializeMockUsers();
-    const q = query.toLowerCase();
-    const results = Array.from(mockUsers.values()).filter(
-      (u) =>
-        u.username.toLowerCase().includes(q) ||
-        (u.bio && u.bio.toLowerCase().includes(q))
-    );
-    
-    if (results.length === 0 && query.length >= 2) {
-      const newUser = generateMockUser(query);
-      mockUsers.set(newUser.id, newUser);
-      mockUsers.set(newUser.username.toLowerCase(), newUser);
-      return [newUser];
-    }
-    
-    return results.slice(0, 10);
-  }
-  
-  try {
-    const response = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`, {
-      credentials: "include",
-    });
-    if (!response.ok) return [];
-    return await response.json() as UserProfile[];
-  } catch {
-    return [];
-  }
+  if (!query || query.trim().length < 2) return [];
+
+  const normalized = query.trim().toLowerCase();
+  const allProfiles = getAllUserProfiles();
+
+  const matches = allProfiles.filter((profile) =>
+    profile.username.toLowerCase().includes(normalized)
+    || (profile.email || "").toLowerCase().includes(normalized)
+    || (profile.bio || "").toLowerCase().includes(normalized),
+  );
+
+  matches.sort((a, b) => {
+    const aStarts = a.username.toLowerCase().startsWith(normalized) ? 0 : 1;
+    const bStarts = b.username.toLowerCase().startsWith(normalized) ? 0 : 1;
+    if (aStarts !== bStarts) return aStarts - bStarts;
+    return a.username.localeCompare(b.username);
+  });
+
+  return matches.slice(0, 20);
 }
 
 export async function getUserById(userId: string): Promise<UserProfile | null> {
-  if (MOCK_USER_API) {
-    initializeMockUsers();
-    const user = mockUsers.get(userId);
-    return user || null;
-  }
-  
-  try {
-    const response = await fetch(`/api/users/${userId}`, {
-      credentials: "include",
-    });
-    if (!response.ok) return null;
-    return await response.json() as UserProfile;
-  } catch {
-    return null;
-  }
+  if (!userId) return null;
+
+  const allProfiles = getAllUserProfiles();
+  const profile = allProfiles.find((entry) => entry.id === userId);
+  if (profile) return profile;
+
+  const authUser = getAuthUserById(userId);
+  if (!authUser) return null;
+
+  const data = loadProfileData();
+  return toUserProfile(
+    {
+      id: authUser.id,
+      username: authUser.username,
+      email: authUser.email,
+      createdAt: authUser.createdAt,
+    },
+    data.profiles[authUser.id],
+  );
 }
 
 export async function getUserByUsername(username: string): Promise<UserProfile | null> {
-  if (MOCK_USER_API) {
-    initializeMockUsers();
-    const user = mockUsers.get(username.toLowerCase());
-    return user || null;
-  }
-  
-  try {
-    const response = await fetch(`/api/users/username/${encodeURIComponent(username)}`, {
-      credentials: "include",
-    });
-    if (!response.ok) return null;
-    return await response.json() as UserProfile;
-  } catch {
-    return null;
-  }
+  if (!username) return null;
+
+  const normalized = username.trim().toLowerCase();
+  const allProfiles = getAllUserProfiles();
+  return allProfiles.find((profile) => profile.username.toLowerCase() === normalized) ?? null;
 }

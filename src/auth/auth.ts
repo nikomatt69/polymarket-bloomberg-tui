@@ -234,6 +234,23 @@ export function getUserById(userId: string): AuthUser | null {
   return authData.users.find(u => u.id === userId) || null;
 }
 
+export interface AuthPublicUser {
+  id: string;
+  username: string;
+  email: string;
+  createdAt: number;
+}
+
+export function listUsers(): AuthPublicUser[] {
+  const authData = loadAuthData();
+  return authData.users.map((user) => ({
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    createdAt: user.createdAt,
+  }));
+}
+
 export function validateToken(token: string): AuthSession | null {
   const session = getCurrentSession();
   if (!session || session.token !== token) {

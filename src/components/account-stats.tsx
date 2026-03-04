@@ -1,6 +1,6 @@
 import { Show, For } from "solid-js";
 import { useTheme } from "../context/theme";
-import { walletState, setAccountStatsOpen } from "../state";
+import { walletState, setAccountStatsOpen, authState, currentUserProfile } from "../state";
 import { PanelHeader, Separator, DataRow } from "./ui/panel-components";
 import { positionsState } from "../hooks/usePositions";
 import { ordersState } from "../hooks/useOrders";
@@ -29,6 +29,12 @@ function fmtCompactUsd(val: number): string {
   return `$${val.toFixed(2)}`;
 }
 
+function shortAddress(value: string | null | undefined): string {
+  if (!value) return "—";
+  if (value.length < 14) return value;
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
+}
+
 export function AccountStatsPanel() {
   const { theme } = useTheme();
 
@@ -55,6 +61,26 @@ export function AccountStatsPanel() {
     return Math.round((liquidity + pnlScore) / 2);
   };
 
+  const healthBar = () => {
+    const score = healthScore();
+    const width = 20;
+    const filled = Math.round((score / 100) * width);
+    return "█".repeat(filled) + "░".repeat(width - filled);
+  };
+
+  const winRateBar = () => {
+    const wr = tradeStats().winRate;
+    const width = 16;
+    const filled = Math.round((Math.min(100, wr) / 100) * width);
+    return "█".repeat(filled) + "░".repeat(width - filled);
+  };
+
+  const concBar = (pct: number) => {
+    const width = 12;
+    const filled = Math.round((Math.min(100, pct) / 100) * width);
+    return "█".repeat(filled) + "░".repeat(width - filled);
+  };
+
   const riskLevel = (): "low" | "medium" | "high" => {
     const bal = totalBalance();
     if (bal === 0) return "low";
@@ -63,13 +89,6 @@ export function AccountStatsPanel() {
     if (exposure < 0.7) return "medium";
     return "high";
   };
-
-  const concentrationColor = () =>
-    concentration().riskLevel === "low"
-      ? theme.success
-      : concentration().riskLevel === "medium"
-        ? theme.warning
-        : theme.error;
 
   return (
     <box
@@ -106,6 +125,39 @@ export function AccountStatsPanel() {
 
             {/* Summary row */}
             <box paddingLeft={1}>
+              <text content="─── ACCOUNT OWNER ───────────────────────────────────────" fg={theme.borderSubtle} />
+            </box>
+            <box flexDirection="row" width="100%" gap={2}>
+              <box flexDirection="column" width="32%">
+                <DataRow
+                  label="Profile"
+                  value={currentUserProfile()?.username || authState.user?.username || "Guest"}
+                  valueColor="accent"
+                  compact
+                />
+                <DataRow
+                  label="Email"
+                  value={currentUserProfile()?.email || authState.user?.email || "—"}
+                  valueColor="muted"
+                  compact
+                />
+              </box>
+              <box flexDirection="column" width="32%">
+                <DataRow label="Wallet" value={shortAddress(walletState.address)} compact />
+                <DataRow
+                  label="Funder"
+                  value={walletState.funderAddress ? shortAddress(walletState.funderAddress) : "not set"}
+                  valueColor={walletState.funderAddress ? "text" : "warning"}
+                  compact
+                />
+              </box>
+              <box flexDirection="column" width="32%">
+                <DataRow label="Open Orders" value={`${ordersState.openOrders.length}`} compact />
+                <DataRow label="Trade History" value={`${ordersState.tradeHistory.length}`} compact />
+              </box>
+            </box>
+
+            <box paddingLeft={1}>
               <text content="─── PORTFOLIO SUMMARY ──────────────────────────────────" fg={theme.borderSubtle} />
             </box>
             <box flexDirection="row" width="100%" gap={2}>
@@ -130,12 +182,11 @@ export function AccountStatsPanel() {
                 />
               </box>
               <box flexDirection="column" width="24%">
-                <DataRow
-                  label="Health"
-                  value={`${healthScore()}%`}
-                  valueColor={healthScore() >= 70 ? "success" : healthScore() >= 40 ? "warning" : "error"}
-                  compact
-                />
+                <box flexDirection="row">
+                  <text content="Health  " fg={theme.textMuted} />
+                  <text content={healthBar()} fg={healthScore() >= 70 ? theme.success : healthScore() >= 40 ? theme.warning : theme.error} />
+                  <text content={` ${healthScore()}%`} fg={healthScore() >= 70 ? theme.success : healthScore() >= 40 ? theme.warning : theme.error} />
+                </box>
                 <DataRow
                   label="Risk Level"
                   value={riskLevel().toUpperCase()}
@@ -153,12 +204,11 @@ export function AccountStatsPanel() {
             <box flexDirection="row" width="100%">
               <box flexDirection="column" width="33%">
                 <DataRow label="Total Trades" value={`${tradeStats().totalTrades}`} compact />
-                <DataRow
-                  label="Win Rate"
-                  value={`${tradeStats().winRate.toFixed(1)}%`}
-                  valueColor={tradeStats().winRate >= 50 ? "success" : "error"}
-                  compact
-                />
+                <box flexDirection="row">
+                  <text content="Win Rate" fg={theme.textMuted} />
+                  <text content={" " + winRateBar()} fg={tradeStats().winRate >= 50 ? theme.success : theme.error} />
+                  <text content={` ${tradeStats().winRate.toFixed(1)}%`} fg={tradeStats().winRate >= 50 ? theme.success : theme.error} />
+                </box>
                 <DataRow label="Avg Size" value={`$${tradeStats().avgTradeSize.toFixed(2)}`} compact />
               </box>
               <box flexDirection="column" width="33%">
@@ -212,6 +262,7 @@ export function AccountStatsPanel() {
                     <text content={row.month.padEnd(8, " ")} fg={theme.text} width={9} />
                     <text content={String(row.tradeCount).padStart(6, " ")} fg={theme.text} width={7} />
                     <text content={fmtCompactUsd(row.volume).padStart(11, " ")} fg={theme.textMuted} width={12} />
+                    <text content={row.pnl >= 0 ? "▲ " : "▼ "} fg={row.pnl >= 0 ? theme.success : theme.error} />
                     <text content={fmtUsd(row.pnl)} fg={row.pnl >= 0 ? theme.success : theme.error} />
                   </box>
                 )}
@@ -238,9 +289,11 @@ export function AccountStatsPanel() {
               <For each={concentration().entries.slice(0, 3)}>
                 {(entry) => (
                   <box flexDirection="row" paddingLeft={1}>
-                    <text content={entry.marketTitle.slice(0, 27).padEnd(27, " ")} fg={theme.text} width={28} />
-                    <text content={`${entry.percentage.toFixed(1)}%`.padStart(7, " ")} fg={theme.textMuted} width={8} />
-                    <text content={fmtCompactUsd(entry.value).padStart(10, " ")} fg={theme.textMuted} width={11} />
+                    <text content={entry.marketTitle.slice(0, 20).padEnd(20, " ")} fg={theme.text} width={21} />
+                    <text content={concBar(entry.percentage)} fg={entry.percentage > 50 ? theme.error : entry.percentage > 30 ? theme.warning : theme.textMuted} />
+                    <text content={` ${entry.percentage.toFixed(1)}%`} fg={theme.textMuted} width={7} />
+                    <text content={fmtCompactUsd(entry.value).padStart(9, " ")} fg={theme.textMuted} width={10} />
+                    <text content={entry.pnl >= 0 ? "▲" : "▼"} fg={entry.pnl >= 0 ? theme.success : theme.error} />
                     <text content={fmtUsd(entry.pnl)} fg={entry.pnl >= 0 ? theme.success : theme.error} />
                   </box>
                 )}
@@ -252,15 +305,22 @@ export function AccountStatsPanel() {
               <box paddingLeft={1} paddingTop={1}>
                 <text content="─── ASSET ALLOCATION ───────────────────────────────────" fg={theme.borderSubtle} />
               </box>
-              <box flexDirection="row" paddingLeft={1} gap={3}>
+              <box flexDirection="column" paddingLeft={1}>
                 <For each={assetAllocation().slice(0, 5)}>
-                  {(asset) => (
-                    <box flexDirection="column" width="18%">
-                      <text content={asset.outcome.slice(0, 10)} fg={theme.textMuted} />
-                      <text content={`${asset.percentage.toFixed(1)}%`} fg={theme.text} />
-                      <text content={`$${asset.value.toFixed(2)}`} fg={theme.textMuted} />
-                    </box>
-                  )}
+                  {(asset) => {
+                    const bar = (() => {
+                      const w = 12; const f = Math.round((Math.min(100, asset.percentage) / 100) * w);
+                      return "█".repeat(f) + "░".repeat(w - f);
+                    })();
+                    return (
+                      <box flexDirection="row" gap={1}>
+                        <text content={asset.outcome.slice(0, 10).padEnd(10)} fg={theme.textMuted} width={11} />
+                        <text content={bar} fg={theme.accent} />
+                        <text content={` ${asset.percentage.toFixed(1)}%`} fg={theme.text} width={7} />
+                        <text content={`$${asset.value.toFixed(2)}`} fg={theme.textMuted} />
+                      </box>
+                    );
+                  }}
                 </For>
               </box>
             </Show>

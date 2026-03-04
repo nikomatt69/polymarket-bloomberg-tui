@@ -305,6 +305,17 @@ export function OrderBookPanel() {
         </Show>
       </box>
 
+      {/* ── Section labels ── */}
+      <box height={1} width="100%" flexDirection="row">
+        <box width="50%" flexDirection="row" justifyContent="flex-start" paddingLeft={1}>
+          <text content="─── BIDS ───" fg={theme.success} />
+        </box>
+        <box width={2} />
+        <box width="50%" flexDirection="row">
+          <text content="ASKS ───" fg={theme.error} />
+        </box>
+      </box>
+
       {/* ── Column headers ── */}
       <box height={1} width="100%" flexDirection="row">
         <box width="50%" flexDirection="row" justifyContent="flex-end">

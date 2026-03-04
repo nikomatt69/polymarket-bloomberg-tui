@@ -719,7 +719,8 @@ export function SettingsPanel() {
             <box flexDirection="column" width={30}>
               <text content="MORE PANELS" fg={theme.accent} />
               <box flexDirection="row"><text content=" U        " fg={theme.textMuted} width={11} /><text content="Account stats" fg={theme.text} /></box>
-              <box flexDirection="row"><text content=" Shift+U  " fg={theme.textMuted} width={11} /><text content="User profile" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" Ctrl+X   " fg={theme.textMuted} width={11} /><text content="User profile" fg={theme.text} /></box>
+              <box flexDirection="row"><text content=" Ctrl+Y   " fg={theme.textMuted} width={11} /><text content="User search" fg={theme.text} /></box>
               <box flexDirection="row"><text content=" A        " fg={theme.textMuted} width={11} /><text content="Analytics" fg={theme.text} /></box>
               <box flexDirection="row"><text content=" G        " fg={theme.textMuted} width={11} /><text content="Auth / Login" fg={theme.text} /></box>
               <box flexDirection="row"><text content=" K        " fg={theme.textMuted} width={11} /><text content="Shortcuts panel" fg={theme.text} /></box>

@@ -175,6 +175,8 @@ export function AlertsPanel() {
 
       <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
 
+        <text content={`─── ACTIVE ALERTS (${visibleAlerts().length}) ────────────────────────────────────`} fg={theme.borderSubtle} />
+
         {/* Column headers */}
         <box flexDirection="row" width="100%">
           <text content="   " fg={theme.textMuted} width={3} />
@@ -211,7 +213,7 @@ export function AlertsPanel() {
                       width={8}
                     />
                     <text
-                      content={(conditionLabel(alert.condition)).padEnd(6, " ")}
+                      content={(alert.condition === "above" || alert.condition === "crossesAbove" ? "▲" : "▼") + conditionLabel(alert.condition).padEnd(5, " ")}
                       fg={alert.condition === "above" || alert.condition === "crossesAbove" ? theme.success : theme.error}
                       width={7}
                     />

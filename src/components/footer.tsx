@@ -10,6 +10,9 @@ import {
   chatInputFocused,
   orderFormOpen,
   orderHistoryOpen,
+  accountStatsOpen,
+  profilePanelOpen,
+  userSearchOpen,
   settingsPanelOpen,
   searchPanelOpen,
   appState,
@@ -47,6 +50,19 @@ function getContextHints(): KeyHint[] {
       hints.push({ key: "Space", fullLabel: "Expand Tool" });
       hints.push({ key: "Esc", fullLabel: "Close Chat" });
     }
+  } else if (profilePanelOpen()) {
+    hints.push({ key: "Esc/X", fullLabel: "Close Profile" });
+    hints.push({ key: "S", fullLabel: "Search Users" });
+    hints.push({ key: "E", fullLabel: "Edit Profile" });
+    hints.push({ key: "M", fullLabel: "My Profile" });
+    hints.push({ key: "L", fullLabel: "Logout" });
+  } else if (userSearchOpen()) {
+    hints.push({ key: "Enter", fullLabel: "Search" });
+    hints.push({ key: "Esc", fullLabel: "Close Search" });
+  } else if (accountStatsOpen()) {
+    hints.push({ key: "Esc", fullLabel: "Close Account" });
+    hints.push({ key: "W", fullLabel: "Wallet" });
+    hints.push({ key: "U", fullLabel: "Refresh Stats" });
   } else if (orderFormOpen()) {
     hints.push({ key: "Tab", fullLabel: "Field" });
     hints.push({ key: "T", fullLabel: "Type" });
@@ -76,6 +92,8 @@ function getContextHints(): KeyHint[] {
     hints.push({ key: "H", fullLabel: "Orders" });
     hints.push({ key: "P", fullLabel: "Portfolio" });
     hints.push({ key: "Z", fullLabel: "Alerts" });
+    hints.push({ key: "Ctrl+X", fullLabel: "User Profile" });
+    hints.push({ key: "Ctrl+Y", fullLabel: "User Search" });
     hints.push({ key: "E", fullLabel: "Settings" });
   }
   
@@ -119,8 +137,9 @@ export function Footer() {
     const pos = positionsState.positions;
     if (pos.length === 0) return "";
     const totalPnl = pos.reduce((sum, p) => sum + p.cashPnl, 0);
+    const arrow = totalPnl >= 0 ? "▲" : "▼";
     const sign = totalPnl >= 0 ? "+" : "";
-    return ` | Pos: ${pos.length} | P&L: ${sign}$${totalPnl.toFixed(0)}`;
+    return ` │ Pos:${pos.length} │ P&L:${arrow}${sign}$${totalPnl.toFixed(0)}`;
   });
 
   const content = createMemo(() => {

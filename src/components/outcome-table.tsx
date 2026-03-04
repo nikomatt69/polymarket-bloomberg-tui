@@ -61,8 +61,7 @@ export function OutcomeTable(props: OutcomeTableProps) {
         {(market: () => Market) => (
           <>
             {/* ── Section header ─────────────────────────────────────────── */}
-            <text content="OUTCOMES" fg={theme.primary} />
-            <text content="" />
+            <text content={`─── OUTCOMES (${market().outcomes.length}) ────────────────────────────────`} fg={theme.borderSubtle} />
 
             {/* ── Probability bars ───────────────────────────────────────── */}
             <For each={market().outcomes}>
@@ -113,13 +112,14 @@ export function OutcomeTable(props: OutcomeTableProps) {
             <For each={market().outcomes}>
               {(outcome, idx) => {
                 const book = props.orderBooks?.[outcome.id];
+                const dir = outcome.change24h > 0 ? "▲" : outcome.change24h < 0 ? "▼" : "─";
                 const row = [
                   outcome.title.padEnd(12),
                   padLeft(formatCents(outcome.price), 8),
                   padLeft(formatCents(book?.bestBid), 8),
                   padLeft(formatCents(book?.bestAsk), 8),
                   padLeft(formatSpread(book?.spread), 8),
-                  padLeft(formatChange(outcome.change24h), 8),
+                  `${dir}${padLeft(formatChange(outcome.change24h), 7)}`,
                   padLeft(formatVolume(outcome.volume), 10),
                 ].join(" ");
 
@@ -132,11 +132,8 @@ export function OutcomeTable(props: OutcomeTableProps) {
               }}
             </For>
 
-            <text content="" />
-
             {/* ── Order book depth summary ───────────────────────────────── */}
-            <text content="ORDER BOOK" fg={theme.primary} />
-            <text content="" />
+            <text content="─── ORDER BOOK DEPTH ───────────────────────────────────────" fg={theme.borderSubtle} />
 
             <For each={market().outcomes.slice(0, 3)}>
               {(outcome) => {

@@ -165,8 +165,12 @@ export function LeaderboardPanel() {
       <Show when={!loading()}>
         <scrollbox flexGrow={1} width="100%">
           <Show when={activeTab() === "traders"}>
+            <text content={`─── TOP TRADERS (${traders().length}) ──────────────────────────────────────`} fg={theme.borderSubtle} />
             <For each={traders()}>
-              {(trader) => (
+              {(trader) => {
+                const maxVol = () => traders()[0]?.volume ?? 1;
+                const volBar = () => { const f = Math.round((trader.volume / maxVol()) * 8); return "█".repeat(f) + "░".repeat(8 - f); };
+                return (
                 <box flexDirection="row" width="100%" paddingLeft={1}>
                   <text
                     content={rankMedal(trader.rank)}
@@ -188,6 +192,7 @@ export function LeaderboardPanel() {
                     fg={theme.textMuted}
                     width={11}
                   />
+                  <text content={volBar()} fg={theme.accent} width={9} />
                   <text
                     content={fmtPnl(trader.realizedPnl).padStart(10)}
                     fg={trader.realizedPnl >= 0 ? theme.success : theme.error}
@@ -204,11 +209,12 @@ export function LeaderboardPanel() {
                     width={7}
                   />
                 </box>
-              )}
+              );}}
             </For>
           </Show>
 
           <Show when={activeTab() === "builders"}>
+            <text content={`─── TOP BUILDERS (${builders().length}) ─────────────────────────────────────`} fg={theme.borderSubtle} />
             <For each={builders()}>
               {(builder) => (
                 <box flexDirection="row" width="100%" paddingLeft={1}>

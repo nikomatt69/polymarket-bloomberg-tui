@@ -167,18 +167,19 @@ export function SocialPanel() {
   }
 
   function sentLabel(s: "bullish" | "bearish" | "neutral") {
-    if (s === "bullish") return "BULL";
-    if (s === "bearish") return "BEAR";
-    return "NEU ";
+    if (s === "bullish") return "▲BULL";
+    if (s === "bearish") return "▼BEAR";
+    return "─NEU ";
   }
 
   const bullPct = () => sent().total > 0 ? Math.round((sent().bullish / sent().total) * 100) : 0;
   const bearPct = () => sent().total > 0 ? Math.round((sent().bearish / sent().total) * 100) : 0;
   const neuPct = () => 100 - bullPct() - bearPct();
 
-  const sentMeter = (pct: number, color: "bull" | "bear" | "neu") => {
-    const bars = Math.max(0, Math.round(pct / 5));
-    return "█".repeat(bars);
+  const sentMeter = (pct: number, _color: "bull" | "bear" | "neu") => {
+    const width = 10;
+    const filled = Math.max(0, Math.round(pct / 100 * width));
+    return "█".repeat(filled) + "░".repeat(width - filled);
   };
 
   return (
@@ -251,22 +252,34 @@ export function SocialPanel() {
         >
           <scrollbox height={19} width="100%" paddingLeft={1}>
             <For each={socialItems()}>
-              {(item) => (
-                <box flexDirection="row" width="100%">
-                  <text
-                    content={(item.source === "cryptopanic" ? "CryptoPanic" : "Nitter     ").slice(0, 11).padEnd(11, " ")}
-                    fg={item.source === "cryptopanic" ? theme.accent : theme.primary}
-                    width={12}
-                  />
-                  <text content={fmtAge(item.timestamp).padEnd(5, " ")} fg={theme.textMuted} width={6} />
-                  <text
-                    content={sentLabel(item.sentiment).padEnd(5, " ")}
-                    fg={sentColor(item.sentiment)}
-                    width={6}
-                  />
-                  <text content={truncate(item.text, 82)} fg={theme.text} />
-                </box>
-              )}
+              {(item, i) => {
+                const prevItem = () => socialItems()[i() - 1];
+                const showSep = () => i() > 0 && prevItem()?.source !== item.source;
+                return (
+                  <>
+                    <Show when={showSep()}>
+                      <text
+                        content={`─── ${item.source === "cryptopanic" ? "CRYPTOPANIC" : "NITTER"} ────────────────────────────────────`}
+                        fg={theme.borderSubtle}
+                      />
+                    </Show>
+                    <box flexDirection="row" width="100%">
+                      <text
+                        content={(item.source === "cryptopanic" ? "CryptoPanic" : "Nitter     ").slice(0, 11).padEnd(11, " ")}
+                        fg={item.source === "cryptopanic" ? theme.accent : theme.primary}
+                        width={12}
+                      />
+                      <text content={fmtAge(item.timestamp).padEnd(5, " ")} fg={theme.textMuted} width={6} />
+                      <text
+                        content={sentLabel(item.sentiment).padEnd(6, " ")}
+                        fg={sentColor(item.sentiment)}
+                        width={7}
+                      />
+                      <text content={truncate(item.text, 80)} fg={theme.text} />
+                    </box>
+                  </>
+                );
+              }}
             </For>
           </scrollbox>
         </Show>

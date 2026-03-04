@@ -208,7 +208,7 @@ export function LoadingState(props: LoadingStateProps) {
 
   return (
     <box flexDirection="row" paddingLeft={2} paddingTop={1}>
-      <text content="◐" fg={theme.accent} />
+      <text content="◌" fg={theme.accent} />
       <text content={` ${props.message || "Loading..."}`} fg={theme.textMuted} />
     </box>
   );
@@ -310,8 +310,8 @@ export function ProgressBar(props: ProgressBarProps) {
   return (
     <box flexDirection="row">
       <text content="[" fg={theme.textMuted} />
-      <text content={Array(filled()).fill("#").join("")} fg={getBarColor()} />
-      <text content={Array(empty()).fill("-").join("")} fg={theme.textMuted} />
+      <text content={Array(filled()).fill("█").join("")} fg={getBarColor()} />
+      <text content={Array(empty()).fill("░").join("")} fg={theme.textMuted} />
       <text content="]" fg={theme.textMuted} />
       <Show when={props.showLabel}>
         <text content={` ${percentage().toFixed(0)}%`} fg={theme.textMuted} />
@@ -739,7 +739,7 @@ export function StreamingMessage(props: StreamingMessageProps) {
   return (
     <box width="100%" flexDirection="column" paddingTop={1}>
       <box flexDirection="row" paddingLeft={1}>
-        <text content={props.role === "user" ? "USER" : "ASSISTANT"} fg={props.role === "user" ? theme.accent : theme.primary} />
+        <text content={props.role === "user" ? "▶ You" : "◈ Agent"} fg={props.role === "user" ? theme.accent : theme.primary} />
         <text content=" | " fg={theme.textMuted} />
         <text content="generating..." fg={theme.warning} />
       </box>
@@ -1101,7 +1101,7 @@ export function ToolCallList(props: ToolCallListProps) {
     <box flexDirection="column" width="100%">
       <Show when={props.title}>
         <box flexDirection="row" paddingTop={1} paddingBottom={0} paddingLeft={1}>
-          <text content={`-- ${props.title} --`} fg={theme.textMuted} />
+          <text content={`─── ${props.title} ───`} fg={theme.textMuted} />
         </box>
       </Show>
       <For each={props.tools}>
@@ -1249,7 +1249,7 @@ export function ChatMessageItem(props: ChatMessageItemProps) {
   return (
     <box width="100%" flexDirection="column" paddingTop={1} paddingBottom={1}>
       <box flexDirection="row" paddingLeft={1}>
-        <text content={isUser() ? "USER" : "ASSISTANT"} fg={isUser() ? theme.accent : theme.primary} />
+        <text content={isUser() ? "▶ You" : "◈ Agent"} fg={isUser() ? theme.accent : theme.primary} />
         <text content=" | " fg={theme.textMuted} />
         <text content={fmtTime(props.timestamp)} fg={theme.textMuted} />
       </box>

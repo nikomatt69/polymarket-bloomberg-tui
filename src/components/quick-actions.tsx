@@ -96,13 +96,14 @@ export function QuickActions() {
 
       {/* Market Ticker Row */}
       <box flexDirection="row" height={1} paddingLeft={1}>
-        <text content="HOT: " fg={theme.textMuted} />
+        <text content="▲HOT " fg={theme.accent} />
         <For each={topMarkets()}>
           {(m: Market, idx: () => number) => (
             <box flexDirection="row">
               <text content={`${idx() + 1}.`} fg={theme.textMuted} />
               <text content={m.title.slice(0, 14)} fg={theme.text} />
               <text content=" " />
+              <text content={m.change24h >= 0 ? "▲" : "▼"} fg={m.change24h >= 0 ? theme.success : theme.error} />
               <text
                 content={fmtPct(m.change24h)}
                 fg={m.change24h >= 0 ? theme.success : theme.error}

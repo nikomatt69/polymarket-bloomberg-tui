@@ -23,9 +23,12 @@ export function UserSearch() {
     const query = userSearchQuery();
     if (query.length < 2) return;
     setUserSearchLoading(true);
-    const results = await searchUsers(query);
-    setUserSearchResults(results);
-    setUserSearchLoading(false);
+    try {
+      const results = await searchUsers(query);
+      setUserSearchResults(results);
+    } finally {
+      setUserSearchLoading(false);
+    }
   };
 
   const handleClose = () => {
@@ -38,9 +41,9 @@ export function UserSearch() {
     <box
       position="absolute"
       top={2}
-      left="15%"
-      width="70%"
-      height={18}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={170}
@@ -72,8 +75,11 @@ export function UserSearch() {
 
       {/* Column headers */}
       <Show when={userSearchResults().length > 0}>
+        <text content={`─── RESULTS (${userSearchResults().length}) ──────────────────────────────────────────`} fg={theme.borderSubtle} />
         <box height={1} width="100%" flexDirection="row" backgroundColor={theme.backgroundPanel} paddingLeft={2}>
-          <text content={"USER".padEnd(22)} fg={theme.textMuted} width={23} />
+          <text content={"USER".padEnd(16)} fg={theme.textMuted} width={17} />
+          <text content={"EMAIL".padEnd(22)} fg={theme.textMuted} width={23} />
+          <text content={"LAST SEEN".padEnd(12)} fg={theme.textMuted} width={13} />
           <text content={"BIO"} fg={theme.textMuted} />
         </box>
       </Show>
@@ -85,17 +91,18 @@ export function UserSearch() {
 
       {/* Results */}
       <Show when={!userSearchLoading() && userSearchResults().length > 0}>
-        <scrollbox flexGrow={1} width="100%">
+        <scrollbox flexGrow={1} width="100%" stickyScroll stickyStart="top">
           <For each={userSearchResults()}>
             {(profile) => (
               <box flexDirection="row" width="100%" paddingLeft={2}>
                 <text content="◈ " fg={theme.accent} width={2} />
                 <text
-                  content={profile.username.padEnd(20)}
+                  content={profile.username.padEnd(16)}
                   fg={theme.text}
-                  width={21}
+                  width={17}
                 />
-                <text content="│ " fg={theme.borderSubtle} />
+                <text content={(profile.email || "—").slice(0, 22).padEnd(22)} fg={theme.textMuted} width={23} />
+                <text content={(profile.lastSeen ? new Date(profile.lastSeen).toLocaleDateString() : "—").slice(0, 12).padEnd(12)} fg={theme.textMuted} width={13} />
                 <text
                   content={profile.bio || "No bio available"}
                   fg={theme.textMuted}
@@ -109,7 +116,7 @@ export function UserSearch() {
       {/* Empty states */}
       <Show when={!userSearchLoading() && userSearchQuery().length >= 2 && userSearchResults().length === 0}>
         <box flexGrow={1} paddingLeft={2} paddingTop={1} flexDirection="column">
-          <text content={`✗ No users found for "${userSearchQuery()}".`} fg={theme.textMuted} />
+          <text content={`No users found for "${userSearchQuery()}".`} fg={theme.textMuted} />
           <text content="" />
           <text content="Try a different username or partial address." fg={theme.textMuted} />
         </box>
@@ -117,7 +124,7 @@ export function UserSearch() {
 
       <Show when={!userSearchLoading() && userSearchQuery().length < 2}>
         <box flexGrow={1} paddingLeft={2} paddingTop={1}>
-          <text content="○ Type at least 2 characters to search." fg={theme.textMuted} />
+          <text content="Type at least 2 characters to search." fg={theme.textMuted} />
         </box>
       </Show>
 

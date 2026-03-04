@@ -135,11 +135,11 @@ export function AuthModal() {
         {/* Status */}
         <Show when={authError()}>
           <text content="" />
-          <text content={`✗ ${authError()}`} fg={theme.error} />
+          <text content={`● ${authError()}`} fg={theme.error} />
         </Show>
         <Show when={authLoading()}>
           <text content="" />
-          <text content="⟳ Processing..." fg={theme.warning} />
+          <text content="◌ Processing…" fg={theme.warning} />
         </Show>
 
         <box flexGrow={1} />

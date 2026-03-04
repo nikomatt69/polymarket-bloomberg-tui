@@ -398,6 +398,63 @@ export function EnterpriseChat() {
     return `TOK:${tokenLabel()}`;
   });
 
+  const streamActive = createMemo(() => Boolean(streamingMessage() || liveToolCalls().length > 0));
+
+  const lastUserMessageId = createMemo(() => {
+    const items = chatMessages();
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      if (items[i]?.role === "user") {
+        return items[i]?.id ?? "";
+      }
+    }
+    return "";
+  });
+
+  const renderLiveStreamBlock = () => (
+    <box width="100%" flexDirection="column" paddingTop={1} paddingBottom={1}>
+      <box flexDirection="row" width="100%" paddingLeft={1} paddingRight={1}>
+        <text content={streamTitleLabel()} fg={theme.accent} />
+        <text content=" | " fg={theme.textMuted} />
+        <text content={streamHeaderLeft()} fg={phaseColor()} />
+        <box flexGrow={1} />
+        <Show when={promptProfile() !== "narrow"}>
+          <text content={`model=${modelLabel()}`} fg={theme.textMuted} />
+        </Show>
+      </box>
+      <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
+
+      <Show when={streamingMessage()}>
+        <box flexDirection="column" paddingLeft={2} paddingRight={1}>
+          <For each={wrapText(streamingMessage(), streamWrapWidth())}>
+            {(line) => <text content={line} fg={theme.text} />}
+          </For>
+          <text content="_" fg={theme.primary} />
+        </box>
+      </Show>
+
+      <Show when={!streamingMessage() && chatLoading()}>
+        <box flexDirection="row" paddingLeft={2}>
+          <text content="processing tool output..." fg={theme.textMuted} />
+        </box>
+      </Show>
+
+      <Show when={liveToolCalls().length > 0}>
+        <box paddingLeft={1} paddingRight={1} paddingTop={1}>
+          <ToolCallList
+            tools={liveToolCalls()}
+            title="Live Tool Calls"
+            selectedId={selectedToolId()}
+            expandedIds={enterpriseToolExpandedIds()}
+            collapseByDefault
+            compact={!showInspector()}
+            onSelect={(id) => setEnterpriseToolSelectedId(id)}
+            onToggleExpand={(id) => toggleEnterpriseToolExpanded(id)}
+          />
+        </box>
+      </Show>
+    </box>
+  );
+
   return (
     <box
       position="absolute"
@@ -448,65 +505,30 @@ export function EnterpriseChat() {
 
               <For each={chatMessages()}>
                 {(message) => (
-                  <ChatMessageItem
-                    role={message.role}
-                    content={message.content}
-                    timestamp={message.timestamp}
-                    toolCalls={(message.toolCalls ?? []).map((toolCall) => ({
-                      id: toolCall.id,
-                      name: toolCall.name,
-                      args: toolCall.arguments,
-                      result: toolCall.result,
-                      status: statusFromToolResult(toolCall.result),
-                      category: toolCategoryFromName(toolCall.name),
-                    }))}
-                  />
+                  <>
+                    <ChatMessageItem
+                      role={message.role}
+                      content={message.content}
+                      timestamp={message.timestamp}
+                      toolCalls={(message.toolCalls ?? []).map((toolCall) => ({
+                        id: toolCall.id,
+                        name: toolCall.name,
+                        args: toolCall.arguments,
+                        result: toolCall.result,
+                        status: statusFromToolResult(toolCall.result),
+                        category: toolCategoryFromName(toolCall.name),
+                      }))}
+                    />
+
+                    <Show when={streamActive() && message.id === lastUserMessageId()}>
+                      {renderLiveStreamBlock()}
+                    </Show>
+                  </>
                 )}
               </For>
 
-              <Show when={streamingMessage() || liveToolCalls().length > 0}>
-                <box width="100%" flexDirection="column" paddingTop={1} paddingBottom={1}>
-                  <box flexDirection="row" width="100%" paddingLeft={1} paddingRight={1}>
-                    <text content={streamTitleLabel()} fg={theme.accent} />
-                    <text content=" | " fg={theme.textMuted} />
-                    <text content={streamHeaderLeft()} fg={phaseColor()} />
-                    <box flexGrow={1} />
-                    <Show when={promptProfile() !== "narrow"}>
-                      <text content={`model=${modelLabel()}`} fg={theme.textMuted} />
-                    </Show>
-                  </box>
-                  <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
-
-                  <Show when={streamingMessage()}>
-                    <box flexDirection="column" paddingLeft={2} paddingRight={1}>
-                      <For each={wrapText(streamingMessage(), streamWrapWidth())}>
-                        {(line) => <text content={line} fg={theme.text} />}
-                      </For>
-                      <text content="_" fg={theme.primary} />
-                    </box>
-                  </Show>
-
-                  <Show when={!streamingMessage() && chatLoading()}>
-                    <box flexDirection="row" paddingLeft={2}>
-                      <text content="processing tool output..." fg={theme.textMuted} />
-                    </box>
-                  </Show>
-
-                  <Show when={liveToolCalls().length > 0}>
-                    <box paddingLeft={1} paddingRight={1} paddingTop={1}>
-                      <ToolCallList
-                        tools={liveToolCalls()}
-                        title="Live Tool Calls"
-                        selectedId={selectedToolId()}
-                        expandedIds={enterpriseToolExpandedIds()}
-                        collapseByDefault
-                        compact={!showInspector()}
-                        onSelect={(id) => setEnterpriseToolSelectedId(id)}
-                        onToggleExpand={(id) => toggleEnterpriseToolExpanded(id)}
-                      />
-                    </box>
-                  </Show>
-                </box>
+              <Show when={streamActive() && !lastUserMessageId()}>
+                {renderLiveStreamBlock()}
               </Show>
 
               <Show when={chatLoading() && !streamingMessage() && liveToolCalls().length === 0}>

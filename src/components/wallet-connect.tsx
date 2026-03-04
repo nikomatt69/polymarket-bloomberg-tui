@@ -65,11 +65,11 @@ export function WalletConnect() {
       {/* Body */}
       <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingRight={2} paddingTop={1}>
         <Show when={walletState.loading}>
-          <text content="◐ Connecting to wallet..." fg={theme.warning} />
+          <text content="◌ Connecting to wallet…" fg={theme.warning} />
         </Show>
 
         <Show when={!walletState.loading && walletState.error !== null}>
-          <text content={`✗ ${walletState.error}`} fg={theme.error} />
+          <text content={`● ${walletState.error}`} fg={theme.error} />
           <text content="" />
           <box onMouseDown={() => setWalletModalMode("enter")}>
             <text content="[C] Try Again  [ESC] Close" fg={theme.textMuted} />
@@ -133,8 +133,9 @@ export function WalletConnect() {
         </Show>
 
         <Show when={!walletState.loading && !walletState.connected && walletModalMode() === "enter"}>
+          <text content="─── PRIVATE KEY ──────────────────────────────" fg={theme.borderSubtle} />
           <text content="Enter your Ethereum private key (0x...):" fg={theme.textMuted} />
-          <text content="Key is stored locally and never sent to any server." fg={theme.textMuted} />
+          <text content="● Stored locally  ● Never sent to any server" fg={theme.textMuted} />
           <text content="" />
           <input
             width="100%"

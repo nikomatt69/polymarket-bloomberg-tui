@@ -186,6 +186,8 @@ import {
   setProfilePanelOpen,
   profileViewMode,
   setProfileViewMode,
+  selectedProfileId,
+  setSelectedProfileId,
   userSearchOpen,
   setUserSearchOpen,
   userSearchQuery,
@@ -1103,11 +1105,31 @@ function AppContent() {
 
     // User profile panel intercept
     if (profilePanelOpen()) {
-      if (e.name === "escape") {
-        setProfilePanelOpen(false);
-      } else if (e.name === "s" && profileViewMode() === "view") {
+      if (e.name === "escape" || e.name === "x") {
+        if (profileViewMode() === "search") {
+          setProfileViewMode("view");
+          setUserSearchOpen(false);
+          setUserSearchQuery("");
+          setUserSearchResults([]);
+          setUserSearchLoading(false);
+        } else if (profileViewMode() === "edit") {
+          setProfileViewMode("view");
+        } else {
+          setProfilePanelOpen(false);
+          setSelectedProfileId(null);
+        }
+      } else if (e.name === "s" && profileViewMode() !== "search") {
         setProfileViewMode("search");
-      } else if (e.name === "l" && profileViewMode() === "view") {
+        setUserSearchOpen(false);
+        setUserSearchLoading(false);
+      } else if (e.name === "m" && profileViewMode() === "view") {
+        setSelectedProfileId(null);
+      } else if (e.name === "e" && profileViewMode() === "view" && selectedProfileId() === null) {
+        setProfileViewMode("edit");
+      } else if (e.name === "g" && !authState.isAuthenticated) {
+        setAuthModalMode("login");
+        setAuthModalOpen(true);
+      } else if (e.name === "l" && profileViewMode() === "view" && selectedProfileId() === null) {
         const auth = require("./auth/auth") as typeof import("./auth/auth");
         auth.logoutUser();
         setAuthState({
@@ -1116,13 +1138,27 @@ function AppContent() {
           token: null,
         });
         setProfilePanelOpen(false);
+      } else if (profileViewMode() === "search") {
+        if (e.name === "return") {
+          const query = userSearchQuery();
+          if (query.length >= 2) {
+            setUserSearchLoading(true);
+            searchUsers(query)
+              .then((results) => {
+                setUserSearchResults(results);
+              })
+              .finally(() => {
+                setUserSearchLoading(false);
+              });
+          }
+        }
       }
       return;
     }
 
     // User search panel intercept
     if (userSearchOpen()) {
-      if (e.name === "escape") {
+      if (e.name === "escape" || (e.ctrl && e.name === "y")) {
         setUserSearchOpen(false);
         setUserSearchQuery("");
         setUserSearchResults([]);
@@ -1135,10 +1171,6 @@ function AppContent() {
           });
           setUserSearchLoading(true);
         }
-      } else if (e.name === "backspace") {
-        setUserSearchQuery(userSearchQuery().slice(0, -1));
-      } else if (e.sequence && e.sequence.length === 1 && e.sequence >= " ") {
-        setUserSearchQuery(userSearchQuery() + e.sequence);
       }
       return;
     }
@@ -1489,9 +1521,14 @@ function AppContent() {
         toggleWatchlistFilter();
         break;
       case "x": {
-        // x — toggle watchlist for selected market
-        const wMarket = getSelectedMarket();
-        if (wMarket) toggleWatchlist(wMarket.id);
+        if (e.ctrl) {
+          // Ctrl+X — toggle user profile panel
+          setProfilePanelOpen(!profilePanelOpen());
+        } else {
+          // x — toggle watchlist for selected market
+          const wMarket = getSelectedMarket();
+          if (wMarket) toggleWatchlist(wMarket.id);
+        }
         break;
       }
       case "d":
@@ -1559,9 +1596,21 @@ function AppContent() {
         }
         break;
       }
-      case "U":
-        // Shift+U — toggle user profile panel
-        setProfilePanelOpen(!profilePanelOpen());
+      case "y":
+        if (e.ctrl) {
+          // Ctrl+Y — toggle user search panel
+          if (userSearchOpen()) {
+            setUserSearchOpen(false);
+            setUserSearchQuery("");
+            setUserSearchResults([]);
+            setUserSearchLoading(false);
+          } else {
+            setUserSearchOpen(true);
+            setUserSearchQuery("");
+            setUserSearchResults([]);
+            setUserSearchLoading(false);
+          }
+        }
         break;
       case "A":
       case "a":

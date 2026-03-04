@@ -43,11 +43,13 @@ export function WatchlistPanel() {
         </box>
       </PanelHeader>
 
+      <text content={`─── WATCHLIST (${watchedMarkets().length} markets) ──────────────────────────────────────`} fg={theme.borderSubtle} />
       {/* Column headers */}
       <box height={1} width="100%" flexDirection="row" backgroundColor={theme.backgroundPanel} paddingLeft={3}>
-        <text content={"MARKET".padEnd(42)} fg={theme.textMuted} width={42} />
+        <text content={"MARKET".padEnd(38)} fg={theme.textMuted} width={38} />
+        <text content={"DIR"} fg={theme.textMuted} width={4} />
         <text content={"VOLUME".padStart(12)} fg={theme.textMuted} width={12} />
-        <text content={"24H %".padStart(10)} fg={theme.textMuted} width={10} />
+        <text content={"24H %".padStart(9)} fg={theme.textMuted} width={9} />
         <text content={"YES¢".padStart(7)} fg={theme.textMuted} width={7} />
       </box>
 
@@ -81,9 +83,14 @@ export function WatchlistPanel() {
                   >
                     <text content={isSelected() ? " ▶ " : "   "} fg={theme.primary} width={3} />
                     <text
-                      content={truncate(market.title, 41)}
+                      content={truncate(market.title, 37)}
                       fg={isSelected() ? theme.highlightText : theme.text}
-                      width={42}
+                      width={38}
+                    />
+                    <text
+                      content={market.change24h > 0 ? "▲  " : market.change24h < 0 ? "▼  " : "─  "}
+                      fg={market.change24h > 0 ? theme.success : market.change24h < 0 ? theme.error : theme.textMuted}
+                      width={4}
                     />
                     <text
                       content={`$${(market.volume24h / 1000).toFixed(1)}K`.padStart(11, " ")}
@@ -91,9 +98,9 @@ export function WatchlistPanel() {
                       width={12}
                     />
                     <text
-                      content={`${market.change24h >= 0 ? "+" : ""}${market.change24h.toFixed(1)}%`.padStart(9, " ")}
+                      content={`${market.change24h >= 0 ? "+" : ""}${market.change24h.toFixed(1)}%`.padStart(8, " ")}
                       fg={market.change24h >= 0 ? theme.success : theme.error}
-                      width={10}
+                      width={9}
                     />
                     <text
                       content={`${((market.outcomes?.[0]?.price ?? 0) * 100).toFixed(1)}¢`.padStart(6, " ")}

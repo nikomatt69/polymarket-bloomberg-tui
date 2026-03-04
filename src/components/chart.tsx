@@ -166,33 +166,46 @@ export function Chart(props: ChartProps) {
     };
   });
 
+  const rsiBar = (rsiLine: string): string => {
+    const rsiVal = parseFloat(rsiLine.split(":")[1]);
+    if (Number.isNaN(rsiVal)) return "";
+    const width = 14;
+    const filled = Math.round((rsiVal / 100) * width);
+    return "█".repeat(filled) + "░".repeat(width - filled);
+  };
+
+  const rsiColor = (rsiLine: string) => {
+    const rsi = parseFloat(rsiLine.split(":")[1]);
+    if (rsi >= 70) return theme.error;
+    if (rsi <= 30) return theme.success;
+    return theme.textMuted;
+  };
+
   return (
     <box flexDirection="column" width="100%">
-      <text content={`📊 PRICE HISTORY (${props.priceHistory?.timeframe?.toUpperCase() || "1D"})`} fg={theme.primary} />
       <Show
         when={chartOutput()}
-        fallback={<text content="No price history available" fg={theme.textMuted} />}
+        fallback={<text content="  No price history available" fg={theme.textMuted} />}
       >
         {(data: () => ChartData) => (
           <>
             <text content={data().sparkline} fg={theme.success} />
             <text content={data().chart} fg={theme.text} />
-            <text content={data().stats} fg={theme.textMuted} />
-            <text content={data().trendLine} fg={theme.textMuted} />
-            <text content={data().volumeInfo} fg={theme.textMuted} />
-            <text content="────────────────────────────────" fg={theme.borderSubtle} />
-            <text content={data().indicators} fg={theme.accent} />
-            <text content={data().rsiLine} fg={
-              (() => {
-                const rsi = parseFloat(data().rsiLine.split(":")[1]);
-                if (rsi >= 70) return theme.error;
-                if (rsi <= 30) return theme.success;
-                return theme.textMuted;
-              })()
-            } />
-            <text content={data().emaLine} fg={theme.warning} />
-            <text content={data().macdLine} fg={theme.primary} />
-            <text content={data().bollingerLine} fg={theme.textMuted} />
+
+            <text content="─── PRICE STATS ─────────────────────────────────────" fg={theme.borderSubtle} />
+            <text content={`  ${data().stats}`} fg={theme.textMuted} />
+            <text content={`  ${data().trendLine}`} fg={theme.textMuted} />
+
+            <text content="─── INDICATORS ──────────────────────────────────────" fg={theme.borderSubtle} />
+            <text content={`  ${data().indicators}`} fg={theme.accent} />
+            <box flexDirection="row" gap={1}>
+              <text content="  " fg={theme.textMuted} />
+              <text content={rsiBar(data().rsiLine)} fg={rsiColor(data().rsiLine)} />
+              <text content={data().rsiLine} fg={rsiColor(data().rsiLine)} />
+            </box>
+            <text content={`  ${data().emaLine}`} fg={theme.warning} />
+            <text content={`  ${data().macdLine}`} fg={theme.primary} />
+            <text content={`  ${data().bollingerLine}`} fg={theme.textMuted} />
           </>
         )}
       </Show>
