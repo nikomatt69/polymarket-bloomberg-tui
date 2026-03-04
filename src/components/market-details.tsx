@@ -1,5 +1,14 @@
 import { Show, createSignal, createEffect, createMemo, For } from "solid-js";
-import { appState, getSelectedMarket, setTimeframe } from "../state";
+import {
+  appState,
+  getSelectedMarket,
+  setTimeframe,
+  wsConnectionStatus,
+  rtdsConnected,
+  userWsConnected,
+  sportsScores,
+  getLastPrice,
+} from "../state";
 import { usePriceHistory } from "../hooks/useMarketData";
 import { PriceHistory, Market, Timeframe } from "../types/market";
 import { Chart } from "./chart";
@@ -120,6 +129,13 @@ function sectionLine(label: string, totalWidth: number = 50): string {
   return prefix + "─".repeat(remaining);
 }
 
+/** WS dot indicator: char + fg level */
+function wsDot(connected: boolean, status?: string): { char: string; level: "ok" | "warn" | "off" } {
+  if (status === "connected" || connected) return { char: "●", level: "ok" };
+  if (status === "connecting" || status === "reconnecting") return { char: "○", level: "warn" };
+  return { char: "·", level: "off" };
+}
+
 const TIMEFRAMES: Timeframe[] = ["1h", "4h", "1d", "5d", "1w", "1M", "all"];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -191,12 +207,13 @@ export function MarketDetails() {
 
     if (!yesOutcome || !noOutcome) return null;
 
-    const currentYes = yesOutcome.price;
-    const currentNo = noOutcome.price;
+    // Use live WS price if available
+    const currentYes = getLastPrice(yesOutcome.id) ?? yesOutcome.price;
+    const currentNo = getLastPrice(noOutcome.id) ?? noOutcome.price;
     const impliedYes = currentYes / (currentYes + currentNo) * 100;
     const spread = Math.abs(100 - (currentYes * 100 + currentNo * 100));
 
-    return { currentYes, currentNo, impliedYes, spread };
+    return { currentYes, currentNo, impliedYes, spread, yesId: yesOutcome.id, noId: noOutcome.id };
   });
 
   const probabilityDistribution = createMemo(() => {
@@ -204,11 +221,18 @@ export function MarketDetails() {
     if (!market || market.outcomes.length === 0) return null;
 
     const total = market.outcomes.reduce((sum, o) => sum + o.price, 0);
-    return market.outcomes.map(o => ({
-      title: o.title,
-      price: o.price,
-      percentage: total > 0 ? (o.price / total) * 100 : 0,
-    }));
+    return market.outcomes.map(o => {
+      const liveP = getLastPrice(o.id);
+      const price = liveP ?? o.price;
+      return {
+        id: o.id,
+        title: o.title,
+        price,
+        isLive: liveP !== undefined,
+        percentage: total > 0 ? (price / total) * 100 : 0,
+        book: orderBooks()[o.id] ?? null,
+      };
+    });
   });
 
   /** Hours until resolution (for closing soon warning) */
@@ -219,6 +243,29 @@ export function MarketDetails() {
     if (diffMs <= 0) return null;
     return diffMs / (1000 * 60 * 60);
   });
+
+  /** Is this a sports market? */
+  const isSportsMarket = createMemo(() => {
+    const market = selectedMarket();
+    if (!market) return false;
+    return (market.category ?? "").toLowerCase().includes("sport");
+  });
+
+  /** Live sports score for this market */
+  const liveScore = createMemo(() => {
+    const market = selectedMarket();
+    if (!market || !isSportsMarket()) return null;
+    const scores = sportsScores();
+    const key = Object.keys(scores).find(k =>
+      k === market.id || market.outcomes.some(o => o.id === k)
+    );
+    return key ? scores[key] : null;
+  });
+
+  // ── WS status ──────────────────────────────────────────────────────────────
+  const clobDot = () => wsDot(false, wsConnectionStatus());
+  const rtdsDot = () => wsDot(rtdsConnected());
+  const userDot = () => wsDot(userWsConnected());
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -270,6 +317,25 @@ export function MarketDetails() {
       >
         {(market: () => Market) => (
           <box flexDirection="column" width="100%" gap={0}>
+
+            {/* ── WS status row ───────────────────────────────────────────── */}
+            <box flexDirection="row" height={1} gap={1}>
+              <text content="WS:" fg={theme.borderSubtle} />
+              <text
+                content={`${clobDot().char}CLOB`}
+                fg={clobDot().level === "ok" ? theme.success : clobDot().level === "warn" ? theme.warning : theme.borderSubtle}
+              />
+              <text content="·" fg={theme.borderSubtle} />
+              <text
+                content={`${rtdsDot().char}RTDS`}
+                fg={rtdsDot().level === "ok" ? theme.success : rtdsDot().level === "warn" ? theme.warning : theme.borderSubtle}
+              />
+              <text content="·" fg={theme.borderSubtle} />
+              <text
+                content={`${userDot().char}User`}
+                fg={userDot().level === "ok" ? theme.success : userDot().level === "warn" ? theme.warning : theme.borderSubtle}
+              />
+            </box>
 
             {/* ── Closing Soon Warning ────────────────────────────────────── */}
             <Show when={hoursToClose() !== null && hoursToClose()! <= 72}>
@@ -340,17 +406,50 @@ export function MarketDetails() {
               />
             </box>
 
+            {/* ── LIVE SPORTS SCORES section ─────────────────────────────── */}
+            <Show when={isSportsMarket() && liveScore()}>
+              <text content={sectionLine("LIVE SCORE")} fg={theme.borderSubtle} />
+              <box flexDirection="row" gap={2} height={1}>
+                <text content={liveScore()!.homeTeam ?? "Home"} fg={theme.text} />
+                <text
+                  content={`${liveScore()!.homeScore ?? 0}`}
+                  fg={theme.success}
+                />
+                <text content=":" fg={theme.textMuted} />
+                <text
+                  content={`${liveScore()!.awayScore ?? 0}`}
+                  fg={theme.error}
+                />
+                <text content={liveScore()!.awayTeam ?? "Away"} fg={theme.text} />
+                <Show when={liveScore()!.period}>
+                  <text content="│" fg={theme.borderSubtle} />
+                  <text content={`Period: ${liveScore()!.period}`} fg={theme.textMuted} />
+                </Show>
+                <Show when={liveScore()!.status}>
+                  <text content="│" fg={theme.borderSubtle} />
+                  <text
+                    content={liveScore()!.status}
+                    fg={liveScore()!.status === "live" ? theme.success : theme.textMuted}
+                  />
+                </Show>
+              </box>
+            </Show>
+
             {/* ── Leader + order book ────────────────────────────────────── */}
             <Show when={leadOutcome()}>
+              {/* Live price indicator */}
               <box flexDirection="row" gap={2} height={1}>
                 <text
                   content={`Leader: ${leadOutcome()!.title.toUpperCase()}`}
                   fg={theme.text}
                 />
                 <text
-                  content={formatCents(leadOutcome()!.price)}
-                  fg={theme.success}
+                  content={formatCents(getLastPrice(leadOutcome()!.id) ?? leadOutcome()!.price)}
+                  fg={getLastPrice(leadOutcome()!.id) !== undefined ? theme.accent : theme.success}
                 />
+                <Show when={getLastPrice(leadOutcome()!.id) !== undefined}>
+                  <text content="⚡LIVE" fg={theme.accent} />
+                </Show>
                 <Show when={leadBook()}>
                   <text content="│" fg={theme.borderSubtle} />
                   <text content="▲" fg={theme.success} />
@@ -377,6 +476,9 @@ export function MarketDetails() {
                   <text content="  NO" fg={theme.error} />
                   <text content={probBar(resolutionComparison()!.currentNo)} fg={theme.error} />
                   <text content={`${(resolutionComparison()!.currentNo * 100).toFixed(0)}%`} fg={theme.error} />
+                  <Show when={getLastPrice(resolutionComparison()!.yesId) !== undefined || getLastPrice(resolutionComparison()!.noId) !== undefined}>
+                    <text content=" ⚡" fg={theme.accent} />
+                  </Show>
                 </box>
               </Show>
             </Show>
@@ -384,15 +486,15 @@ export function MarketDetails() {
             {/* ── PROBABILITIES section ───────────────────────────────────── */}
             <Show when={probabilityDistribution() && probabilityDistribution()!.length > 0}>
               <text content={sectionLine("PROBABILITIES")} fg={theme.borderSubtle} />
-              <For each={probabilityDistribution()!.slice(0, 4)}>
+              <For each={probabilityDistribution()!.slice(0, 6)}>
                 {(outcome) => {
                   const isYes = outcome.title.toLowerCase().includes("yes") || outcome.price >= 0.5;
                   const barColor = () => isYes ? theme.success : theme.error;
                   return (
                     <box flexDirection="row" height={1}>
                       <text
-                        content={outcome.title.toUpperCase().slice(0, 8).padEnd(8, " ")}
-                        fg={theme.text}
+                        content={(outcome.isLive ? "⚡" : " ") + outcome.title.toUpperCase().slice(0, 7).padEnd(7, " ")}
+                        fg={outcome.isLive ? theme.accent : theme.text}
                         width={9}
                       />
                       <text content={probBar(outcome.price)} fg={barColor()} width={11} />
@@ -403,15 +505,29 @@ export function MarketDetails() {
                       />
                       <text
                         content={`  ${formatCents(outcome.price)}`}
-                        fg={theme.textMuted}
+                        fg={outcome.isLive ? theme.accent : theme.textMuted}
                         width={8}
                       />
+                      {/* Bid/ask from order book per outcome */}
+                      <Show when={outcome.book}>
+                        <text content=" " fg={theme.borderSubtle} width={1} />
+                        <text
+                          content={`B:${outcome.book!.bestBid !== null ? formatCents(outcome.book!.bestBid!) : "--"}`}
+                          fg={theme.success}
+                          width={9}
+                        />
+                        <text
+                          content={`A:${outcome.book!.bestAsk !== null ? formatCents(outcome.book!.bestAsk!) : "--"}`}
+                          fg={theme.error}
+                          width={9}
+                        />
+                      </Show>
                     </box>
                   );
                 }}
               </For>
-              <Show when={probabilityDistribution()!.length > 4}>
-                <text content={`  …and ${probabilityDistribution()!.length - 4} more outcomes`} fg={theme.textMuted} />
+              <Show when={probabilityDistribution()!.length > 6}>
+                <text content={`  …and ${probabilityDistribution()!.length - 6} more outcomes`} fg={theme.textMuted} />
               </Show>
             </Show>
 

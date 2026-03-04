@@ -31,6 +31,7 @@ import {
   setOrderFormTokenId,
   setOrderFormMarketTitle,
   setOrderFormOutcomeTitle,
+  orderFormOutcomeTitle,
   setOrderFormCurrentPrice,
   setOrderFormPriceInput,
   setOrderFormSharesInput,
@@ -92,6 +93,7 @@ import {
   cycleOrderHistoryStatusFilter,
   cycleOrderHistoryWindowFilter,
   cycleOrderHistorySideFilter,
+  cycleOrderHistoryScoringFilter,
   setOrderHistoryStatusFilter,
   toggleOrderHistorySelectedMarketOnly,
   startOrderHistorySearch,
@@ -429,7 +431,7 @@ function AppContent() {
             postOnly: orderFormPostOnly(),
             negRisk: orderFormNegRisk(),
             marketTitle: market?.title,
-            outcomeTitle: market?.outcomes[0]?.title,
+            outcomeTitle: orderFormOutcomeTitle() || market?.outcomes[0]?.title,
           }).then((result) => {
             if (result) {
               setOrderFormOpen(false);
@@ -526,9 +528,14 @@ function AppContent() {
       } else if (e.name === "g") {
         cycleOrderHistoryWindowFilter();
         resetHistoryCursor();
+      } else if (e.name === "n") {
+        cycleOrderHistoryScoringFilter();
+        resetHistoryCursor();
       } else if (e.name === "m") {
         toggleOrderHistorySelectedMarketOnly();
         resetHistoryCursor();
+      } else if (e.name === "r") {
+        void refreshOrders();
       } else if (e.name === "1") {
         setOrderHistoryStatusFilter("ALL");
         resetHistoryCursor();
@@ -1665,6 +1672,21 @@ function AppContent() {
   };
   process.on("SIGINT", handleExit);
   process.on("SIGTERM", handleExit);
+
+  createEffect(() => {
+    if (!orderHistoryOpen()) return;
+
+    void refreshOrders();
+
+    const timer = setInterval(() => {
+      void refreshOrders();
+    }, 10_000);
+
+    onCleanup(() => {
+      clearInterval(timer);
+    });
+  });
+
   onCleanup(() => {
     process.removeListener("SIGINT", handleExit);
     process.removeListener("SIGTERM", handleExit);

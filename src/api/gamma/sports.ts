@@ -102,21 +102,42 @@ export async function getTeamByAbbreviation(abbreviation: string): Promise<Sport
 }
 
 export async function getValidSportsMarketTypes(): Promise<SportsMarketType[]> {
+  // Try documented path first, then fallback
+  for (const path of ["/sports/valid-market-types", "/sports-market-types"]) {
+    try {
+      const response = await fetch(`${GAMMA_API_BASE}${path}`);
+      if (!response.ok) continue;
+      const data = await response.json();
+      if (!Array.isArray(data)) continue;
+      return data.map((item) => parseMarketType(item as Record<string, unknown>));
+    } catch {
+      continue;
+    }
+  }
+  console.error("Failed to fetch sports market types from all endpoints");
+  return [];
+}
+
+export async function getSportById(sportId: string): Promise<Record<string, unknown> | null> {
   try {
-    const response = await fetch(`${GAMMA_API_BASE}/sports-market-types`);
-
-    if (!response.ok) {
-      throw new Error(`Sports market types API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data.map((item) => parseMarketType(item as Record<string, unknown>));
+    const response = await fetch(`${GAMMA_API_BASE}/sports/${encodeURIComponent(sportId)}`);
+    if (!response.ok) return null;
+    return await response.json() as Record<string, unknown>;
   } catch (error) {
-    console.error("Failed to fetch sports market types:", error);
+    console.error("Failed to fetch sport by ID:", error);
+    return null;
+  }
+}
+
+export async function getSportLeagues(): Promise<Array<{ id: string; name: string; leagues: string[] }>> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/sports`);
+    if (!response.ok) return [];
+    const data = await response.json();
+    if (!Array.isArray(data)) return [];
+    return data as Array<{ id: string; name: string; leagues: string[] }>;
+  } catch (error) {
+    console.error("Failed to fetch sport leagues:", error);
     return [];
   }
 }

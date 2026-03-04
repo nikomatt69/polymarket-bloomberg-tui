@@ -169,7 +169,7 @@ export function OrderBookPanel() {
     const offStatus = ws.onStatus((status) => setWsStatus(status));
 
     const offMsg = ws.onMessage((msg) => {
-      if (msg.assetId !== tokenId) return;
+      if (!("assetId" in msg) || msg.assetId !== tokenId) return;
 
       if (msg.type === "book") {
         const snap = msg as WsBookSnapshot;

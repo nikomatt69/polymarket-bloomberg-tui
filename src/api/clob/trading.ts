@@ -18,6 +18,7 @@ import { Order, PlacedOrder, OrderStatus } from "../../types/orders";
 const CLOB_BASE = "https://clob.polymarket.com";
 const GEO_BLOCK_URL = "https://polymarket.com/api/geoblock";
 const GEO_BLOCK_CACHE_TTL_MS = 60_000;
+const MAX_CANCEL_IDS_PER_REQUEST = 3000;
 
 interface ClobSignedOrder {
   salt: number;
@@ -38,7 +39,7 @@ interface ClobSignedOrder {
 interface ClobOrderPayload {
   order: ClobSignedOrder;
   owner: string;
-  orderType: "GTC" | "FOK" | "GTD";
+  orderType: "GTC" | "FOK" | "GTD" | "FAK";
   postOnly?: boolean;
 }
 
@@ -88,6 +89,10 @@ interface ClobPagedResponse<T> {
   next_cursor?: string;
 }
 
+interface ClobOrderScoringResponse {
+  scoring?: boolean;
+}
+
 interface GeoblockResponse {
   blocked?: boolean;
   ip?: string;
@@ -129,6 +134,14 @@ function parseSize(value: unknown): number {
 
   const parsed = parseNumber(value, 0);
   return Number.isInteger(parsed) ? parsed / 1_000_000 : parsed;
+}
+
+async function parseJsonSafe<T>(response: Response): Promise<T | null> {
+  try {
+    return (await response.json()) as T;
+  } catch {
+    return null;
+  }
 }
 
 function mapOrderErrorMessage(rawError: string | undefined, status: number): string {
@@ -248,6 +261,55 @@ function extractPagedRows<T>(payload: unknown): T[] {
   return [];
 }
 
+function extractNextCursor(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const nextCursor = (payload as ClobPagedResponse<unknown>).next_cursor;
+  if (typeof nextCursor !== "string" || nextCursor.length === 0) {
+    return null;
+  }
+  return nextCursor;
+}
+
+function appendCursor(requestPath: string, cursor: string): string {
+  const separator = requestPath.includes("?") ? "&" : "?";
+  return `${requestPath}${separator}next_cursor=${encodeURIComponent(cursor)}`;
+}
+
+async function fetchAllPagedRows<T>(
+  privateKey: `0x${string}`,
+  creds: ApiCredentials,
+  baseRequestPath: string,
+  maxPages: number = 30,
+): Promise<T[]> {
+  const rows: T[] = [];
+  let cursor: string | null = null;
+
+  for (let page = 0; page < maxPages; page += 1) {
+    const requestPath = cursor ? appendCursor(baseRequestPath, cursor) : baseRequestPath;
+    const headers = await createL2Headers(privateKey, creds, "GET", requestPath);
+    const response = await fetch(`${CLOB_BASE}${requestPath}`, { headers });
+    if (!response.ok) {
+      break;
+    }
+
+    const payload = (await parseJsonSafe<unknown>(response)) as unknown;
+    if (payload === null) {
+      break;
+    }
+
+    rows.push(...extractPagedRows<T>(payload));
+
+    const nextCursor = extractNextCursor(payload);
+    if (!nextCursor || nextCursor === cursor) {
+      break;
+    }
+
+    cursor = nextCursor;
+  }
+
+  return rows;
+}
+
 async function resolveMarketByAssetId(
   privateKey: `0x${string}`,
   creds: ApiCredentials,
@@ -325,7 +387,7 @@ async function buildSignedOrder(
   side: "BUY" | "SELL",
   price: number,
   shares: number,
-  orderType: "GTC" | "FOK" | "GTD",
+  orderType: "GTC" | "FOK" | "GTD" | "FAK",
   funderAddress?: string,
   negRisk?: boolean,
 ): Promise<ClobSignedOrder> {
@@ -344,6 +406,7 @@ async function buildSignedOrder(
   const takerAmount = (side === "BUY" ? sharesScaled : usdcAmount).toString();
 
   const salt = Math.floor(Math.random() * 1_000_000_000);
+  // GTD: 24h from now. GTC/FOK/FAK: "0"
   const expiration = orderType === "GTD" ? String(Math.floor(Date.now() / 1000) + 86_400) : "0";
 
   const domain = {
@@ -450,7 +513,7 @@ export async function placeOrder(order: Order): Promise<PlacedOrder> {
     body,
   });
 
-  const data = (await response.json()) as ClobOrderResponse;
+  const data = (await parseJsonSafe<ClobOrderResponse>(response)) ?? {};
   if (!response.ok || data.errorMsg || data.success === false) {
     const errorText = data.errorMsg ?? data.error;
     throw new Error(mapOrderErrorMessage(errorText, response.status));
@@ -480,6 +543,85 @@ export async function placeOrder(order: Order): Promise<PlacedOrder> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Batch Order Placement (max 15 per call)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function placeBatchOrders(orders: Order[]): Promise<PlacedOrder[]> {
+  if (orders.length === 0) return [];
+  if (orders.length > 15) throw new Error("Batch order limit is 15 orders per call");
+
+  await ensureTradingAllowed();
+  const { privateKey, creds } = await getAuthContext();
+  const config = loadWalletConfig();
+  const funderAddress = config?.funderAddress;
+
+  const signedOrders = await Promise.all(
+    orders.map((order) =>
+      buildSignedOrder(
+        privateKey,
+        order.tokenId,
+        order.side,
+        order.price,
+        order.shares,
+        order.type,
+        funderAddress,
+        order.negRisk,
+      )
+    )
+  );
+
+  const payloads: ClobOrderPayload[] = signedOrders.map((signedOrder, i) => ({
+    order: signedOrder,
+    owner: creds.apiKey,
+    orderType: orders[i].type,
+    ...(orders[i].postOnly ? { postOnly: true } : {}),
+  }));
+
+  const body = JSON.stringify(payloads);
+  const headers = await createL2Headers(privateKey, creds, "POST", "/orders", body);
+  const response = await fetch(`${CLOB_BASE}/orders`, {
+    method: "POST",
+    headers,
+    body,
+  });
+
+  const data = (await parseJsonSafe<ClobOrderResponse[] | ClobOrderResponse>(response)) ?? { error: `HTTP ${response.status}` };
+
+  if (!response.ok) {
+    const single = Array.isArray(data) ? data[0] : data;
+    const errorText = single?.errorMsg ?? single?.error;
+    throw new Error(mapOrderErrorMessage(errorText, response.status));
+  }
+
+  const results = Array.isArray(data) ? data : [data];
+  const failed = results.filter((item) => item.success === false || Boolean(item.errorMsg) || Boolean(item.error));
+  if (failed.length === results.length && failed.length > 0) {
+    const firstFailure = failed[0];
+    throw new Error(mapOrderErrorMessage(firstFailure.errorMsg ?? firstFailure.error, response.status));
+  }
+
+  return results.map((item, i) => {
+    const orderId = item.orderId ?? item.orderID ?? "";
+    const status = normalizeStatus(item.status);
+    const order = orders[i];
+    return {
+      orderId,
+      tokenId: order.tokenId,
+      side: order.side,
+      price: order.price,
+      originalSize: order.shares,
+      sizeMatched: status === "MATCHED" || status === "FILLED" ? order.shares : 0,
+      sizeRemaining: status === "MATCHED" || status === "FILLED" ? 0 : order.shares,
+      status,
+      createdAt: Date.now(),
+      postOnly: order.postOnly,
+      marketTitle: order.marketTitle,
+      outcomeTitle: order.outcomeTitle,
+    } as PlacedOrder;
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Order Cancellation
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -494,12 +636,12 @@ export async function cancelOrder(orderId: string): Promise<boolean> {
     body,
   });
 
-  const data = (await response.json()) as {
+  const data = (await parseJsonSafe<{
     canceled?: string[];
     not_canceled?: Record<string, string>;
     error?: string;
     errorMsg?: string;
-  };
+  }>(response)) ?? {};
 
   if (!response.ok) {
     const reason = data.errorMsg ?? data.error ?? `HTTP ${response.status}`;
@@ -532,12 +674,12 @@ async function cancelWithBody(
     ...(body ? { body } : {}),
   });
 
-  const data = (await response.json()) as {
+  const data = (await parseJsonSafe<{
     canceled?: string[];
     not_canceled?: Record<string, string>;
     error?: string;
     errorMsg?: string;
-  };
+  }>(response)) ?? {};
 
   if (!response.ok) {
     const reason = data.errorMsg ?? data.error;
@@ -559,12 +701,26 @@ export async function cancelAllOrders(): Promise<{ canceled: string[]; notCancel
 }
 
 export async function cancelOrdersBulk(orderIds: string[]): Promise<{ canceled: string[]; notCanceled: Record<string, string> }> {
-  if (orderIds.length === 0) {
+  const uniqueOrderIds = Array.from(new Set(orderIds.filter(Boolean)));
+  if (uniqueOrderIds.length === 0) {
     return { canceled: [], notCanceled: {} };
   }
 
-  const body = JSON.stringify(orderIds);
-  return cancelWithBody("/orders", body);
+  if (uniqueOrderIds.length <= MAX_CANCEL_IDS_PER_REQUEST) {
+    const body = JSON.stringify(uniqueOrderIds);
+    return cancelWithBody("/orders", body);
+  }
+
+  const aggregate = { canceled: [] as string[], notCanceled: {} as Record<string, string> };
+  for (let i = 0; i < uniqueOrderIds.length; i += MAX_CANCEL_IDS_PER_REQUEST) {
+    const chunk = uniqueOrderIds.slice(i, i + MAX_CANCEL_IDS_PER_REQUEST);
+    const body = JSON.stringify(chunk);
+    const result = await cancelWithBody("/orders", body);
+    aggregate.canceled.push(...result.canceled);
+    Object.assign(aggregate.notCanceled, result.notCanceled);
+  }
+
+  return aggregate;
 }
 
 export async function cancelOrdersForAssetIds(assetIds: string[]): Promise<{ canceled: string[]; notCanceled: Record<string, string> }> {
@@ -592,6 +748,25 @@ export async function cancelOrdersForAssetIds(assetIds: string[]): Promise<{ can
   return aggregate;
 }
 
+export async function getOrderScoringStatus(orderId: string): Promise<boolean | null> {
+  if (!orderId) return null;
+
+  try {
+    const { privateKey, creds } = await getAuthContext();
+    const requestPath = `/order-scoring?order_id=${encodeURIComponent(orderId)}`;
+    const headers = await createL2Headers(privateKey, creds, "GET", requestPath);
+
+    const response = await fetch(`${CLOB_BASE}${requestPath}`, { headers });
+    if (!response.ok) return null;
+
+    const payload = await parseJsonSafe<ClobOrderScoringResponse>(response);
+    if (!payload || typeof payload.scoring !== "boolean") return null;
+    return payload.scoring;
+  } catch {
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Order History
 // ─────────────────────────────────────────────────────────────────────────────
@@ -599,14 +774,7 @@ export async function cancelOrdersForAssetIds(assetIds: string[]): Promise<{ can
 export async function fetchOpenOrders(): Promise<PlacedOrder[]> {
   try {
     const { privateKey, creds } = await getAuthContext();
-    const requestPath = "/orders";
-    const headers = await createL2Headers(privateKey, creds, "GET", requestPath);
-
-    const response = await fetch(`${CLOB_BASE}${requestPath}`, { headers });
-    if (!response.ok) return [];
-
-    const payload = (await response.json()) as unknown;
-    const rows = extractPagedRows<ClobOpenOrder>(payload);
+    const rows = await fetchAllPagedRows<ClobOpenOrder>(privateKey, creds, "/orders");
 
     return rows
       .map((row) => {
@@ -638,14 +806,8 @@ export async function fetchTradeHistory(): Promise<PlacedOrder[]> {
     const config = loadWalletConfig();
     // Trades are recorded against the funder/proxy wallet, not the EOA signer
     const makerAddress = config?.funderAddress ?? privateKeyToAccount(privateKey).address;
-    const requestPath = `/trades?maker_address=${encodeURIComponent(makerAddress)}`;
-    const headers = await createL2Headers(privateKey, creds, "GET", requestPath);
-
-    const response = await fetch(`${CLOB_BASE}${requestPath}`, { headers });
-    if (!response.ok) return [];
-
-    const payload = (await response.json()) as unknown;
-    const rows = extractPagedRows<ClobTrade>(payload);
+    const basePath = `/trades?maker_address=${encodeURIComponent(makerAddress)}`;
+    const rows = await fetchAllPagedRows<ClobTrade>(privateKey, creds, basePath);
 
     return rows
       .map((trade) => {

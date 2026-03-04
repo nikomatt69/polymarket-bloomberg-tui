@@ -5,10 +5,12 @@
 
 export {
   placeOrder,
+  placeBatchOrders,
   cancelOrder,
   cancelAllOrders,
   cancelOrdersBulk,
   cancelOrdersForAssetIds,
+  getOrderScoringStatus,
   fetchOpenOrders,
   fetchTradeHistory,
 } from "./clob/trading";

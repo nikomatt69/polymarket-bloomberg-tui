@@ -7,6 +7,12 @@ import { Market, Outcome, PriceHistory, PricePoint } from "../../types/market";
 
 const GAMMA_API_BASE = "https://gamma-api.polymarket.com";
 
+interface GammaTag {
+  id: number | string;
+  slug: string;
+  label: string;
+}
+
 interface GammaMarket {
   id: string;
   question: string | null;
@@ -27,7 +33,6 @@ interface GammaMarket {
   oneDayPriceChange: number | null;
   clobTokenIds: string | null;
   groupItemTitle?: string | null;
-  tags?: string[] | null;
 }
 
 function parseNumeric(value: unknown, fallback: number = 0): number {
@@ -49,6 +54,56 @@ function parseJsonArray(raw: string | null): string[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Resolve category from market data.
+ * Gamma API `category` field is often null for new markets.
+ * This function:
+ * 1. Uses `category` field when present (normalizes whitespace/hyphens)
+ * 2. Falls back to keyword inference from question/slug
+ * 3. Returns "general" as last resort
+ */
+function resolveCategory(market: GammaMarket): string {
+  // 1. Try direct category field (normalize trailing space, convert hyphens)
+  const rawCat = market.category;
+  if (rawCat && rawCat.trim()) {
+    return rawCat.trim().toLowerCase().replace(/-/g, "");
+  }
+
+  // 2. Infer from question and slug keywords
+  const text = `${market.question ?? ""} ${market.slug ?? ""}`.toLowerCase();
+
+  // Sports patterns
+  if (/\b(nba|nfl|nhl|mlb|soccer|football|ufc|mma|tennis|world cup|fifa|qualif|championship|season|win the|beat |score |game\b)/.test(text)) {
+    return "sports";
+  }
+  // Politics patterns
+  if (/\b(trump|biden|election|president|congress|senate|republican|democrat|governor|polling|vote|cabinet|ukraine|russia|china |taiwan|policy|law|bill|supreme court)/.test(text)) {
+    return "politics";
+  }
+  // Crypto patterns
+  if (/\b(bitcoin|btc|ethereum|eth|solana|xrp|binance|coinbase|crypto|defi|blockchain|token\b)/.test(text)) {
+    return "crypto";
+  }
+  // Tech patterns
+  if (/\b(ai |openai|gpt|chatgpt|anthropic|claude|google |microsoft|apple |meta |twitter|amazon |tesla|spacex|tech|software|startup|ipo|valuation\b)/.test(text)) {
+    return "tech";
+  }
+  // Entertainment patterns
+  if (/\b(album|music|song|artist|movie|film|netflix|disney|spotify|gta|video game|grammy|oscar|emmy|tony\b)/.test(text)) {
+    return "entertainment";
+  }
+  // Science/Health patterns
+  if (/\b(vaccine|covid|coronavirus|health|medical|disease|fda|cdc|science|research|study|trial\b)/.test(text)) {
+    return "science";
+  }
+  // Business/Economics patterns
+  if (/\b(market|stock|economy|gdp|fed|inflation|unemployment|interest|recession|bank|finance|oil|energy\b)/.test(text)) {
+    return "business";
+  }
+
+  return "general";
 }
 
 function parseGammaMarket(market: GammaMarket): Market {
@@ -80,7 +135,7 @@ function parseGammaMarket(market: GammaMarket): Market {
     openInterest: 0,
     resolutionDate: market.endDate ? new Date(market.endDate) : undefined,
     totalTrades: 0,
-    category: market.category || "general",
+    category: resolveCategory(market),
     closed: market.closed || false,
     resolved: false,
   };
@@ -132,7 +187,7 @@ function buildMarketsQuery(filters: MarketFilters): string {
 }
 
 export async function getMarkets(limit: number = 50, offset: number = 0): Promise<Market[]> {
-  const query = buildMarketsQuery({ limit, offset, closed: false, order: "volumeNum", ascending: false });
+  const query = buildMarketsQuery({ limit, offset, closed: false, active: true, order: "volumeNum", ascending: false });
   const response = await fetch(`${GAMMA_API_BASE}/markets?${query}`);
 
   if (!response.ok) {
@@ -151,17 +206,24 @@ export async function getMarkets(limit: number = 50, offset: number = 0): Promis
 
 export async function getMarketDetails(marketId: string): Promise<Market | null> {
   try {
-    const response = await fetch(`${GAMMA_API_BASE}/markets?id=${marketId}`);
-
-    if (!response.ok) {
-      throw new Error(`Gamma API error: ${response.status}`);
+    // Try direct path first (returns single object)
+    const pathResponse = await fetch(`${GAMMA_API_BASE}/markets/${encodeURIComponent(marketId)}`);
+    if (pathResponse.ok) {
+      const data = await pathResponse.json();
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        return parseGammaMarket(data as GammaMarket);
+      }
+      if (Array.isArray(data) && data.length > 0) {
+        return parseGammaMarket(data[0] as GammaMarket);
+      }
     }
+
+    // Fall back to query param
+    const response = await fetch(`${GAMMA_API_BASE}/markets?id=${encodeURIComponent(marketId)}`);
+    if (!response.ok) return null;
 
     const data = await response.json();
-
-    if (!Array.isArray(data) || data.length === 0) {
-      return null;
-    }
+    if (!Array.isArray(data) || data.length === 0) return null;
 
     return parseGammaMarket(data[0]);
   } catch (error) {
@@ -188,23 +250,33 @@ const CATEGORY_TAG_SLUGS: Record<string, string> = {
   Sports: "sports",
   Politics: "politics",
   Crypto: "cryptocurrency",
-  Business: "business",
-  Entertainment: "entertainment",
+  Business: "economics",
+  Entertainment: "pop-culture",
   Science: "science",
   AI: "artificial-intelligence",
+  Tech: "technology",
   NFTs: "nft",
   Coronavirus: "covid-19",
+  World: "world",
+  Health: "health",
+  Climate: "climate-and-environment",
 };
 
 export async function getMarketsByCategory(category: string, limit: number = 50, offset: number = 0): Promise<Market[]> {
   const tagSlug = CATEGORY_TAG_SLUGS[category];
 
   try {
+    // Prefer numeric tag_id for more reliable filtering
+    const { getTagId } = await import("./tags");
+    const slugToResolve = tagSlug || category.toLowerCase();
+    const tagId = await getTagId(slugToResolve);
+
     const query = buildMarketsQuery({
       limit,
       offset,
       closed: false,
-      tagSlug: tagSlug || category.toLowerCase(),
+      active: true,
+      ...(tagId !== null ? { tagId } : { tagSlug: slugToResolve }),
       order: "volumeNum",
       ascending: false,
     });
@@ -231,22 +303,8 @@ export async function getMarketsByCategory(category: string, limit: number = 50,
 
 export async function searchMarkets(query: string): Promise<Market[]> {
   try {
-    const response = await fetch(
-      `${GAMMA_API_BASE}/markets?limit=50&closed=false&question=${encodeURIComponent(query)}`
-    );
-
-    if (!response.ok) {
-      return [];
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data
-      .map((item) => parseGammaMarket(item as GammaMarket))
-      .filter((market) => market.outcomes.length > 0);
+    const { searchMarketsByQuery } = await import("./search");
+    return searchMarketsByQuery(query, 50, 0);
   } catch (error) {
     console.error("Failed to search markets:", error);
     return [];
@@ -254,7 +312,27 @@ export async function searchMarkets(query: string): Promise<Market[]> {
 }
 
 export async function getTrendingMarkets(limit: number = 20, offset: number = 0): Promise<Market[]> {
-  return getMarkets(limit, offset);
+  try {
+    const query = buildMarketsQuery({
+      limit,
+      offset,
+      closed: false,
+      active: true,
+      order: "competitive",
+      ascending: false,
+    });
+    const response = await fetch(`${GAMMA_API_BASE}/markets?${query}`);
+    if (!response.ok) return getMarkets(limit, offset);
+
+    const data = await response.json();
+    if (!Array.isArray(data)) return getMarkets(limit, offset);
+
+    return data
+      .map((item) => parseGammaMarket(item as GammaMarket))
+      .filter((market) => market.outcomes.length > 0);
+  } catch {
+    return getMarkets(limit, offset);
+  }
 }
 
 export async function getLiveSportsMarkets(limit: number = 50, offset: number = 0): Promise<Market[]> {

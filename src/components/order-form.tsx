@@ -63,6 +63,7 @@ export function OrderForm() {
     if (!tokenId) {
       setOrderBook(null);
       setBookLoading(false);
+      setOrderFormNegRisk(false);
       return;
     }
 
@@ -75,6 +76,11 @@ export function OrderForm() {
         if (!cancelled) {
           setOrderBook(snapshot);
           setOrderFormNegRisk(snapshot?.negRisk === true);
+        }
+      } catch {
+        if (!cancelled) {
+          setOrderBook(null);
+          setOrderFormNegRisk(false);
         }
       } finally {
         if (!cancelled) {
@@ -136,6 +142,43 @@ export function OrderForm() {
     if (minSize === null || minSize === undefined) return false;
     if (!sharesValid()) return false;
     return parsedShares() < minSize;
+  });
+
+  const postOnlyCrossingInvalid = createMemo(() => {
+    if (!orderFormPostOnly() || !priceValid()) return false;
+    const snapshot = orderBook();
+    if (!snapshot) return false;
+
+    if (side() === "BUY") {
+      return snapshot.bestAsk !== null && parsedPrice() >= snapshot.bestAsk;
+    }
+
+    return snapshot.bestBid !== null && parsedPrice() <= snapshot.bestBid;
+  });
+
+  const topOfBookDepth = createMemo(() => {
+    const snapshot = orderBook();
+    if (!snapshot) return null;
+    return side() === "BUY" ? snapshot.askDepth : snapshot.bidDepth;
+  });
+
+  const bookParticipation = createMemo(() => {
+    if (!sharesValid()) return null;
+    const depth = topOfBookDepth();
+    if (!Number.isFinite(depth) || depth === null || depth <= 0) return null;
+    return parsedShares() / depth;
+  });
+
+  const marketImpactWarning = createMemo(() => {
+    const participation = bookParticipation();
+    if (participation === null) return null;
+    if (participation >= 0.5) {
+      return "Order size is over 50% of visible top-book depth; execution quality may degrade.";
+    }
+    if (participation >= 0.25) {
+      return "Order size is over 25% of visible top-book depth; consider slicing the order.";
+    }
+    return null;
   });
 
   const quoteReferencePrice = createMemo(() => {
@@ -203,7 +246,9 @@ export function OrderForm() {
   const positionImpact = createMemo(() => {
     const existingTotal = positionsState.positions.reduce((s, pos) => s + pos.currentValue, 0);
     const newCost = estimatedCost() ?? 0;
-    return existingTotal + newCost;
+    return side() === "BUY"
+      ? existingTotal + newCost
+      : Math.max(0, existingTotal - newCost);
   });
 
   const canSubmit = createMemo(() =>
@@ -213,6 +258,7 @@ export function OrderForm() {
     && !buyBalanceExceeded()
     && !tickSizeInvalid()
     && !minSizeInvalid()
+    && !postOnlyCrossingInvalid()
     && !ordersState.placing
   );
 
@@ -270,6 +316,16 @@ export function OrderForm() {
             <text content="  Spread " fg={theme.textMuted} />
             <text content={formatBps(orderBook()?.spreadBps)} fg={theme.warning} />
           </box>
+          <box flexDirection="row">
+            <text content="       " width={10} />
+            <text content="Last " fg={theme.textMuted} />
+            <text content={formatCents(orderBook()?.lastTradePrice)} fg={theme.accent} />
+            <text content="  Depth B/A " fg={theme.textMuted} />
+            <text
+              content={`${(orderBook()?.bidDepth ?? 0).toFixed(2)} / ${(orderBook()?.askDepth ?? 0).toFixed(2)}`}
+              fg={theme.textMuted}
+            />
+          </box>
         </Show>
       </box>
 
@@ -300,6 +356,9 @@ export function OrderForm() {
 
         <Show when={invalidPostOnlyConfig()}>
           <text content="Post-only is not valid with FOK; use GTC/GTD." fg={theme.error} />
+        </Show>
+        <Show when={postOnlyCrossingInvalid()}>
+          <text content="Post-only order crosses the current book; adjust price away from top-of-book." fg={theme.error} />
         </Show>
 
         <text content="" />
@@ -361,6 +420,9 @@ export function OrderForm() {
         <Show when={spreadWarning()}>
           <text content={spreadWarning()!} fg={theme.warning} />
         </Show>
+        <Show when={marketImpactWarning()}>
+          <text content={marketImpactWarning()!} fg={theme.warning} />
+        </Show>
       </box>
 
       {/* Balance usage bar */}
@@ -382,6 +444,12 @@ export function OrderForm() {
               </box>
             );
           })()}
+          <Show when={bookParticipation() !== null}>
+            <text
+              content={`Book usage: ${(bookParticipation()! * 100).toFixed(1)}% of visible ${side() === "BUY" ? "ask" : "bid"} depth`}
+              fg={bookParticipation()! > 0.25 ? theme.warning : theme.textMuted}
+            />
+          </Show>
         </box>
       </Show>
 

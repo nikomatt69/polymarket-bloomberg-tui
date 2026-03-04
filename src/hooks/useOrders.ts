@@ -12,6 +12,7 @@ import {
   cancelAllOrders,
   cancelOrdersBulk,
   cancelOrdersForAssetIds,
+  getOrderScoringStatus,
 } from "../api/orders";
 import { Order } from "../types/orders";
 import { OrderStatus } from "../types/orders";
@@ -22,6 +23,7 @@ import { join } from "path";
 export type OrderHistoryStatusFilter = "ALL" | OrderStatus;
 export type OrderHistoryWindowFilter = "ALL" | "24H" | "7D" | "30D";
 export type OrderHistorySideFilter = "ALL" | "BUY" | "SELL";
+export type OrderHistoryScoringFilter = "ALL" | "ON" | "OFF" | "N/A";
 export type OrderHistorySection = "open" | "trades";
 
 interface OrdersState {
@@ -36,10 +38,16 @@ interface OrdersState {
   historyStatusFilter: OrderHistoryStatusFilter;
   historyWindowFilter: OrderHistoryWindowFilter;
   historySideFilter: OrderHistorySideFilter;
+  historyScoringFilter: OrderHistoryScoringFilter;
   historySelectedMarketOnly: boolean;
   historySearchQuery: string;
   historySearchEditing: boolean;
   lastExportPath: string | null;
+  scoringByOrderId: Record<string, boolean | null>;
+  scoringLastUpdatedAtByOrderId: Record<string, number>;
+  scoringRefreshInFlight: number;
+  scoringLastAttemptAt: number | null;
+  scoringLastError: string | null;
 }
 
 export const [ordersState, setOrdersState] = createStore<OrdersState>({
@@ -54,10 +62,16 @@ export const [ordersState, setOrdersState] = createStore<OrdersState>({
   historyStatusFilter: "ALL",
   historyWindowFilter: "ALL",
   historySideFilter: "ALL",
+  historyScoringFilter: "ALL",
   historySelectedMarketOnly: false,
   historySearchQuery: "",
   historySearchEditing: false,
   lastExportPath: null,
+  scoringByOrderId: {},
+  scoringLastUpdatedAtByOrderId: {},
+  scoringRefreshInFlight: 0,
+  scoringLastAttemptAt: null,
+  scoringLastError: null,
 });
 
 function matchesStatus(order: PlacedOrder, statusFilter: OrderHistoryStatusFilter): boolean {
@@ -86,6 +100,15 @@ function matchesSide(order: PlacedOrder, sideFilter: OrderHistorySideFilter): bo
   return order.side === sideFilter;
 }
 
+function matchesScoring(order: PlacedOrder, scoringFilter: OrderHistoryScoringFilter): boolean {
+  if (scoringFilter === "ALL") return true;
+
+  const scoring = ordersState.scoringByOrderId[order.orderId] ?? null;
+  if (scoringFilter === "ON") return scoring === true;
+  if (scoringFilter === "OFF") return scoring === false;
+  return scoring === null;
+}
+
 function matchesMarket(order: PlacedOrder, tokenIds: string[]): boolean {
   if (!ordersState.historySelectedMarketOnly) return true;
   if (tokenIds.length === 0) return false;
@@ -111,6 +134,7 @@ function applyFilters(orders: PlacedOrder[], selectedMarketTokenIds: string[] = 
     matchesStatus(order, ordersState.historyStatusFilter)
     && matchesWindow(order, ordersState.historyWindowFilter)
     && matchesSide(order, ordersState.historySideFilter)
+    && matchesScoring(order, ordersState.historyScoringFilter)
     && matchesMarket(order, selectedMarketTokenIds)
     && matchesSearch(order, query)
   ));
@@ -151,6 +175,14 @@ export function getFilteredTradeHistory(selectedMarketTokenIds: string[] = []): 
 
 export function getOrderCancelReason(orderId: string): string | null {
   return ordersState.cancelReasonsByOrderId[orderId] ?? null;
+}
+
+export function getOrderScoring(orderId: string): boolean | null {
+  return ordersState.scoringByOrderId[orderId] ?? null;
+}
+
+export function getOrderScoringUpdatedAt(orderId: string): number | null {
+  return ordersState.scoringLastUpdatedAtByOrderId[orderId] ?? null;
 }
 
 function setCancelReason(orderId: string, reason: string | null): void {
@@ -237,6 +269,13 @@ export function cycleOrderHistorySideFilter(): void {
   setOrdersState("historySideFilter", next);
 }
 
+export function cycleOrderHistoryScoringFilter(): void {
+  const values: OrderHistoryScoringFilter[] = ["ALL", "ON", "OFF", "N/A"];
+  const idx = values.indexOf(ordersState.historyScoringFilter);
+  const next = values[(idx + 1) % values.length];
+  setOrdersState("historyScoringFilter", next);
+}
+
 export function setOrderHistoryStatusFilter(filter: OrderHistoryStatusFilter): void {
   setOrdersState("historyStatusFilter", filter);
 }
@@ -274,22 +313,29 @@ export function exportOrderHistoryCsv(selectedMarketTokenIds: string[] = []): st
   ].sort((a, b) => b.order.createdAt - a.order.createdAt);
 
   const lines = [
-    "kind,createdAtIso,orderId,status,side,tokenId,marketTitle,outcomeTitle,price,originalSize,sizeMatched,sizeRemaining,notionalUsd",
-    ...allRows.map(({ kind, order }) => [
-      kind,
-      new Date(order.createdAt).toISOString(),
-      order.orderId,
-      order.status,
-      order.side,
-      order.tokenId,
-      order.marketTitle ?? "",
-      order.outcomeTitle ?? "",
-      order.price.toString(),
-      order.originalSize.toString(),
-      order.sizeMatched.toString(),
-      order.sizeRemaining.toString(),
-      (order.price * order.sizeMatched).toString(),
-    ].map(csvEscape).join(",")),
+    "kind,createdAtIso,orderId,status,side,tokenId,marketTitle,outcomeTitle,price,originalSize,sizeMatched,sizeRemaining,notionalUsd,scoring,scoringUpdatedAtIso",
+    ...allRows.map(({ kind, order }) => {
+      const scoring = getOrderScoring(order.orderId);
+      const scoringUpdatedAt = getOrderScoringUpdatedAt(order.orderId);
+
+      return [
+        kind,
+        new Date(order.createdAt).toISOString(),
+        order.orderId,
+        order.status,
+        order.side,
+        order.tokenId,
+        order.marketTitle ?? "",
+        order.outcomeTitle ?? "",
+        order.price.toString(),
+        order.originalSize.toString(),
+        order.sizeMatched.toString(),
+        order.sizeRemaining.toString(),
+        (order.price * order.sizeMatched).toString(),
+        String(scoring),
+        scoringUpdatedAt ? new Date(scoringUpdatedAt).toISOString() : "",
+      ].map(csvEscape).join(",");
+    }),
   ];
 
   const fileName = `orders_${formatTimestampForFile(Date.now())}.csv`;
@@ -459,7 +505,80 @@ export async function refreshOrders(): Promise<void> {
       }
       return next;
     });
+
+    const scoringCandidates = [
+      ...open.map((order) => order.orderId),
+      ...history.slice(0, 25).map((order) => order.orderId),
+    ];
+    void refreshOrderScoring(scoringCandidates);
   } catch {
     // silent
+  }
+}
+
+export async function refreshOrderScoring(orderIds?: string[]): Promise<void> {
+  if (ordersState.scoringRefreshInFlight > 0) {
+    return;
+  }
+
+  const ids = Array.from(new Set((orderIds ?? [
+    ...ordersState.openOrders.map((order) => order.orderId),
+    ...ordersState.tradeHistory.slice(0, 25).map((order) => order.orderId),
+  ]).filter(Boolean)));
+
+  if (ids.length === 0) {
+    return;
+  }
+
+  setOrdersState("scoringRefreshInFlight", (value) => value + 1);
+  setOrdersState("scoringLastAttemptAt", Date.now());
+  setOrdersState("scoringLastError", null);
+
+  try {
+    const queue = [...ids];
+    const concurrency = 6;
+
+    const worker = async (): Promise<void> => {
+      while (queue.length > 0) {
+        const orderId = queue.shift();
+        if (!orderId) continue;
+
+        const scoring = await getOrderScoringStatus(orderId);
+        const updatedAt = Date.now();
+        setOrdersState("scoringByOrderId", orderId, scoring);
+        setOrdersState("scoringLastUpdatedAtByOrderId", orderId, updatedAt);
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(concurrency, ids.length) }, () => worker()));
+
+    const liveIds = new Set([
+      ...ordersState.openOrders.map((order) => order.orderId),
+      ...ordersState.tradeHistory.slice(0, 25).map((order) => order.orderId),
+    ]);
+
+    setOrdersState("scoringByOrderId", (prev) => {
+      const next: Record<string, boolean | null> = {};
+      for (const [orderId, value] of Object.entries(prev)) {
+        if (liveIds.has(orderId)) {
+          next[orderId] = value;
+        }
+      }
+      return next;
+    });
+
+    setOrdersState("scoringLastUpdatedAtByOrderId", (prev) => {
+      const next: Record<string, number> = {};
+      for (const [orderId, value] of Object.entries(prev)) {
+        if (liveIds.has(orderId)) {
+          next[orderId] = value;
+        }
+      }
+      return next;
+    });
+  } catch (error) {
+    setOrdersState("scoringLastError", error instanceof Error ? error.message : "Scoring refresh failed");
+  } finally {
+    setOrdersState("scoringRefreshInFlight", (value) => Math.max(0, value - 1));
   }
 }

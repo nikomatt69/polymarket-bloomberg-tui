@@ -77,7 +77,9 @@ function parseNumeric(value: unknown, fallback: number = 0): number {
 
 export async function getPriceHistory(
   marketId: string,
-  timeframe: Timeframe = "1d"
+  timeframe: Timeframe = "1d",
+  startTs?: number,
+  endTs?: number
 ): Promise<PriceHistory | null> {
   try {
     // Import here to avoid circular dependency
@@ -103,8 +105,14 @@ export async function getPriceHistory(
       "all": "max",
     };
 
+    const priceHistoryParams = new URLSearchParams();
+    priceHistoryParams.set("market", tokenId);
+    priceHistoryParams.set("interval", intervalMap[timeframe]);
+    if (startTs !== undefined) priceHistoryParams.set("startTs", String(startTs));
+    if (endTs !== undefined) priceHistoryParams.set("endTs", String(endTs));
+
     const response = await fetch(
-      `${CLOB_API_BASE}/prices-history?market=${tokenId}&interval=${intervalMap[timeframe]}`
+      `${CLOB_API_BASE}/prices-history?${priceHistoryParams.toString()}`
     );
 
     if (!response.ok) {
@@ -194,18 +202,166 @@ export async function getOrderBookSummaries(tokenIds: string[]): Promise<Record<
   const unique = Array.from(new Set(tokenIds.filter(Boolean)));
   if (unique.length === 0) return {};
 
-  const entries = await Promise.all(
-    unique.map(async (tokenId) => [tokenId, await getOrderBookSummary(tokenId)] as const)
-  );
+  try {
+    // Use batch POST /books endpoint (max 500 tokens per call)
+    const BATCH_SIZE = 500;
+    const result: Record<string, OrderBookSummary> = {};
 
-  const result: Record<string, OrderBookSummary> = {};
-  for (const [tokenId, summary] of entries) {
-    if (summary) {
-      result[tokenId] = summary;
+    for (let i = 0; i < unique.length; i += BATCH_SIZE) {
+      const batch = unique.slice(i, i + BATCH_SIZE);
+      const body = JSON.stringify(batch.map((token_id) => ({ token_id })));
+      const response = await fetch(`${CLOB_API_BASE}/books`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+
+      if (!response.ok) {
+        // Fall back to individual calls for this batch
+        const entries = await Promise.all(
+          batch.map(async (tokenId) => [tokenId, await getOrderBookSummary(tokenId)] as const)
+        );
+        for (const [tokenId, summary] of entries) {
+          if (summary) result[tokenId] = summary;
+        }
+        continue;
+      }
+
+      const data = await response.json();
+      const books = Array.isArray(data) ? data : [];
+
+      for (const bookData of books) {
+        const book = bookData as ClobBookResponse;
+        const tokenId = book.asset_id ?? "";
+        if (!tokenId) continue;
+
+        const bids = Array.isArray(book.bids) ? book.bids : [];
+        const asks = Array.isArray(book.asks) ? book.asks : [];
+        const bestBid = bids.length > 0 ? parseNumeric(bids[0].price, 0) : null;
+        const bestAsk = asks.length > 0 ? parseNumeric(asks[0].price, 0) : null;
+        const midpoint =
+          bestBid !== null && bestAsk !== null
+            ? (bestBid + bestAsk) / 2
+            : bestBid !== null ? bestBid : bestAsk;
+        const spread = bestBid !== null && bestAsk !== null ? Math.max(0, bestAsk - bestBid) : null;
+        const spreadBps =
+          midpoint !== null && midpoint > 0 && spread !== null
+            ? (spread / midpoint) * 10_000
+            : null;
+        const bidDepth = bids.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
+        const askDepth = asks.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
+
+        result[tokenId] = {
+          marketId: book.market ?? "",
+          tokenId,
+          bestBid,
+          bestAsk,
+          midpoint,
+          spread,
+          spreadBps,
+          bidDepth,
+          askDepth,
+          minOrderSize: book.min_order_size ? parseNumeric(book.min_order_size, 0) : null,
+          tickSize: book.tick_size ? parseNumeric(book.tick_size, 0) : null,
+          updatedAt: book.timestamp ? new Date(book.timestamp).getTime() : null,
+        };
+      }
     }
-  }
 
-  return result;
+    return result;
+  } catch {
+    // Full fallback to individual calls
+    const entries = await Promise.all(
+      unique.map(async (tokenId) => [tokenId, await getOrderBookSummary(tokenId)] as const)
+    );
+    const result: Record<string, OrderBookSummary> = {};
+    for (const [tokenId, summary] of entries) {
+      if (summary) result[tokenId] = summary;
+    }
+    return result;
+  }
+}
+
+export async function getBatchPrices(tokenIds: string[]): Promise<Record<string, number>> {
+  if (tokenIds.length === 0) return {};
+  try {
+    const body = JSON.stringify(tokenIds.map((token_id) => ({ token_id })));
+    const response = await fetch(`${CLOB_API_BASE}/prices`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    if (!response.ok) return {};
+    const data = (await response.json()) as Array<{ token_id: string; price: string }>;
+    if (!Array.isArray(data)) return {};
+    const result: Record<string, number> = {};
+    for (const item of data) {
+      const price = parseNumeric(item.price, 0);
+      result[item.token_id] = price > 1 ? price / 100 : price;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+export async function getBatchMidpoints(tokenIds: string[]): Promise<Record<string, number>> {
+  if (tokenIds.length === 0) return {};
+  try {
+    const body = JSON.stringify(tokenIds.map((token_id) => ({ token_id })));
+    const response = await fetch(`${CLOB_API_BASE}/midpoints`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    if (!response.ok) return {};
+    const data = (await response.json()) as Array<{ token_id: string; mid: string }>;
+    if (!Array.isArray(data)) return {};
+    const result: Record<string, number> = {};
+    for (const item of data) {
+      const mid = parseNumeric(item.mid, 0);
+      result[item.token_id] = mid > 1 ? mid / 100 : mid;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+export async function getLastTradePrice(tokenId: string): Promise<number | null> {
+  try {
+    const response = await fetch(`${CLOB_API_BASE}/last-trade-price?token_id=${tokenId}`);
+    if (!response.ok) return null;
+    const data = (await response.json()) as { price?: number | string } | null;
+    if (!data?.price) return null;
+    const price = parseNumeric(data.price, 0);
+    return price > 1 ? price / 100 : price;
+  } catch {
+    return null;
+  }
+}
+
+export async function getBatchLastTradePrices(tokenIds: string[]): Promise<Record<string, number>> {
+  if (tokenIds.length === 0) return {};
+  try {
+    const body = JSON.stringify(tokenIds.map((token_id) => ({ token_id })));
+    const response = await fetch(`${CLOB_API_BASE}/last-trade-prices`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body,
+    });
+    if (!response.ok) return {};
+    const data = (await response.json()) as Array<{ token_id: string; price: string }>;
+    if (!Array.isArray(data)) return {};
+    const result: Record<string, number> = {};
+    for (const item of data) {
+      const price = parseNumeric(item.price, 0);
+      result[item.token_id] = price > 1 ? price / 100 : price;
+    }
+    return result;
+  } catch {
+    return {};
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

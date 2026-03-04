@@ -6,6 +6,7 @@
 // Positions
 export {
   fetchPositions,
+  fetchPortfolioValue,
   calculatePortfolioSummary,
   getPositionByAsset,
   getActivePositions,
@@ -16,6 +17,7 @@ export {
 export {
   fetchActivity,
   fetchRecentActivity,
+  fetchMarketTrades,
 } from "./activity";
 
 export type { ActivityItem } from "./activity";

@@ -6,6 +6,16 @@
 import { Position, PortfolioSummary } from "../../types/positions";
 
 const DATA_API_BASE = "https://data-api.polymarket.com";
+const DEFAULT_TIMEOUT_MS = 15_000;
+const MAX_PAGE_LIMIT = 500;
+
+interface FetchPositionsOptions {
+  sizeThreshold?: number;
+  sortBy?: string;
+  limit?: number;
+  offset?: number;
+  maxPages?: number;
+}
 
 interface DataApiPosition {
   asset: string;
@@ -21,6 +31,54 @@ interface DataApiPosition {
   endDate: string | null;
   redeemable: boolean;
   initialValue: number;
+}
+
+interface DataApiPositionsResponse {
+  data?: DataApiPosition[];
+  positions?: DataApiPosition[];
+}
+
+function parseNumber(value: unknown, fallback = 0): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
+  if (typeof value === "string") {
+    const parsed = Number.parseFloat(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+async function fetchJson<T>(path: string): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${DATA_API_BASE}${path}`, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Data API error: ${response.status}`);
+    }
+
+    return (await response.json()) as T;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractPositions(payload: unknown): DataApiPosition[] {
+  if (Array.isArray(payload)) {
+    return payload as DataApiPosition[];
+  }
+  if (payload && typeof payload === "object") {
+    const result = payload as DataApiPositionsResponse;
+    if (Array.isArray(result.data)) return result.data;
+    if (Array.isArray(result.positions)) return result.positions;
+  }
+  return [];
 }
 
 function mapPosition(raw: DataApiPosition): Position {
@@ -41,22 +99,36 @@ function mapPosition(raw: DataApiPosition): Position {
   };
 }
 
-export async function fetchPositions(address: string): Promise<Position[]> {
-  const response = await fetch(
-    `${DATA_API_BASE}/positions?user=${address}&limit=100`
-  );
+export async function fetchPositions(
+  address: string,
+  options: FetchPositionsOptions = {}
+): Promise<Position[]> {
+  const requestedTotal = Math.max(1, options.limit ?? 100);
+  const maxPages = Math.max(1, options.maxPages ?? 10);
+  const pageLimit = Math.min(MAX_PAGE_LIMIT, requestedTotal);
+  let offset = Math.max(0, options.offset ?? 0);
+  const rows: DataApiPosition[] = [];
 
-  if (!response.ok) {
-    throw new Error(`Data API error: ${response.status}`);
+  for (let page = 0; page < maxPages && rows.length < requestedTotal; page += 1) {
+    const params = new URLSearchParams();
+    params.set("user", address);
+    params.set("limit", String(Math.min(pageLimit, requestedTotal - rows.length)));
+    params.set("offset", String(offset));
+    if (options.sizeThreshold !== undefined) params.set("sizeThreshold", String(options.sizeThreshold));
+    if (options.sortBy) params.set("sortBy", options.sortBy);
+
+    const payload = await fetchJson<unknown>(`/positions?${params.toString()}`);
+    const pageRows = extractPositions(payload);
+    if (pageRows.length === 0) break;
+
+    rows.push(...pageRows);
+    if (pageRows.length < Math.min(pageLimit, requestedTotal - rows.length + pageRows.length)) {
+      break;
+    }
+    offset += pageRows.length;
   }
 
-  const data = await response.json();
-
-  if (!Array.isArray(data)) {
-    return [];
-  }
-
-  return (data as DataApiPosition[]).map(mapPosition);
+  return rows.slice(0, requestedTotal).map(mapPosition);
 }
 
 export function calculatePortfolioSummary(positions: Position[]): PortfolioSummary {
@@ -90,4 +162,14 @@ export async function getActivePositions(address: string): Promise<Position[]> {
 export async function getRedeemablePositions(address: string): Promise<Position[]> {
   const positions = await fetchPositions(address);
   return positions.filter(p => p.redeemable);
+}
+
+export async function fetchPortfolioValue(address: string): Promise<number> {
+  try {
+    const data = await fetchJson<{ user?: string; value?: number | string } | null>(`/value?user=${encodeURIComponent(address)}`);
+    if (!data || data.value === undefined || data.value === null) return 0;
+    return parseNumber(data.value, 0);
+  } catch {
+    return 0;
+  }
 }

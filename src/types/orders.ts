@@ -4,7 +4,7 @@
 
 export type OrderSide = "BUY" | "SELL";
 export type OrderStatus = "LIVE" | "MATCHED" | "CANCELLED" | "DELAYED" | "FILLED" | "UNMATCHED";
-export type OrderType = "GTC" | "FOK" | "GTD";
+export type OrderType = "GTC" | "FOK" | "GTD" | "FAK";
 
 export interface Order {
   tokenId: string;       // CLOB token ID (outcome ID)
@@ -32,6 +32,8 @@ export interface PlacedOrder {
   postOnly?: boolean;
   marketTitle?: string;
   outcomeTitle?: string;
+  scoring?: boolean | null;
+  scoringUpdatedAt?: number;
 }
 
 export interface OrderFormState {

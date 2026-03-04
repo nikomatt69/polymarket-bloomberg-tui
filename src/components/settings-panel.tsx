@@ -1,3 +1,4 @@
+
 /**
  * Settings panel — tabbed overlay for theme, providers, account, display, and key bindings
  * Key: E — toggle open/close

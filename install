@@ -1,0 +1,460 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP="polymarket-bloomberg-tui"
+REPO_OWNER="nikomatt69"
+REPO_NAME="polymarket-bloomberg-tui"
+INSTALL_DIR="${POLYMARKET_BLOOMBERG_TUI_INSTALL_DIR:-$HOME/.polymarket-bloomberg-tui/bin}"
+
+MUTED='\033[0;2m'
+RED='\033[0;31m'
+ORANGE='\033[38;5;214m'
+NC='\033[0m'
+
+usage() {
+  cat <<EOF
+Polymarket Bloomberg TUI Installer
+
+Usage: install [options]
+
+Options:
+  -h, --help              Show this help message
+  -v, --version <version> Install a specific version (for example: 1.0.0)
+  -b, --binary <path>     Install from a local binary
+      --no-modify-path    Do not edit shell config files
+
+Examples:
+  curl -fsSL https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/install | bash
+  curl -fsSL https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/install | bash -s -- --version 1.0.0
+  ./install --binary ./dist/${APP}-darwin-arm64/bin/${APP}
+EOF
+}
+
+requested_version=${VERSION:-}
+no_modify_path=false
+binary_path=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -v|--version)
+      if [[ -n "${2:-}" ]]; then
+        requested_version="$2"
+        shift 2
+      else
+        echo -e "${RED}Error: --version requires an argument${NC}"
+        exit 1
+      fi
+      ;;
+    -b|--binary)
+      if [[ -n "${2:-}" ]]; then
+        binary_path="$2"
+        shift 2
+      else
+        echo -e "${RED}Error: --binary requires a path${NC}"
+        exit 1
+      fi
+      ;;
+    --no-modify-path)
+      no_modify_path=true
+      shift
+      ;;
+    *)
+      echo -e "${ORANGE}Warning: Unknown option '$1'${NC}" >&2
+      shift
+      ;;
+  esac
+done
+
+print_message() {
+  local level="$1"
+  local message="$2"
+  local color="$NC"
+  if [[ "$level" == "error" ]]; then
+    color="$RED"
+  fi
+  echo -e "${color}${message}${NC}"
+}
+
+if ! command -v curl >/dev/null 2>&1; then
+  print_message error "Error: curl is required but not installed."
+  exit 1
+fi
+
+mkdir -p "$INSTALL_DIR"
+
+os=""
+arch=""
+archive_ext=""
+target=""
+filename=""
+specific_version=""
+url_candidates=()
+
+detect_platform() {
+  local raw_os
+  raw_os=$(uname -s)
+  os=$(echo "$raw_os" | tr '[:upper:]' '[:lower:]')
+
+  case "$raw_os" in
+    Darwin*) os="darwin" ;;
+    Linux*) os="linux" ;;
+    MINGW*|MSYS*|CYGWIN*) os="windows" ;;
+  esac
+
+  arch=$(uname -m)
+  if [[ "$arch" == "aarch64" ]]; then
+    arch="arm64"
+  fi
+  if [[ "$arch" == "x86_64" ]]; then
+    arch="x64"
+  fi
+
+  if [[ "$os" == "darwin" && "$arch" == "x64" ]]; then
+    local rosetta_flag
+    rosetta_flag=$(sysctl -n sysctl.proc_translated 2>/dev/null || echo 0)
+    if [[ "$rosetta_flag" == "1" ]]; then
+      arch="arm64"
+    fi
+  fi
+
+  case "$os-$arch" in
+    linux-x64|linux-arm64|darwin-x64|darwin-arm64|windows-x64)
+      ;;
+    *)
+      print_message error "Unsupported OS/Arch: $os/$arch"
+      exit 1
+      ;;
+  esac
+}
+
+detect_target() {
+  archive_ext=".zip"
+  if [[ "$os" == "linux" ]]; then
+    archive_ext=".tar.gz"
+  fi
+
+  local is_musl=false
+  if [[ "$os" == "linux" ]]; then
+    if [[ -f /etc/alpine-release ]]; then
+      is_musl=true
+    fi
+
+    if command -v ldd >/dev/null 2>&1; then
+      if ldd --version 2>&1 | grep -qi musl; then
+        is_musl=true
+      fi
+    fi
+  fi
+
+  local needs_baseline=false
+  if [[ "$arch" == "x64" ]]; then
+    if [[ "$os" == "linux" ]]; then
+      if ! grep -qi avx2 /proc/cpuinfo 2>/dev/null; then
+        needs_baseline=true
+      fi
+    fi
+    if [[ "$os" == "darwin" ]]; then
+      local avx2
+      avx2=$(sysctl -n hw.optional.avx2_0 2>/dev/null || echo 0)
+      if [[ "$avx2" != "1" ]]; then
+        needs_baseline=true
+      fi
+    fi
+  fi
+
+  target="$os-$arch"
+  if [[ "$needs_baseline" == "true" ]]; then
+    target="$target-baseline"
+  fi
+  if [[ "$is_musl" == "true" ]]; then
+    target="$target-musl"
+  fi
+
+  filename="$APP-$target$archive_ext"
+}
+
+build_release_urls() {
+  url_candidates=()
+
+  if [[ -z "$requested_version" ]]; then
+    specific_version=$(
+      curl -fsSL "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest" \
+        | sed -E -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v?([^\"]+)".*/\1/p' \
+        | head -n 1
+    )
+
+    if [[ -z "$specific_version" ]]; then
+      print_message error "Failed to resolve latest release version"
+      exit 1
+    fi
+
+    url_candidates+=("https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/latest/download/${filename}")
+    return
+  fi
+
+  local normalized
+  normalized="${requested_version#v}"
+  specific_version="$normalized"
+
+  url_candidates+=("https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${normalized}/${filename}")
+  url_candidates+=("https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/${normalized}/${filename}")
+}
+
+download_file() {
+  local url="$1"
+  local output="$2"
+  if [[ -t 2 ]]; then
+    curl --fail --location --progress-bar --output "$output" "$url"
+  else
+    curl --fail --location --silent --show-error --output "$output" "$url"
+  fi
+}
+
+resolve_installed_command() {
+  if command -v "$APP" >/dev/null 2>&1; then
+    echo "$APP"
+    return 0
+  fi
+
+  if command -v "${APP}.exe" >/dev/null 2>&1; then
+    echo "${APP}.exe"
+    return 0
+  fi
+
+  return 1
+}
+
+check_version() {
+  local command_name
+  if ! command_name=$(resolve_installed_command); then
+    return 0
+  fi
+
+  local installed_version
+  installed_version=$($command_name --version 2>/dev/null || true)
+  if [[ -z "$installed_version" ]]; then
+    return 0
+  fi
+
+  if [[ "$installed_version" == "$specific_version" ]]; then
+    print_message info "${MUTED}${APP} ${NC}${specific_version}${MUTED} is already installed${NC}"
+    exit 0
+  fi
+
+  print_message info "${MUTED}Installed version:${NC} $installed_version"
+}
+
+install_from_binary() {
+  if [[ ! -f "$binary_path" ]]; then
+    print_message error "Error: binary not found at $binary_path"
+    exit 1
+  fi
+
+  local output_name="$APP"
+  if [[ "$binary_path" == *.exe ]]; then
+    output_name="${APP}.exe"
+  fi
+
+  print_message info "\n${MUTED}Installing ${NC}${APP}${MUTED} from local binary:${NC} $binary_path"
+  cp "$binary_path" "${INSTALL_DIR}/${output_name}"
+  chmod 755 "${INSTALL_DIR}/${output_name}" || true
+}
+
+extract_archive() {
+  local archive="$1"
+  local output_dir="$2"
+
+  if [[ "$os" == "linux" ]]; then
+    if ! command -v tar >/dev/null 2>&1; then
+      print_message error "Error: tar is required but not installed."
+      exit 1
+    fi
+    tar -xzf "$archive" -C "$output_dir"
+    return
+  fi
+
+  if ! command -v unzip >/dev/null 2>&1; then
+    print_message error "Error: unzip is required but not installed."
+    exit 1
+  fi
+  unzip -q "$archive" -d "$output_dir"
+}
+
+locate_extracted_binary() {
+  local output_dir="$1"
+  local candidate
+
+  for candidate in \
+    "$output_dir/$APP" \
+    "$output_dir/${APP}.exe" \
+    "$output_dir/bin/$APP" \
+    "$output_dir/bin/${APP}.exe"; do
+    if [[ -f "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  candidate=$(find "$output_dir" -maxdepth 4 -type f \( -name "$APP" -o -name "${APP}.exe" \) | head -n 1 || true)
+  if [[ -n "$candidate" ]]; then
+    echo "$candidate"
+    return 0
+  fi
+
+  return 1
+}
+
+download_and_install() {
+  print_message info "\n${MUTED}Installing ${NC}${APP} ${MUTED}version:${NC} ${specific_version}"
+
+  local tmp_dir
+  tmp_dir="${TMPDIR:-/tmp}/${APP}_install_$$"
+  mkdir -p "$tmp_dir"
+  trap 'rm -rf "$tmp_dir"' RETURN
+
+  local archive_path="$tmp_dir/$filename"
+  local downloaded=false
+  local selected_url=""
+
+  for url in "${url_candidates[@]}"; do
+    if download_file "$url" "$archive_path"; then
+      if [[ -s "$archive_path" ]]; then
+        downloaded=true
+        selected_url="$url"
+        break
+      fi
+    fi
+  done
+
+  if [[ "$downloaded" != "true" ]]; then
+    print_message error "Error: failed to download ${filename}"
+    print_message info "${MUTED}Releases:${NC} https://github.com/${REPO_OWNER}/${REPO_NAME}/releases"
+    exit 1
+  fi
+
+  print_message info "${MUTED}Downloaded from:${NC} $selected_url"
+
+  extract_archive "$archive_path" "$tmp_dir"
+
+  local extracted_binary
+  if ! extracted_binary=$(locate_extracted_binary "$tmp_dir"); then
+    print_message error "Error: ${APP} binary not found in archive ${filename}"
+    exit 1
+  fi
+
+  local output_name="$APP"
+  if [[ "$extracted_binary" == *.exe ]]; then
+    output_name="${APP}.exe"
+  fi
+
+  mv "$extracted_binary" "${INSTALL_DIR}/${output_name}"
+  chmod 755 "${INSTALL_DIR}/${output_name}" || true
+}
+
+add_to_path() {
+  local config_file="$1"
+  local command_line="$2"
+
+  if grep -Fxq "$command_line" "$config_file"; then
+    print_message info "${MUTED}PATH entry already present in ${NC}${config_file}"
+    return
+  fi
+
+  if [[ -w "$config_file" ]]; then
+    {
+      echo ""
+      echo "# ${APP}"
+      echo "$command_line"
+    } >> "$config_file"
+    print_message info "${MUTED}Added ${NC}${APP}${MUTED} to PATH in ${NC}${config_file}"
+    return
+  fi
+
+  print_message info "${ORANGE}Could not edit ${config_file}. Add this manually:${NC}"
+  print_message info "  $command_line"
+}
+
+configure_path() {
+  if [[ "$no_modify_path" == "true" ]]; then
+    return
+  fi
+
+  local xdg_config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
+  local current_shell
+  current_shell=$(basename "${SHELL:-sh}")
+  local config_files=""
+
+  case "$current_shell" in
+    fish)
+      config_files="$HOME/.config/fish/config.fish"
+      ;;
+    zsh)
+      config_files="${ZDOTDIR:-$HOME}/.zshrc ${ZDOTDIR:-$HOME}/.zshenv ${xdg_config_home}/zsh/.zshrc ${xdg_config_home}/zsh/.zshenv"
+      ;;
+    bash)
+      config_files="$HOME/.bashrc $HOME/.bash_profile $HOME/.profile ${xdg_config_home}/bash/.bashrc ${xdg_config_home}/bash/.bash_profile"
+      ;;
+    ash|sh)
+      config_files="$HOME/.ashrc $HOME/.profile /etc/profile"
+      ;;
+    *)
+      config_files="$HOME/.bashrc $HOME/.bash_profile ${xdg_config_home}/bash/.bashrc ${xdg_config_home}/bash/.bash_profile"
+      ;;
+  esac
+
+  local config_file=""
+  local file
+  for file in $config_files; do
+    if [[ -f "$file" ]]; then
+      config_file="$file"
+      break
+    fi
+  done
+
+  if [[ -z "$config_file" ]]; then
+    print_message info "${ORANGE}No shell config file found. Add this manually:${NC}"
+    print_message info "  export PATH=$INSTALL_DIR:\$PATH"
+    return
+  fi
+
+  if [[ ":$PATH:" == *":$INSTALL_DIR:"* ]]; then
+    return
+  fi
+
+  case "$current_shell" in
+    fish)
+      add_to_path "$config_file" "fish_add_path $INSTALL_DIR"
+      ;;
+    *)
+      add_to_path "$config_file" "export PATH=$INSTALL_DIR:\$PATH"
+      ;;
+  esac
+}
+
+if [[ -n "$binary_path" ]]; then
+  specific_version="local"
+  install_from_binary
+else
+  detect_platform
+  detect_target
+  build_release_urls
+  check_version
+  download_and_install
+fi
+
+configure_path
+
+if [[ -n "${GITHUB_ACTIONS-}" && "$GITHUB_ACTIONS" == "true" ]]; then
+  echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+  print_message info "Added $INSTALL_DIR to \$GITHUB_PATH"
+fi
+
+echo ""
+echo -e "${MUTED}Install completed.${NC}"
+echo -e "Run: ${NC}${APP}"
+echo -e "${MUTED}Releases: https://github.com/${REPO_OWNER}/${REPO_NAME}/releases${NC}"
+echo ""

@@ -7,6 +7,7 @@ import {
   getMarkets,
   getMarketDetails,
   getPriceHistory,
+  getMarketsByCategory,
 } from "../api/polymarket";
 import { Timeframe } from "../types/market";
 import {
@@ -15,12 +16,14 @@ import {
   setError,
   appState,
   getSelectedMarket,
+  selectedCategory,
 } from "../state";
 import { Market, PriceHistory } from "../types/market";
 import { evaluateAlerts } from "./useAlerts";
 import { MarketScanner } from "../automation/scanner";
 import { loadRules, checkAllRules, executeAction } from "../automation/rules";
 import { setAutomationRules, setScannerAlerts } from "../state";
+import { initializeWebSocket, subscribe } from "../api/websocket";
 
 const marketScanner = new MarketScanner();
 const priceMap = new Map<string, number>();
@@ -70,26 +73,53 @@ async function runAutomationCycle(markets: Market[]): Promise<void> {
 }
 
 /**
- * Hook to fetch all markets on startup
+ * Subscribe to token IDs of all visible markets via CLOB WS
+ */
+function subscribeToMarketTokens(markets: Market[]): void {
+  const tokenIds: string[] = [];
+  for (const m of markets) {
+    for (const o of m.outcomes) {
+      if (o.id && !o.id.startsWith("outcome_")) tokenIds.push(o.id);
+    }
+  }
+  if (tokenIds.length > 0) subscribe(tokenIds);
+}
+
+/**
+ * Hook to fetch all markets on startup (initial load only — category switching
+ * is owned by MarketList component to avoid double-fetches).
  */
 export function useMarketsFetch(): void {
-  createEffect(async () => {
+  // Initialize WS singleton on first mount
+  initializeWebSocket();
+
+  // One-shot initial load — does NOT react to selectedCategory signal.
+  // MarketList handles all category-switching fetches.
+  createEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
 
-    try {
-      const markets = await getMarkets(50);
-      setMarkets(markets);
-      evaluateAlerts(markets);
-      void runAutomationCycle(markets);
-      setError(null);
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Failed to fetch markets";
-      setError(errorMsg);
-      console.error("Error fetching markets:", error);
-    } finally {
-      setLoading(false);
-    }
+    void (async () => {
+      try {
+        const markets = await getMarkets(50);
+        if (cancelled) return;
+        setMarkets(markets);
+        evaluateAlerts(markets);
+        void runAutomationCycle(markets);
+        subscribeToMarketTokens(markets);
+        setError(null);
+      } catch (error) {
+        if (cancelled) return;
+        const errorMsg = error instanceof Error ? error.message : "Failed to fetch markets";
+        setError(errorMsg);
+        console.error("Error fetching markets:", error);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
   });
 }
 
@@ -105,12 +135,16 @@ export function useSelectedMarketDetails(): Market | undefined {
     try {
       const details = await getMarketDetails(appState.selectedMarketId);
       if (details) {
-        // Update market in list with new details
         setMarkets([
           ...appState.markets.map((m) =>
             m.id === details.id ? details : m
           ),
         ]);
+        // Subscribe to this market's tokens for real-time updates
+        const tokenIds = details.outcomes
+          .map((o) => o.id)
+          .filter((id) => id && !id.startsWith("outcome_"));
+        if (tokenIds.length > 0) subscribe(tokenIds);
       }
     } catch (error) {
       console.error("Error fetching market details:", error);
@@ -145,10 +179,18 @@ export function useRefreshInterval(intervalMs: number = 30000): void {
   createEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const markets = await getMarkets(50);
+        // Refresh the currently visible markets.
+        // selectedCategory() is read here intentionally to refresh the right set,
+        // but only on a timer — not reactive — so no double-fetch with MarketList.
+        const category = selectedCategory();
+        const markets = category && category !== "All" && category !== "trending" && category !== "all"
+          ? await getMarketsByCategory(category, 50)
+          : await getMarkets(50);
+
         setMarkets(markets);
         evaluateAlerts(markets);
         void runAutomationCycle(markets);
+        subscribeToMarketTokens(markets);
       } catch (error) {
         console.error("Error refreshing markets:", error);
       }
@@ -164,10 +206,15 @@ export function useRefreshInterval(intervalMs: number = 30000): void {
 export async function manualRefresh(): Promise<void> {
   setLoading(true);
   try {
-    const markets = await getMarkets(50);
+    const category = selectedCategory();
+    const markets = category && category !== "All" && category !== "trending" && category !== "all"
+      ? await getMarketsByCategory(category, 50)
+      : await getMarkets(50);
+
     setMarkets(markets);
     evaluateAlerts(markets);
     void runAutomationCycle(markets);
+    subscribeToMarketTokens(markets);
     setError(null);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "Refresh failed";

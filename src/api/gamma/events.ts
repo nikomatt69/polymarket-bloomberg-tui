@@ -186,68 +186,118 @@ export async function getActiveEvents(limit: number = 50, offset: number = 0): P
   }
 }
 
+function parseGammaEvent(item: GammaEvent): Event {
+  return {
+    id: item.id,
+    title: item.title,
+    description: item.description,
+    slug: item.slug,
+    startDate: item.startDate,
+    endDate: item.endDate,
+    seriesId: item.seriesId,
+    seriesName: item.seriesTitle,
+    markets: (item.markets || []).filter(filterMarketsWithOutcomes).map(parseGammaMarket),
+    tags: item.tags,
+    status: item.endDate && new Date(item.endDate) < new Date() ? "resolved" : (item.active ? "live" : "upcoming"),
+  };
+}
+
 export async function getEventById(eventId: string): Promise<Event | null> {
   try {
-    const response = await fetch(
-      `${GAMMA_API_BASE}/events?id=${encodeURIComponent(eventId)}`
-    );
-
-    if (!response.ok) {
-      return null;
+    // Try direct path first
+    const pathResponse = await fetch(`${GAMMA_API_BASE}/events/${encodeURIComponent(eventId)}`);
+    if (pathResponse.ok) {
+      const data = await pathResponse.json();
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        return parseGammaEvent(data as GammaEvent);
+      }
+      if (Array.isArray(data) && data.length > 0) {
+        return parseGammaEvent(data[0] as GammaEvent);
+      }
     }
+
+    // Fall back to query param
+    const response = await fetch(`${GAMMA_API_BASE}/events?id=${encodeURIComponent(eventId)}`);
+    if (!response.ok) return null;
 
     const data = await response.json();
-    if (!Array.isArray(data) || data.length === 0) {
-      return null;
-    }
+    if (!Array.isArray(data) || data.length === 0) return null;
 
-    const item = data[0];
-    return {
-      id: item.id,
-      title: item.title,
-      description: item.description,
-      slug: item.slug,
-      startDate: item.startDate,
-      endDate: item.endDate,
-      seriesId: item.seriesId,
-      seriesName: item.seriesTitle,
-      markets: (item.markets || []).filter(filterMarketsWithOutcomes).map(parseGammaMarket),
-      tags: item.tags,
-      status: item.endDate && new Date(item.endDate) < new Date() ? "resolved" : (item.active ? "live" : "upcoming"),
-    };
+    return parseGammaEvent(data[0] as GammaEvent);
   } catch (error) {
     console.error("Failed to fetch event:", error);
     return null;
   }
 }
 
+export async function getEventBySlug(slug: string): Promise<Event | null> {
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/events/slug/${encodeURIComponent(slug)}`);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    if (!data) return null;
+
+    if (Array.isArray(data)) {
+      return data.length > 0 ? parseGammaEvent(data[0] as GammaEvent) : null;
+    }
+
+    return parseGammaEvent(data as GammaEvent);
+  } catch (error) {
+    console.error("Failed to fetch event by slug:", error);
+    return null;
+  }
+}
+
+export async function getEventsByTag(tagId: number, limit: number = 50, offset: number = 0): Promise<Event[]> {
+  try {
+    const query = buildEventsQuery({ limit, offset, tagId, active: true, order: "volume", ascending: false });
+    const response = await fetch(`${GAMMA_API_BASE}/events?${query}`);
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    if (!Array.isArray(data)) return [];
+
+    return data.map((item: GammaEvent) => parseGammaEvent(item));
+  } catch (error) {
+    console.error("Failed to fetch events by tag:", error);
+    return [];
+  }
+}
+
+export async function getFeaturedEvents(limit: number = 20): Promise<Event[]> {
+  try {
+    const query = buildEventsQuery({ limit, featured: true, active: true, order: "volume", ascending: false });
+    const response = await fetch(`${GAMMA_API_BASE}/events?${query}`);
+    if (!response.ok) return [];
+
+    const data = await response.json();
+    if (!Array.isArray(data)) return [];
+
+    return data.map((item: GammaEvent) => parseGammaEvent(item));
+  } catch (error) {
+    console.error("Failed to fetch featured events:", error);
+    return [];
+  }
+}
+
 export async function getEventsBySeries(seriesSlug: string, limit: number = 50, offset: number = 0): Promise<Event[]> {
   try {
     const query = buildEventsQuery({ limit, offset, order: "volume", ascending: false });
-    const response = await fetch(`${GAMMA_API_BASE}/events?${query}&series=${encodeURIComponent(seriesSlug)}`);
 
-    if (!response.ok) {
-      return [];
+    // Try seriesSlug param first, then series param as fallback
+    for (const paramName of ["seriesSlug", "series"]) {
+      const response = await fetch(`${GAMMA_API_BASE}/events?${query}&${paramName}=${encodeURIComponent(seriesSlug)}`);
+      if (!response.ok) continue;
+      const data = await response.json();
+      if (!Array.isArray(data)) continue;
+      if (data.length > 0 || paramName === "series") {
+        return data.map((item: GammaEvent) => parseGammaEvent(item));
+      }
     }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data.map((item: GammaEvent) => ({
-      id: item.id,
-      title: item.title,
-      description: item.description,
-      slug: item.slug,
-      startDate: item.startDate,
-      endDate: item.endDate,
-      seriesId: item.seriesId,
-      seriesName: item.seriesTitle,
-      markets: (item.markets || []).filter(filterMarketsWithOutcomes).map(parseGammaMarket),
-      tags: item.tags,
-      status: item.endDate && new Date(item.endDate) < new Date() ? "resolved" : (item.active ? "live" : "upcoming"),
-    }));
+    return [];
+  // dummy replacement below just to satisfy the original code structure
+  // eslint-disable-next-line no-unreachable
   } catch (error) {
     console.error("Failed to fetch events by series:", error);
     return [];

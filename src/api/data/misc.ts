@@ -4,6 +4,8 @@
  */
 
 const DATA_API_BASE = "https://data-api.polymarket.com";
+const DEFAULT_TIMEOUT_MS = 15_000;
+const MAX_PAGE_LIMIT = 500;
 
 function parseNumeric(value: unknown, fallback: number = 0): number {
   if (typeof value === "number") {
@@ -14,6 +16,51 @@ function parseNumeric(value: unknown, fallback: number = 0): number {
     return Number.isFinite(parsed) ? parsed : fallback;
   }
   return fallback;
+}
+
+interface DataApiArrayPayload<T> {
+  data?: T[];
+  entries?: T[];
+  results?: T[];
+}
+
+async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${DATA_API_BASE}${path}`, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Data API error: ${response.status}`);
+    }
+
+    return (await response.json()) as T;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function extractArrayRows<T>(payload: unknown): T[] {
+  if (Array.isArray(payload)) {
+    return payload as T[];
+  }
+
+  if (payload && typeof payload === "object") {
+    const result = payload as DataApiArrayPayload<T>;
+    if (Array.isArray(result.entries)) return result.entries;
+    if (Array.isArray(result.results)) return result.results;
+    if (Array.isArray(result.data)) return result.data;
+  }
+
+  return [];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -37,23 +84,47 @@ export interface ClosedPosition {
 export async function fetchClosedPositions(
   address: string,
   limit: number = 100,
-  offset: number = 0
+  offset: number = 0,
+  maxPages: number = 10,
 ): Promise<ClosedPosition[]> {
   try {
-    const response = await fetch(
-      `${DATA_API_BASE}/positions/closed?user=${address}&limit=${limit}&offset=${offset}`
-    );
+    const requestedTotal = Math.max(1, limit);
+    const pageLimit = Math.min(MAX_PAGE_LIMIT, requestedTotal);
+    const rows: ClosedPosition[] = [];
+    const seen = new Set<string>();
+    let pageOffset = Math.max(0, offset);
 
-    if (!response.ok) {
-      return [];
+    for (let page = 0; page < Math.max(1, maxPages) && rows.length < requestedTotal; page += 1) {
+      const requestLimit = Math.min(pageLimit, requestedTotal - rows.length);
+      const params = new URLSearchParams({
+        user: address,
+        limit: String(requestLimit),
+        offset: String(pageOffset),
+      });
+
+      const payload = await fetchJson<unknown>(`/positions/closed?${params.toString()}`);
+      const pageRows = extractArrayRows<ClosedPosition>(payload);
+      if (pageRows.length === 0) break;
+
+      let added = 0;
+      for (const row of pageRows) {
+        const key = `${row.asset}-${row.conditionId}-${row.closedAt}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          rows.push(row);
+          added += 1;
+        }
+        if (rows.length >= requestedTotal) break;
+      }
+
+      if (added === 0 || pageRows.length < requestLimit) {
+        break;
+      }
+
+      pageOffset += pageRows.length;
     }
 
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data as ClosedPosition[];
+    return rows.slice(0, requestedTotal);
   } catch (error) {
     console.error("Failed to fetch closed positions:", error);
     return [];
@@ -82,7 +153,8 @@ export interface PositionValuesResponse {
 
 export async function fetchPositionValues(address: string): Promise<PositionValuesResponse | null> {
   try {
-    const response = await fetch(`${DATA_API_BASE}/positions/value?user=${address}`);
+    const params = new URLSearchParams({ user: address });
+    const response = await fetch(`${DATA_API_BASE}/positions/value?${params.toString()}`);
 
     if (!response.ok) {
       return null;
@@ -121,16 +193,54 @@ export async function fetchTraderLeaderboard(
   timeframe: "daily" | "weekly" | "monthly" | "allTime" = "weekly"
 ): Promise<TraderLeaderboardResponse | null> {
   try {
-    const response = await fetch(
-      `${DATA_API_BASE}/trader-leaderboard?limit=${limit}&timeframe=${timeframe}`
-    );
+    const requestedTotal = Math.max(1, limit);
+    const pageLimit = Math.min(MAX_PAGE_LIMIT, requestedTotal);
+    const entries: TraderLeaderboardEntry[] = [];
+    const seen = new Set<string>();
+    let offset = 0;
+    let resolvedTimeframe: string = timeframe;
 
-    if (!response.ok) {
-      return null;
+    for (let page = 0; page < 10 && entries.length < requestedTotal; page += 1) {
+      const requestLimit = Math.min(pageLimit, requestedTotal - entries.length);
+      const params = new URLSearchParams({
+        limit: String(requestLimit),
+        timeframe,
+        offset: String(offset),
+      });
+
+      const payload = await fetchJson<unknown>(`/trader-leaderboard?${params.toString()}`);
+      if (payload && typeof payload === "object") {
+        const candidate = (payload as { timeframe?: unknown }).timeframe;
+        if (typeof candidate === "string" && candidate.length > 0) {
+          resolvedTimeframe = candidate;
+        }
+      }
+
+      const pageRows = extractArrayRows<TraderLeaderboardEntry>(payload);
+      if (pageRows.length === 0) break;
+
+      let added = 0;
+      for (const row of pageRows) {
+        const key = row.address || `${row.rank}-${row.volume}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          entries.push(row);
+          added += 1;
+        }
+        if (entries.length >= requestedTotal) break;
+      }
+
+      if (added === 0 || pageRows.length < requestLimit) {
+        break;
+      }
+
+      offset += pageRows.length;
     }
 
-    const data = (await response.json()) as TraderLeaderboardResponse;
-    return data;
+    return {
+      timeframe: resolvedTimeframe,
+      entries: entries.slice(0, requestedTotal),
+    };
   } catch (error) {
     console.error("Failed to fetch trader leaderboard:", error);
     return null;
@@ -157,7 +267,7 @@ export interface TraderProfile {
 
 export async function fetchTraderProfile(address: string): Promise<TraderProfile | null> {
   try {
-    const response = await fetch(`${DATA_API_BASE}/profiles/${address}`);
+    const response = await fetch(`${DATA_API_BASE}/profiles/${encodeURIComponent(address)}`);
 
     if (!response.ok) {
       return null;
@@ -252,7 +362,8 @@ export interface PortfolioAnalytics {
 
 export async function fetchPortfolioAnalytics(address: string): Promise<PortfolioAnalytics | null> {
   try {
-    const response = await fetch(`${DATA_API_BASE}/portfolio/analytics?user=${address}`);
+    const params = new URLSearchParams({ user: address });
+    const response = await fetch(`${DATA_API_BASE}/portfolio/analytics?${params.toString()}`);
 
     if (!response.ok) {
       return null;
@@ -286,27 +397,47 @@ export async function fetchNotifications(
   unreadOnly: boolean = false
 ): Promise<Notification[]> {
   try {
-    const params = new URLSearchParams({
-      user: address,
-      limit: String(limit),
-    });
+    const requestedTotal = Math.max(1, limit);
+    const pageLimit = Math.min(MAX_PAGE_LIMIT, requestedTotal);
+    const rows: Notification[] = [];
+    const seen = new Set<string>();
+    let offset = 0;
 
-    if (unreadOnly) {
-      params.set("unread", "true");
+    for (let page = 0; page < 10 && rows.length < requestedTotal; page += 1) {
+      const requestLimit = Math.min(pageLimit, requestedTotal - rows.length);
+      const params = new URLSearchParams({
+        user: address,
+        limit: String(requestLimit),
+        offset: String(offset),
+      });
+
+      if (unreadOnly) {
+        params.set("unread", "true");
+      }
+
+      const payload = await fetchJson<unknown>(`/notifications?${params.toString()}`);
+      const pageRows = extractArrayRows<Notification>(payload);
+      if (pageRows.length === 0) break;
+
+      let added = 0;
+      for (const row of pageRows) {
+        const key = row.id || `${row.type}-${row.createdAt}-${row.title}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          rows.push(row);
+          added += 1;
+        }
+        if (rows.length >= requestedTotal) break;
+      }
+
+      if (added === 0 || pageRows.length < requestLimit) {
+        break;
+      }
+
+      offset += pageRows.length;
     }
 
-    const response = await fetch(`${DATA_API_BASE}/notifications?${params}`);
-
-    if (!response.ok) {
-      return [];
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data as Notification[];
+    return rows.slice(0, requestedTotal);
   } catch (error) {
     console.error("Failed to fetch notifications:", error);
     return [];
@@ -357,7 +488,8 @@ export interface ReferralStats {
 
 export async function fetchReferralStats(address: string): Promise<ReferralStats | null> {
   try {
-    const response = await fetch(`${DATA_API_BASE}/referral/stats?referrer=${address}`);
+    const params = new URLSearchParams({ referrer: address });
+    const response = await fetch(`${DATA_API_BASE}/referral/stats?${params.toString()}`);
 
     if (!response.ok) {
       return null;
@@ -419,7 +551,7 @@ export interface UserSettings {
 
 export async function fetchUserSettings(address: string): Promise<UserSettings | null> {
   try {
-    const response = await fetch(`${DATA_API_BASE}/users/${address}/settings`);
+    const response = await fetch(`${DATA_API_BASE}/users/${encodeURIComponent(address)}/settings`);
 
     if (!response.ok) {
       return null;
@@ -435,7 +567,7 @@ export async function fetchUserSettings(address: string): Promise<UserSettings |
 
 export async function updateUserSettings(address: string, settings: Partial<UserSettings>): Promise<boolean> {
   try {
-    const response = await fetch(`${DATA_API_BASE}/users/${address}/settings`, {
+    const response = await fetch(`${DATA_API_BASE}/users/${encodeURIComponent(address)}/settings`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
@@ -460,7 +592,8 @@ export interface WatchlistItem {
 
 export async function fetchWatchlist(address: string): Promise<WatchlistItem[]> {
   try {
-    const response = await fetch(`${DATA_API_BASE}/watchlist?user=${address}`);
+    const params = new URLSearchParams({ user: address });
+    const response = await fetch(`${DATA_API_BASE}/watchlist?${params.toString()}`);
 
     if (!response.ok) {
       return [];
@@ -496,7 +629,8 @@ export async function addToWatchlist(address: string, marketId: string): Promise
 
 export async function removeFromWatchlist(address: string, marketId: string): Promise<boolean> {
   try {
-    const response = await fetch(`${DATA_API_BASE}/watchlist/${marketId}?user=${address}`, {
+    const params = new URLSearchParams({ user: address });
+    const response = await fetch(`${DATA_API_BASE}/watchlist/${encodeURIComponent(marketId)}?${params.toString()}`, {
       method: "DELETE",
     });
 
@@ -524,7 +658,8 @@ export interface PriceAlert {
 
 export async function fetchPriceAlerts(address: string): Promise<PriceAlert[]> {
   try {
-    const response = await fetch(`${DATA_API_BASE}/alerts?user=${address}`);
+    const params = new URLSearchParams({ user: address });
+    const response = await fetch(`${DATA_API_BASE}/alerts?${params.toString()}`);
 
     if (!response.ok) {
       return [];
@@ -598,18 +733,43 @@ export interface MarketComment {
 
 export async function fetchMarketComments(marketId: string, limit: number = 50): Promise<MarketComment[]> {
   try {
-    const response = await fetch(`${DATA_API_BASE}/comments?market=${marketId}&limit=${limit}`);
+    const requestedTotal = Math.max(1, limit);
+    const pageLimit = Math.min(MAX_PAGE_LIMIT, requestedTotal);
+    const rows: MarketComment[] = [];
+    const seen = new Set<string>();
+    let offset = 0;
 
-    if (!response.ok) {
-      return [];
+    for (let page = 0; page < 10 && rows.length < requestedTotal; page += 1) {
+      const requestLimit = Math.min(pageLimit, requestedTotal - rows.length);
+      const params = new URLSearchParams({
+        market: marketId,
+        limit: String(requestLimit),
+        offset: String(offset),
+      });
+
+      const payload = await fetchJson<unknown>(`/comments?${params.toString()}`);
+      const pageRows = extractArrayRows<MarketComment>(payload);
+      if (pageRows.length === 0) break;
+
+      let added = 0;
+      for (const row of pageRows) {
+        const key = row.id || `${row.user}-${row.createdAt}-${row.content}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          rows.push(row);
+          added += 1;
+        }
+        if (rows.length >= requestedTotal) break;
+      }
+
+      if (added === 0 || pageRows.length < requestLimit) {
+        break;
+      }
+
+      offset += pageRows.length;
     }
 
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data as MarketComment[];
+    return rows.slice(0, requestedTotal);
   } catch (error) {
     console.error("Failed to fetch market comments:", error);
     return [];

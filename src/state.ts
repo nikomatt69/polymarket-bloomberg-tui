@@ -49,6 +49,32 @@ export function setConnectionStatus(status: ConnectionStatus): void {
 
 export { wsConnectionStatus };
 
+// ─── Toast Notifications ───────────────────────────────────────────────────────
+
+export interface Toast {
+  id: string;
+  message: string;
+  type: "error" | "success" | "warning" | "info";
+  timestamp: number;
+}
+
+const [toastQueue, setToastQueue] = createSignal<Toast[]>([]);
+
+export function showToast(message: string, type: Toast["type"] = "info"): void {
+  const toast: Toast = { id: crypto.randomUUID(), message, type, timestamp: Date.now() };
+  setToastQueue([...toastQueue(), toast]);
+  // Auto-remove after 5 seconds
+  setTimeout(() => {
+    setToastQueue((prev) => prev.filter((t) => t.id !== toast.id));
+  }, 5000);
+}
+
+export function dismissToast(id: string): void {
+  setToastQueue((prev) => prev.filter((t) => t.id !== id));
+}
+
+export { toastQueue };
+
 export interface MarketUpdate {
   tokenId: string;
   marketId?: string;
@@ -69,7 +95,7 @@ export function addMarketUpdate(update: MarketUpdate): void {
   }
 }
 
-function getLastPrice(tokenId: string): number | undefined {
+export function getLastPrice(tokenId: string): number | undefined {
   return lastMarketUpdates()[tokenId]?.price;
 }
 
@@ -1269,6 +1295,38 @@ export function clearEnterpriseToolUiState(): void {
 
 // ─── Real-time WebSocket status ───────────────────────────────────────────────
 export const [realtimeConnected, setRealtimeConnected] = createSignal(false);
+export const [rtdsConnected, setRtdsConnected] = createSignal(false);
+export const [sportsWsConnected, setSportsWsConnected] = createSignal(false);
+export const [userWsConnected, setUserWsConnected] = createSignal(false);
+
+// Live sports scores from Sports WS: gameId → score data
+export const [sportsScores, setSportsScores] = createSignal<Record<string, {
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number;
+  awayScore: number;
+  period: string;
+  status: string;
+}>>({});
+
+export function setSportsScore(gameId: string, score: {
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number;
+  awayScore: number;
+  period: string;
+  status: string;
+}): void {
+  setSportsScores((prev) => ({ ...prev, [gameId]: score }));
+}
+
+// Category filter for market list
+export const [selectedCategory, setSelectedCategory] = createSignal<string>("All");
+
+// Live tags fetched from /tags endpoint
+export interface LiveTag { id: number; slug: string; label: string; count: number }
+export const [liveTags, setLiveTags] = createSignal<LiveTag[]>([]);
+export const [categoriesLoaded, setCategoriesLoaded] = createSignal(false);
 export const [streamingTools, setStreamingTools] = createSignal<StreamingTool[]>([]);
 export const [inputHistory, setInputHistory] = createSignal<string[]>([]);
 export const [inputHistoryIdx, setInputHistoryIdx] = createSignal(-1);

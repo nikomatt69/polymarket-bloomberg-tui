@@ -12,6 +12,10 @@ export {
   getMarketDepth,
   getCurrentPrice,
   getMidpointPrice,
+  getBatchPrices,
+  getBatchMidpoints,
+  getLastTradePrice,
+  getBatchLastTradePrices,
 } from "./prices";
 
 export type {
@@ -23,10 +27,12 @@ export type {
 // Trading
 export {
   placeOrder,
+  placeBatchOrders,
   cancelOrder,
   cancelAllOrders,
   cancelOrdersBulk,
   cancelOrdersForAssetIds,
+  getOrderScoringStatus,
   fetchOpenOrders,
   fetchTradeHistory,
 } from "./trading";
@@ -39,7 +45,8 @@ export {
   getTickSize,
   getMultipleOrderBooks,
   getOrderDetails,
-  cancelOrderByHash,
+  getServerTime,
+  isMarketHealthy,
   getHealthStatus,
   type SpreadResponse,
   type FeeRatesResponse,

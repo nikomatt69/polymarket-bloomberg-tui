@@ -181,6 +181,34 @@ interface SearchResponse {
   tags?: GammaTag[];
 }
 
+export async function publicSearch(
+  query: string,
+  filters: SearchFilters = {}
+): Promise<SearchResult> {
+  try {
+    const params = buildSearchQuery(filters);
+    params.set("q", query);
+
+    const response = await fetch(`${GAMMA_API_BASE}/public-search?${params.toString()}`);
+
+    if (!response.ok) {
+      throw new Error(`Public search API error: ${response.status}`);
+    }
+
+    const data = (await response.json()) as SearchResponse;
+
+    return {
+      events: parseSearchEventsResponse(data.events || []),
+      markets: (data.markets || []).map(parseGammaMarketResponse),
+      profiles: data.profiles || [],
+      tags: parseSearchTagsResponse(data.tags || []),
+    };
+  } catch (error) {
+    console.error("Failed to public search:", error);
+    return { events: [], markets: [], profiles: [], tags: [] };
+  }
+}
+
 export async function search(
   query: string,
   filters: SearchFilters = {}
@@ -247,16 +275,35 @@ export async function searchMarketsByQuery(
     params.set("offset", String(offset));
     params.set("markets", "true");
 
-    const response = await fetch(`${GAMMA_API_BASE}/search?${params.toString()}`);
-
-    if (!response.ok) {
-      return [];
+    // Try /public-search first, fall back to /search
+    for (const endpoint of ["/public-search", "/search"]) {
+      const response = await fetch(`${GAMMA_API_BASE}${endpoint}?${params.toString()}`);
+      if (!response.ok) continue;
+      const data = (await response.json()) as SearchResponse;
+      const markets = (data.markets || []).map(parseGammaMarketResponse);
+      if (markets.length > 0 || endpoint === "/search") return markets;
     }
-
-    const data = (await response.json()) as SearchResponse;
-    return (data.markets || []).map(parseGammaMarketResponse);
+    return [];
   } catch (error) {
     console.error("Failed to search markets:", error);
+    return [];
+  }
+}
+
+export async function searchProfiles(query: string, limit: number = 20): Promise<ProfileSearchResult[]> {
+  try {
+    const params = new URLSearchParams();
+    params.set("q", query);
+    params.set("limit", String(limit));
+    params.set("type", "profiles");
+
+    const response = await fetch(`${GAMMA_API_BASE}/public-search?${params.toString()}`);
+    if (!response.ok) return [];
+
+    const data = (await response.json()) as SearchResponse;
+    return data.profiles || [];
+  } catch (error) {
+    console.error("Failed to search profiles:", error);
     return [];
   }
 }

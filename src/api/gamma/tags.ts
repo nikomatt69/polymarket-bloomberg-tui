@@ -31,16 +31,85 @@ interface GammaMarket {
 }
 
 interface GammaTag {
-  id: string;
+  id: number | string;
   slug: string;
-  name: string;
-  category?: string;
+  label: string;
+  forceActive?: boolean;
+  count?: number;
 }
 
-function parseNumeric(value: unknown, fallback: number = 0): number {
-  if (typeof value === "number") {
-    return Number.isFinite(value) ? value : fallback;
+// ── Tag cache (5-min TTL) ──────────────────────────────────────────────────
+
+interface CachedTag {
+  id: number;
+  slug: string;
+  label: string;
+  forceActive: boolean;
+  count: number;
+}
+
+let tagCache: CachedTag[] | null = null;
+let tagCacheTtl = 0;
+const TAG_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function loadTags(): Promise<CachedTag[]> {
+  const now = Date.now();
+  if (tagCache && now < tagCacheTtl) return tagCache;
+
+  try {
+    const response = await fetch(`${GAMMA_API_BASE}/tags?limit=200`);
+    if (!response.ok) throw new Error(`Tags API error: ${response.status}`);
+
+    const data = await response.json();
+    if (!Array.isArray(data)) return tagCache ?? [];
+
+    tagCache = (data as GammaTag[]).map((item) => ({
+      id: typeof item.id === "number" ? item.id : parseInt(String(item.id), 10),
+      slug: item.slug,
+      label: item.label,
+      forceActive: item.forceActive ?? false,
+      count: item.count ?? 0,
+    }));
+    tagCacheTtl = now + TAG_CACHE_TTL_MS;
+    return tagCache;
+  } catch (error) {
+    console.error("Failed to load tags:", error);
+    return tagCache ?? [];
   }
+}
+
+/**
+ * Resolve a tag slug to its numeric ID. Returns null if not found.
+ */
+export async function getTagId(slug: string): Promise<number | null> {
+  const tags = await loadTags();
+  const found = tags.find((t) => t.slug.toLowerCase() === slug.toLowerCase());
+  return found ? found.id : null;
+}
+
+/**
+ * Get all tags (cached, with numeric IDs).
+ */
+export async function getTags(): Promise<Tag[]> {
+  const tags = await loadTags();
+  return tags.map((t) => ({
+    id: String(t.id),
+    slug: t.slug,
+    name: t.label,
+  }));
+}
+
+export async function getTagBySlug(tagSlug: string): Promise<Tag | null> {
+  const tags = await loadTags();
+  const found = tags.find((t) => t.slug.toLowerCase() === tagSlug.toLowerCase());
+  if (!found) return null;
+  return { id: String(found.id), slug: found.slug, name: found.label };
+}
+
+// ── Helper parsers (duplicated to avoid circular deps) ───────────────────
+
+function parseNumeric(value: unknown, fallback: number = 0): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : fallback;
   if (typeof value === "string") {
     const parsed = Number.parseFloat(value);
     return Number.isFinite(parsed) ? parsed : fallback;
@@ -60,9 +129,8 @@ function parseJsonArray(raw: string | null): string[] {
 
 function parseGammaMarket(market: GammaMarket): Market {
   const outcomes = parseJsonArray(market.outcomes);
-  const outcomePrices = parseJsonArray(market.outcomePrices).map((value) => parseNumeric(value, 0.5));
+  const outcomePrices = parseJsonArray(market.outcomePrices).map((v) => parseNumeric(v, 0.5));
   const clobTokenIds = parseJsonArray(market.clobTokenIds);
-
   const normalizedOutcomes = outcomes.length > 0 ? outcomes : ["Yes", "No"];
 
   return {
@@ -91,89 +159,45 @@ function parseGammaMarket(market: GammaMarket): Market {
   };
 }
 
-export async function getTags(): Promise<Tag[]> {
-  try {
-    const response = await fetch(`${GAMMA_API_BASE}/tags`);
-
-    if (!response.ok) {
-      throw new Error(`Gamma API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data.map((item: GammaTag) => ({
-      id: item.id,
-      slug: item.slug,
-      name: item.name,
-      category: item.category,
-    }));
-  } catch (error) {
-    console.error("Failed to fetch tags:", error);
-    return [];
-  }
-}
-
-export async function getTagBySlug(tagSlug: string): Promise<Tag | null> {
-  try {
-    const response = await fetch(`${GAMMA_API_BASE}/tags?slug=${encodeURIComponent(tagSlug)}`);
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data) || data.length === 0) {
-      return null;
-    }
-
-    const item = data[0];
-    return {
-      id: item.id,
-      slug: item.slug,
-      name: item.name,
-      category: item.category,
-    };
-  } catch (error) {
-    console.error("Failed to fetch tag:", error);
-    return null;
-  }
-}
-
+/**
+ * Fetch markets by numeric tag_id (preferred) or tag slug.
+ */
 export async function getMarketsByTag(
-  tagSlug: string,
+  tagIdOrSlug: string | number,
   limit: number = 50,
   offset: number = 0
 ): Promise<Market[]> {
   try {
-    // Use tag_id for numeric IDs, tag (slug) for string slugs
     const params = new URLSearchParams();
     params.set("limit", String(limit));
     params.set("offset", String(offset));
     params.set("closed", "false");
+    params.set("active", "true");
     params.set("order", "volumeNum");
     params.set("ascending", "false");
 
-    // Check if it's a numeric ID
-    const tagId = parseInt(tagSlug, 10);
-    if (!Number.isNaN(tagId)) {
-      params.set("tag_id", String(tagId));
+    if (typeof tagIdOrSlug === "number") {
+      params.set("tag_id", String(tagIdOrSlug));
     } else {
-      params.set("tag", tagSlug);
+      const numericId = parseInt(tagIdOrSlug, 10);
+      if (!Number.isNaN(numericId)) {
+        params.set("tag_id", String(numericId));
+      } else {
+        // Try to resolve slug to ID
+        const id = await getTagId(tagIdOrSlug);
+        if (id !== null) {
+          params.set("tag_id", String(id));
+        } else {
+          params.set("tag", tagIdOrSlug);
+        }
+      }
     }
 
     const response = await fetch(`${GAMMA_API_BASE}/markets?${params.toString()}`);
-
-    if (!response.ok) {
-      return [];
-    }
+    if (!response.ok) return [];
 
     const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
+    if (!Array.isArray(data)) return [];
 
     return data
       .map((item) => parseGammaMarket(item as GammaMarket))

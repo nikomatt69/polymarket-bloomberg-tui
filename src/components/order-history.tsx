@@ -14,6 +14,8 @@ import {
   getFilteredOpenOrders,
   getFilteredTradeHistory,
   getOrderCancelReason,
+  getOrderScoring,
+  getOrderScoringUpdatedAt,
 } from "../hooks/useOrders";
 import {
   orderHistorySelectedIdx,
@@ -102,6 +104,35 @@ function statusGuidance(order: PlacedOrder | null): string {
   }
 }
 
+function scoringBadge(orderId: string): string {
+  const scoring = getOrderScoring(orderId);
+  if (scoring === true) return "ON ";
+  if (scoring === false) return "OFF";
+  return "N/A";
+}
+
+function scoringColor(orderId: string, theme: ReturnType<typeof useTheme>["theme"]) {
+  const scoring = getOrderScoring(orderId);
+  if (scoring === true) return theme.success;
+  if (scoring === false) return theme.error;
+  return theme.textMuted;
+}
+
+function scoringDetails(order: PlacedOrder | null): string {
+  if (!order) return "Order scoring unavailable.";
+  const value = getOrderScoring(order.orderId);
+  const updatedAt = getOrderScoringUpdatedAt(order.orderId);
+  const refreshed = updatedAt ? new Date(updatedAt).toLocaleTimeString() : "never";
+
+  if (value === true) {
+    return `Scoring: ON (eligible for rewards). Last check ${refreshed}.`;
+  }
+  if (value === false) {
+    return `Scoring: OFF (not currently scoring). Last check ${refreshed}.`;
+  }
+  return `Scoring: N/A (status unavailable). Last check ${refreshed}.`;
+}
+
 export function OrderHistory() {
   const { theme } = useTheme();
 
@@ -173,6 +204,28 @@ export function OrderHistory() {
     return d ? new Date(d).toLocaleTimeString() : "never";
   };
 
+  const scoringRefreshText = () => {
+    const lastAttempt = ordersState.scoringLastAttemptAt
+      ? new Date(ordersState.scoringLastAttemptAt).toLocaleTimeString()
+      : "never";
+
+    if (ordersState.scoringRefreshInFlight > 0) {
+      return `Scoring refresh in progress... (last attempt ${lastAttempt})`;
+    }
+
+    if (ordersState.scoringLastError) {
+      return `Scoring refresh error: ${ordersState.scoringLastError}`;
+    }
+
+    return `Scoring refresh idle (last check ${lastAttempt})`;
+  };
+
+  const scoringRefreshColor = () => {
+    if (ordersState.scoringRefreshInFlight > 0) return theme.warning;
+    if (ordersState.scoringLastError) return theme.error;
+    return theme.textMuted;
+  };
+
   const handleClose = () => {
     setOrderHistoryOpen(false);
     setOrderHistorySelectedIdx(0);
@@ -195,7 +248,7 @@ export function OrderHistory() {
       <PanelHeader
         title="ORDER HISTORY"
         icon="◈"
-        subtitle={`Updated: ${lastFetchStr()}`}
+        subtitle={`Updated: ${lastFetchStr()} · auto 10s`}
         onClose={handleClose}
       />
 
@@ -204,10 +257,11 @@ export function OrderHistory() {
 
       <box flexDirection="column" flexGrow={1} paddingLeft={2} paddingTop={1}>
         <text
-          content={`Filters  [V] Status:${ordersState.historyStatusFilter}  [B] Side:${ordersState.historySideFilter}  [G] Range:${ordersState.historyWindowFilter}  [M] Market:${ordersState.historySelectedMarketOnly ? "SELECTED" : "ALL"}`}
+          content={`Filters  [V] Status:${ordersState.historyStatusFilter}  [B] Side:${ordersState.historySideFilter}  [G] Range:${ordersState.historyWindowFilter}  [N] Score:${ordersState.historyScoringFilter}  [M] Market:${ordersState.historySelectedMarketOnly ? "SELECTED" : "ALL"}`}
           fg={theme.textMuted}
         />
         <text content="Quick Status  [1]ALL [2]LIVE [3]MATCHED [4]FILLED [5]CANCEL [6]DELAY [7]UNMATCH" fg={theme.textMuted} />
+        <text content={`Scoring  [R] Refresh  ${scoringRefreshText()}`} fg={scoringRefreshColor()} />
         <text
           content={`Search  [/] Edit  [X] Clear  Query: ${ordersState.historySearchQuery || "(none)"}`}
           fg={ordersState.historySearchEditing ? theme.warning : theme.textMuted}
@@ -243,6 +297,7 @@ export function OrderHistory() {
             <text content="SIZE    " fg={theme.textMuted} width={8} />
             <text content="FILLED  " fg={theme.textMuted} width={8} />
             <text content="STATUS    " fg={theme.textMuted} width={10} />
+            <text content="SCORE " fg={theme.textMuted} width={6} />
             <text content="FILL BAR+%      " fg={theme.textMuted} width={16} />
             <text content="MARKET" fg={theme.textMuted} />
           </box>
@@ -279,6 +334,7 @@ export function OrderHistory() {
                       fg={isCancelling() ? theme.warning : statusColor(order.status, theme)}
                       width={10}
                     />
+                    <text content={scoringBadge(order.orderId)} fg={scoringColor(order.orderId, theme)} width={6} />
                     <text content={`${miniBar(orderFillPct(), 8)} ${orderFillPct().toFixed(0)}%`} fg={fillColor()} width={16} />
                     <text content={truncate((order as any).marketTitle ?? order.tokenId, 20)} fg={theme.textMuted} />
                   </box>
@@ -310,6 +366,7 @@ export function OrderHistory() {
             <text content="FILLED  " fg={theme.textMuted} width={8} />
             <text content="TOTAL USDC " fg={theme.textMuted} width={11} />
             <text content="FILL% " fg={theme.textMuted} width={7} />
+            <text content="SCR " fg={theme.textMuted} width={4} />
             <text content="MARKET" fg={theme.textMuted} />
           </box>
 
@@ -340,6 +397,7 @@ export function OrderHistory() {
                     <text content={order.sizeMatched.toFixed(1).padStart(7, " ")} fg={isSelected() && orderHistorySection() === "trades" ? theme.highlightText : theme.success} width={8} />
                     <text content={`$${totalUsdc.toFixed(2)}`.padStart(10, " ")} fg={isSelected() && orderHistorySection() === "trades" ? theme.highlightText : theme.text} width={11} />
                     <text content={`${orderFillPct.toFixed(0)}%`.padStart(6, " ")} fg={fillColor} width={7} />
+                    <text content={scoringBadge(order.orderId)} fg={scoringColor(order.orderId, theme)} width={4} />
                     <text content={truncate((order as any).marketTitle ?? order.tokenId, 18)} fg={theme.textMuted} />
                   </box>
                 );
@@ -361,6 +419,7 @@ export function OrderHistory() {
         <box flexDirection="column" width="100%" backgroundColor={theme.backgroundPanel} paddingLeft={1} paddingTop={0}>
           <text content="─── ORDER DETAILS ───" fg={theme.borderSubtle} />
           <text content={statusGuidance(activeOrder())} fg={theme.textMuted} />
+          <text content={scoringDetails(activeOrder())} fg={theme.textMuted} />
         </box>
         <Show when={activeCancelReason()}>
           <text content={`Last cancel reason: ${activeCancelReason()}`} fg={theme.error} />
@@ -391,9 +450,10 @@ export function OrderHistory() {
             <text content="[Y] Cancel market" fg={theme.error} />
           </box>
           <text content="[TAB] Switch section" fg={theme.textMuted} />
+          <text content="[R] Refresh now" fg={theme.textMuted} />
           <text content="[D] Duplicate to order form" fg={theme.textMuted} />
           <text content="[E] Export CSV" fg={theme.textMuted} />
-          <text content="[B/V/G] Side/Status/Range" fg={theme.textMuted} />
+          <text content="[B/V/G/N] Side/Status/Range/Score" fg={theme.textMuted} />
           <text content="[↑↓/JK] Navigate" fg={theme.textMuted} />
           <box onMouseDown={handleClose}>
             <text content="[ESC] Close" fg={theme.textMuted} />

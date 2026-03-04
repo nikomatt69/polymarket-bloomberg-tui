@@ -25,6 +25,10 @@ function formatBps(value: number | null | undefined): string {
   return `${value.toFixed(0)}bp`;
 }
 
+function resolveLastPrice(outcomePrice: number, book?: OrderBookSummary): number {
+  return book?.lastTradePrice ?? book?.midpoint ?? outcomePrice;
+}
+
 /** Returns a fixed-width probability bar string: filled + unfilled chars. */
 function probBar(price: number, width: number, fillChar = "█", emptyChar = "░"): string {
   const filled = Math.max(0, Math.min(width, Math.round(price * width)));
@@ -101,7 +105,7 @@ export function OutcomeTable(props: OutcomeTableProps) {
 
             {/* ── Columnar table header ──────────────────────────────────── */}
             <text
-              content={`${"Outcome".padEnd(12)} ${"Last".padEnd(8)} ${"Bid".padEnd(8)} ${"Ask".padEnd(8)} ${"Sprd".padEnd(8)} ${"24h%".padEnd(8)} ${"Vol".padEnd(10)}`}
+              content={`${"Outcome".padEnd(12)} ${"Last".padEnd(8)} ${"Bid".padEnd(8)} ${"Ask".padEnd(8)} ${"Mid".padEnd(8)} ${"Sprd".padEnd(8)} ${"24h%".padEnd(8)} ${"Vol".padEnd(10)}`}
               fg={theme.textMuted}
             />
             <text
@@ -112,12 +116,14 @@ export function OutcomeTable(props: OutcomeTableProps) {
             <For each={market().outcomes}>
               {(outcome, idx) => {
                 const book = props.orderBooks?.[outcome.id];
+                const last = resolveLastPrice(outcome.price, book);
                 const dir = outcome.change24h > 0 ? "▲" : outcome.change24h < 0 ? "▼" : "─";
                 const row = [
                   outcome.title.padEnd(12),
-                  padLeft(formatCents(outcome.price), 8),
+                  padLeft(formatCents(last), 8),
                   padLeft(formatCents(book?.bestBid), 8),
                   padLeft(formatCents(book?.bestAsk), 8),
+                  padLeft(formatCents(book?.midpoint), 8),
                   padLeft(formatSpread(book?.spread), 8),
                   `${dir}${padLeft(formatChange(outcome.change24h), 7)}`,
                   padLeft(formatVolume(outcome.volume), 10),
@@ -151,6 +157,7 @@ export function OutcomeTable(props: OutcomeTableProps) {
                 const bidFrac = totalDepth > 0 ? book.bidDepth / totalDepth : 0.5;
                 const bidBar = probBar(bidFrac, 10, "▓", "░");
                 const askBar = probBar(1 - bidFrac, 10, "▓", "░");
+                const imbalancePct = totalDepth > 0 ? (book.bidDepth / totalDepth) * 100 : 50;
 
                 return (
                   <box flexDirection="row" height={1} width="100%">
@@ -168,7 +175,7 @@ export function OutcomeTable(props: OutcomeTableProps) {
                     <text content=" " width={1} />
                     <text content={formatCents(book.bestAsk)} fg={theme.error} width={7} />
                     <text content="  Ask " fg={theme.textMuted} width={6} />
-                    <text content={`Sprd:${formatBps(book.spreadBps)}`} fg={theme.textMuted} />
+                    <text content={`Sprd:${formatBps(book.spreadBps)}  Imb:${imbalancePct.toFixed(0)}%`} fg={theme.textMuted} />
                   </box>
                 );
               }}

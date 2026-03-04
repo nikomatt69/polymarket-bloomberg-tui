@@ -42,7 +42,10 @@ export {
 export {
   getActiveEvents,
   getEventById,
+  getEventBySlug,
   getEventsBySeries,
+  getEventsByTag,
+  getFeaturedEvents,
   type EventFilters,
 } from "./events";
 
@@ -50,12 +53,14 @@ export {
 export {
   getSeries,
   getSeriesById,
+  getSeriesBySlug,
   getMarketsBySeries,
 } from "./series";
 
 // Tags
 export {
   getTags,
+  getTagId,
   getTagBySlug,
   getMarketsByTag,
 } from "./tags";
@@ -64,6 +69,7 @@ export {
 export {
   getCategories,
   getCategoryBySlug,
+  getCategoryTagId,
   POLYMARKET_CATEGORIES,
 } from "./categories";
 
@@ -72,8 +78,10 @@ export type { PolymarketCategoryId } from "./categories";
 // Search
 export {
   search,
+  publicSearch,
   searchEvents,
   searchMarketsByQuery,
+  searchProfiles,
   searchTags,
   type SearchFilters,
   type SearchResult,
@@ -89,6 +97,8 @@ export {
   getSportsMetadata,
   getTeamsByLeague,
   searchTeams,
+  getSportById,
+  getSportLeagues,
   type SportsTeam,
   type SportsMarketType,
   type SportsMetadata,

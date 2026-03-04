@@ -7,6 +7,9 @@
  *
  * The displayed list is always the filtered view from getFilteredMarkets(),
  * which applies search-query and watchlist filters on top of the loaded set.
+ *
+ * Live WS price updates (from addMarketUpdate) are overlaid on each row so
+ * probabilities reflect real-time data without a full market refresh.
  */
 
 import { For, Show, createMemo, createSignal, createEffect, on } from "solid-js";
@@ -19,6 +22,12 @@ import {
   appendMarkets,
   marketListCategoryId,
   setMarketListCategoryId,
+  wsConnectionStatus,
+  rtdsConnected,
+  userWsConnected,
+  sportsScores,
+  getLastPrice,
+  setSelectedCategory,
 } from "../state";
 import { formatVolume, formatChange, truncateString } from "../utils/format";
 import { useTheme } from "../context/theme";
@@ -49,18 +58,33 @@ function generateMiniSparkline(change24h: number, width: number = 6): string {
   }
 }
 
-/** 3-letter category badge label */
+/** Category emoji + 3-letter badge */
+const BADGE_MAP: Record<string, string> = {
+  sports:         "⚽SPO",
+  politics:       "🏛POL",
+  crypto:         "₿CRY",
+  cryptocurrency: "₿CRY",
+  business:       "💼BIZ",
+  economics:      "💼BIZ",
+  "ai":           "🤖 AI",
+  "artificial-intelligence": "🤖 AI",
+  tech:           "💻TEC",
+  technology:     "💻TEC",
+  science:        "🔬SCI",
+  entertainment:  "🎬ENT",
+  "pop-culture":  "🎬ENT",
+  world:          "🌍WLD",
+  health:         "🏥HLT",
+  climate:        "🌿CLM",
+  "climate-and-environment": "🌿CLM",
+};
+
 function getCategoryBadge(category: string | undefined): string {
-  const cat = (category ?? "").toLowerCase();
-  if (cat.includes("sport")) return "SPO";
-  if (cat.includes("polit")) return "POL";
-  if (cat.includes("crypto")) return "CRY";
-  if (cat.includes("business") || cat.includes("econ")) return "BIZ";
-  if (cat.includes("ai")) return " AI";
-  if (cat.includes("tech")) return "TEC";
-  if (cat.includes("science")) return "SCI";
-  if (cat.includes("entertain")) return "ENT";
-  return "GEN";
+  const cat = (category ?? "").toLowerCase().trim();
+  for (const [key, badge] of Object.entries(BADGE_MAP)) {
+    if (cat.includes(key)) return badge;
+  }
+  return "   GEN";
 }
 
 /** Expiry info for the Exp column */
@@ -75,6 +99,13 @@ function formatExpiry(resolutionDate: Date | undefined): { text: string; level: 
   if (days <= 7) return { text: `  ${days}d `, level: "warn" };
   if (days > 30) return { text: `${Math.floor(days / 30)}mo `, level: "ok" };
   return { text: `${days.toString().padStart(2, " ")}d  `, level: "ok" };
+}
+
+/** WS connection dot: ● connected, ○ connecting, · disconnected */
+function wsStatusDot(status: string): { char: string; level: "ok" | "warn" | "off" } {
+  if (status === "connected") return { char: "●", level: "ok" };
+  if (status === "connecting" || status === "reconnecting") return { char: "○", level: "warn" };
+  return { char: "·", level: "off" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -102,14 +133,17 @@ export const CATEGORIES: CategoryDef[] = [
   { id: "closing_soon",  label: "Soon⚠",   apiValue: "all",  virtual: true },
   { id: "watchlist_cat", label: "★Watch",  apiValue: "all",  virtual: true },
   { id: "sports_live",   label: "Live⚡",  apiValue: "sports_live", live: true },
-  { id: "Sports",        label: "Sports",   apiValue: "Sports"         },
-  { id: "Politics",      label: "Politics", apiValue: "Politics"       },
-  { id: "Crypto",        label: "Crypto",   apiValue: "Crypto"         },
-  { id: "Business",      label: "Biz",      apiValue: "Business"       },
-  { id: "AI",            label: "AI",       apiValue: "AI"             },
-  { id: "Tech",          label: "Tech",     apiValue: "Tech"           },
-  { id: "Science",       label: "Sci",      apiValue: "Science"        },
-  { id: "Entertainment", label: "Ent",      apiValue: "Entertainment"  },
+  { id: "Sports",        label: "⚽Sports",  apiValue: "Sports"         },
+  { id: "Politics",      label: "🏛Pol",    apiValue: "Politics"       },
+  { id: "Crypto",        label: "₿Crypto",  apiValue: "Crypto"         },
+  { id: "Business",      label: "💼Biz",    apiValue: "Business"       },
+  { id: "AI",            label: "🤖AI",     apiValue: "AI"             },
+  { id: "Tech",          label: "💻Tech",   apiValue: "Tech"           },
+  { id: "Science",       label: "🔬Sci",    apiValue: "Science"        },
+  { id: "Entertainment", label: "🎬Ent",    apiValue: "Entertainment"  },
+  { id: "World",         label: "🌍World",  apiValue: "World"          },
+  { id: "Health",        label: "🏥Health", apiValue: "Health"         },
+  { id: "Climate",       label: "🌿Clim",  apiValue: "Climate"        },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -174,6 +208,12 @@ export function MarketList() {
 
     return base;
   });
+
+  // ── Sync selectedCategory signal (drives useMarketData category-aware fetch)
+  createEffect(on(activeCategory, (cat) => {
+    const def = CATEGORIES.find(c => c.id === cat);
+    setSelectedCategory(def?.apiValue ?? "All");
+  }));
 
   // ── Category switch ────────────────────────────────────────────────────────
   createEffect(on(activeCategory, (category) => {
@@ -247,6 +287,11 @@ export function MarketList() {
     }
   }
 
+  // ── WS status indicator ────────────────────────────────────────────────────
+  const clobDot = () => wsStatusDot(wsConnectionStatus());
+  const rtdsDot = () => wsStatusDot(rtdsConnected() ? "connected" : "disconnected");
+  const userDot = () => wsStatusDot(userWsConnected() ? "connected" : "disconnected");
+
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <box flexDirection="column" width="100%">
@@ -279,6 +324,19 @@ export function MarketList() {
           }}
         </For>
         <box flexGrow={1} />
+        {/* WS status indicators: CLOB · RTDS · User */}
+        <text
+          content={`${clobDot().char}C `}
+          fg={clobDot().level === "ok" ? theme.success : clobDot().level === "warn" ? theme.warning : theme.borderSubtle}
+        />
+        <text
+          content={`${rtdsDot().char}R `}
+          fg={rtdsDot().level === "ok" ? theme.success : rtdsDot().level === "warn" ? theme.warning : theme.borderSubtle}
+        />
+        <text
+          content={`${userDot().char}U `}
+          fg={userDot().level === "ok" ? theme.success : userDot().level === "warn" ? theme.warning : theme.borderSubtle}
+        />
         <Show when={localLoading() || loadingMore()}>
           <text content="◌ " fg={theme.textMuted} />
         </Show>
@@ -288,7 +346,7 @@ export function MarketList() {
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
         <text content="  #" fg={theme.textMuted} width={4} />
         <text content=" Market" fg={theme.textMuted} width={19} />
-        <text content="Cat" fg={theme.textMuted} width={4} />
+        <text content="Cat " fg={theme.textMuted} width={5} />
         <text content=" Prob " fg={theme.textMuted} width={7} />
         <text content="Trend " fg={theme.textMuted} width={7} />
         <text content="Volume " fg={theme.textMuted} width={9} />
@@ -343,23 +401,47 @@ export function MarketList() {
                 const isHighlighted = () => index() === highlightedIndex();
                 const watched = () => isWatched(market.id);
 
-                const lead = market.outcomes.length > 0
+                // Best leading outcome from static data
+                const staticLead = market.outcomes.length > 0
                   ? market.outcomes.reduce((b, o) => (o.price > b.price ? o : b))
                   : null;
 
-                const probStr = lead ? probLabel(lead.price, lead.title) : " --  ";
+                // Overlay live WS price if available for the leading token
+                const livePrice = () => staticLead ? getLastPrice(staticLead.id) : undefined;
+                const leadPrice = () => livePrice() ?? staticLead?.price ?? 0;
+                const isLive = () => livePrice() !== undefined;
+
+                const probStr = () => {
+                  if (!staticLead) return " --  ";
+                  const pct = Math.round(leadPrice() * 100);
+                  const short = staticLead.title.length > 3
+                    ? staticLead.title.slice(0, 3).toUpperCase()
+                    : staticLead.title.toUpperCase();
+                  return `${pct}%${short}`;
+                };
 
                 const probFg = () => {
                   if (isHighlighted()) return theme.highlightText;
-                  if (!lead) return theme.textMuted;
-                  if (lead.price >= 0.66) return theme.success;
-                  if (lead.price <= 0.34) return theme.error;
+                  if (!staticLead) return theme.textMuted;
+                  if (leadPrice() >= 0.66) return theme.success;
+                  if (leadPrice() <= 0.34) return theme.error;
                   return theme.warning;
                 };
 
-                const isLiveSports =
-                  activeCategory() === "sports_live"
+                const isSports =
+                  activeCategory() === "sports_live" || activeCategory() === "Sports"
                   || (market.category ?? "").toLowerCase().includes("sport");
+
+                // Live sports score for this market (if any token maps to a game)
+                const sportsScore = () => {
+                  if (!isSports) return null;
+                  const scores = sportsScores();
+                  // Match by any token id or market id
+                  const key = Object.keys(scores).find(k =>
+                    k === market.id || market.outcomes.some(o => o.id === k)
+                  );
+                  return key ? scores[key] : null;
+                };
 
                 const expiry = () => formatExpiry(market.resolutionDate);
 
@@ -374,6 +456,19 @@ export function MarketList() {
                 };
 
                 const catBadge = getCategoryBadge(market.category);
+
+                // Trend: for sports show live score if available, else sparkline
+                const trendStr = () => {
+                  const score = sportsScore();
+                  if (score) {
+                    const h = String(score.homeScore ?? 0).padStart(2);
+                    const a = String(score.awayScore ?? 0).padStart(2);
+                    return `${h}-${a}`;
+                  }
+                  return isSports && activeCategory() === "sports_live"
+                    ? "⚡" + generateMiniSparkline(market.change24h, 5)
+                    : generateMiniSparkline(market.change24h);
+                };
 
                 return (
                   <box
@@ -403,24 +498,34 @@ export function MarketList() {
                       width={19}
                     />
 
-                    {/* Category badge */}
+                    {/* Category badge (emoji + 3 chars) */}
                     <text
-                      content={catBadge}
+                      content={catBadge.slice(-4)}
                       fg={isHighlighted() ? theme.highlightText : theme.primary}
-                      width={4}
+                      width={5}
                     />
 
-                    {/* Probability */}
+                    {/* Probability — ⚡ prefix if live WS data */}
                     <text
-                      content={probStr.padStart(6)}
+                      content={(isLive() ? "⚡" : " ") + probStr().padStart(5)}
                       fg={probFg()}
                       width={7}
                     />
 
-                    {/* Trend sparkline */}
+                    {/* Trend sparkline or live score */}
                     <text
-                      content={isLiveSports && activeCategory() === "sports_live" ? "⚡" + generateMiniSparkline(market.change24h, 5) : generateMiniSparkline(market.change24h)}
-                      fg={isHighlighted() ? theme.highlightText : market.change24h > 0 ? theme.success : market.change24h < 0 ? theme.error : theme.textMuted}
+                      content={trendStr()}
+                      fg={
+                        isHighlighted()
+                          ? theme.highlightText
+                          : sportsScore()
+                            ? theme.accent
+                            : market.change24h > 0
+                              ? theme.success
+                              : market.change24h < 0
+                                ? theme.error
+                                : theme.textMuted
+                      }
                       width={7}
                     />
 

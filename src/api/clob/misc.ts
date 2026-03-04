@@ -30,7 +30,7 @@ export interface SpreadResponse {
 
 export async function getSpread(tokenId: string): Promise<SpreadResponse | null> {
   try {
-    const response = await fetch(`${CLOB_API_BASE}/prices/spread?token_id=${tokenId}`);
+    const response = await fetch(`${CLOB_API_BASE}/spread?token_id=${tokenId}`);
 
     if (!response.ok) {
       return null;
@@ -47,12 +47,12 @@ export async function getSpreads(tokenIds: string[]): Promise<SpreadResponse[]> 
   if (tokenIds.length === 0) return [];
 
   try {
-    const response = await fetch(`${CLOB_API_BASE}/prices/spreads`, {
+    const response = await fetch(`${CLOB_API_BASE}/spreads`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ token_ids: tokenIds }),
+      body: JSON.stringify({ params: tokenIds.map((token_id) => ({ token_id })) }),
     });
 
     if (!response.ok) {
@@ -134,26 +134,31 @@ export async function getMultipleOrderBooks(tokenIds: string[]): Promise<Record<
   if (tokenIds.length === 0) return {};
 
   try {
-    const response = await fetch(`${CLOB_API_BASE}/order-books`, {
+    // POST /books accepts [{token_id: "..."}] and returns array of book objects
+    const response = await fetch(`${CLOB_API_BASE}/books`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ token_ids: tokenIds }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(tokenIds.map((token_id) => ({ token_id }))),
     });
 
-    if (!response.ok) {
-      return {};
-    }
+    if (!response.ok) return {};
 
-    const data = (await response.json()) as Record<string, {
+    const books = (await response.json()) as Array<{
       bids: Array<{ price: string; size: string }>;
       asks: Array<{ price: string; size: string }>;
       market?: string;
       asset_id?: string;
       timestamp?: string;
     }>;
-    return data;
+
+    if (!Array.isArray(books)) return {};
+
+    // Re-key result by asset_id for O(1) lookup
+    const result: Record<string, typeof books[0]> = {};
+    for (const book of books) {
+      if (book.asset_id) result[book.asset_id] = book;
+    }
+    return result;
   } catch {
     return {};
   }
@@ -192,27 +197,33 @@ export async function getOrderDetails(orderId: string): Promise<OrderDetails | n
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Cancel Order by Hash API
+// Server Time API — use before EIP-712 signing for clock sync
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function cancelOrderByHash(orderHash: string): Promise<{ success: boolean; message?: string }> {
+export async function getServerTime(): Promise<number | null> {
   try {
-    const response = await fetch(`${CLOB_API_BASE}/orders/cancel-by-hash`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ order_hash: orderHash }),
-    });
+    const response = await fetch(`${CLOB_API_BASE}/time`);
+    if (!response.ok) return null;
+    const data = (await response.json()) as { time?: number | string } | null;
+    if (!data?.time) return null;
+    const t = parseNumeric(data.time, 0);
+    // Server returns Unix seconds; normalize to ms if needed
+    return t < 1_000_000_000_000 ? Math.round(t * 1000) : Math.round(t);
+  } catch {
+    return null;
+  }
+}
 
-    if (!response.ok) {
-      const error = (await response.json()) as { message?: string };
-      return { success: false, message: error.message || "Failed to cancel order" };
-    }
+// ─────────────────────────────────────────────────────────────────────────────
+// Connection health check
+// ─────────────────────────────────────────────────────────────────────────────
 
-    return { success: true };
-  } catch (error) {
-    return { success: false, message: error instanceof Error ? error.message : "Unknown error" };
+export async function isMarketHealthy(): Promise<boolean> {
+  try {
+    const response = await fetch(`${CLOB_API_BASE}/ok`);
+    return response.ok;
+  } catch {
+    return false;
   }
 }
 

@@ -17,8 +17,9 @@ import {
   ConnectionTimeoutError,
   WalletError,
 } from "../auth/wallet";
-import { setWalletState, walletState } from "../state";
+import { setWalletState, walletState, setUserWsConnected } from "../state";
 import { fetchUserPositions } from "./usePositions";
+import { initializeUserWebSocket, disconnectUserWebSocket } from "../api/websocket";
 
 /**
  * Formats error for display in TUI
@@ -115,6 +116,17 @@ export async function initializeWallet(): Promise<void> {
   setWalletState("loading", false);
 
   fetchUserPositions();
+
+  // Wire User WS after creds are ready
+  const latestCreds = {
+    apiKey: walletState.apiKey ?? "",
+    secret: walletState.apiSecret ?? "",
+    passphrase: walletState.apiPassphrase ?? "",
+  };
+  if (latestCreds.apiKey) {
+    initializeUserWebSocket(latestCreds, []);
+    setUserWsConnected(true);
+  }
 }
 
 /**
@@ -174,6 +186,17 @@ export async function connectWallet(privateKey: string): Promise<void> {
   }
 
   fetchUserPositions();
+
+  // Wire User WS after creds are ready
+  const connectedCreds = {
+    apiKey: walletState.apiKey ?? "",
+    secret: walletState.apiSecret ?? "",
+    passphrase: walletState.apiPassphrase ?? "",
+  };
+  if (connectedCreds.apiKey) {
+    initializeUserWebSocket(connectedCreds, []);
+    setUserWsConnected(true);
+  }
 }
 
 /**
@@ -189,6 +212,8 @@ export function disconnectWalletHook(): void {
   setWalletState("apiPassphrase", undefined);
   setWalletState("funderAddress", undefined);
   setWalletState("error", null);
+  disconnectUserWebSocket();
+  setUserWsConnected(false);
 }
 
 /**

@@ -2,7 +2,23 @@ import { For, Show, createMemo } from "solid-js";
 import { positionsState } from "../hooks/usePositions";
 import { ordersState } from "../hooks/useOrders";
 import { calculatePortfolioSummary } from "../api/positions";
-import { walletState, appState, portfolioTab, setPortfolioTab, highlightedIndex, setHighlightedIndex, setPortfolioOpen } from "../state";
+import {
+  walletState,
+  appState,
+  portfolioTab,
+  setPortfolioTab,
+  highlightedIndex,
+  setHighlightedIndex,
+  setPortfolioOpen,
+  setOrderFormOpen,
+  setOrderFormTokenId,
+  setOrderFormSide,
+  setOrderFormMarketTitle,
+  setOrderFormOutcomeTitle,
+  setOrderFormCurrentPrice,
+  setOrderFormPriceInput,
+  setOrderFormSharesInput,
+} from "../state";
 import { calculateMonthlyStats, calculateTradeStats, calculateMarketConcentration, calculateSharpeRatio, calculateMaxDrawdown, calculatePnLTimeSeries, calculatePositionRisk } from "../utils/analytics";
 import { sparkline } from "../utils/charts";
 import { useTheme } from "../context/theme";
@@ -351,7 +367,7 @@ export function PortfolioPanel() {
                   </box>
 
                   <text content="" />
-                  <text content="[Tab] switch to POSITIONS  [Shift+Tab] HISTORY" fg={theme.borderSubtle} />
+                  <text content="[Tab] switch tabs  [click] sell position" fg={theme.borderSubtle} />
                 </box>
               </Show>
 
@@ -362,7 +378,7 @@ export function PortfolioPanel() {
                 <box flexDirection="column" width="100%">
                   {/* Column headers */}
                   <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel} paddingTop={1}>
-                    <text content="MARKET" fg={theme.textMuted} width={23} />
+                    <text content="MARKET" fg={theme.textMuted} width={19} />
                     <text content="OUT" fg={theme.textMuted} width={5} />
                     <text content="SHR" fg={theme.textMuted} width={7} />
                     <text content="ENTRY" fg={theme.textMuted} width={7} />
@@ -370,7 +386,7 @@ export function PortfolioPanel() {
                     <text content="P&L $" fg={theme.textMuted} width={9} />
                     <text content="ROI" fg={theme.textMuted} width={7} />
                     <text content="RSK" fg={theme.textMuted} width={5} />
-                    <text content="TREND" fg={theme.textMuted} width={7} />
+                    <text content="ACTION" fg={theme.textMuted} width={6} />
                   </box>
                   <Separator type="light" />
 
@@ -396,23 +412,39 @@ export function PortfolioPanel() {
                           };
                           const rowBg = () => position.cashPnl > 0 ? theme.successMuted : position.cashPnl < 0 ? theme.errorMuted : undefined;
                           const handleClick = () => {
-                            const m = market();
-                            if (m) {
-                              const marketIdx = appState.markets.findIndex(mk => mk.id === m.id);
-                              if (marketIdx >= 0) {
-                                setHighlightedIndex(marketIdx);
-                                setPortfolioOpen(false);
+                            // Open sell order form pre-filled with position data
+                            setOrderFormTokenId(position.asset);
+                            setOrderFormSide("SELL");
+                            setOrderFormMarketTitle(position.title);
+                            setOrderFormOutcomeTitle(position.outcome);
+                            setOrderFormCurrentPrice(position.curPrice);
+                            // Default to market price
+                            setOrderFormPriceInput(position.curPrice.toFixed(2));
+                            // Pre-fill with entire position size for quick cashout
+                            setOrderFormSharesInput(position.size.toFixed(4));
+                            setOrderFormOpen(true);
+                          };
+                          const handleNavigate = (e: { name: string }) => {
+                            // Navigate to market on Enter key
+                            if (e.name === "enter") {
+                              const m = market();
+                              if (m) {
+                                const marketIdx = appState.markets.findIndex(mk => mk.id === m.id);
+                                if (marketIdx >= 0) {
+                                  setHighlightedIndex(marketIdx);
+                                  setPortfolioOpen(false);
+                                }
                               }
                             }
                           };
                           return (
-                            <box 
-                              flexDirection="row" 
-                              width="100%" 
+                            <box
+                              flexDirection="row"
+                              width="100%"
                               backgroundColor={rowBg()}
                               onMouseDown={handleClick}
                             >
-                              <text content={truncate(position.title, 22)} fg={theme.text} width={23} />
+                              <text content={truncate(position.title, 18)} fg={theme.text} width={19} />
                               <text content={position.outcome.slice(0, 4).padEnd(4, " ")} fg={theme.accent} width={5} />
                               <text content={position.size.toFixed(1).padStart(6, " ")} fg={theme.text} width={7} />
                               <text content={fmtPrice(position.avgPrice).padStart(6, " ")} fg={theme.textMuted} width={7} />
@@ -432,7 +464,7 @@ export function PortfolioPanel() {
                                 fg={riskColor()}
                                 width={5}
                               />
-                              <text content={trendSpark()} fg={theme.textMuted} width={7} />
+                              <text content="SELL" fg={theme.error} width={5} />
                             </box>
                           );
                         }}

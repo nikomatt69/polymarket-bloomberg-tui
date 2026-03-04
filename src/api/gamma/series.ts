@@ -120,52 +120,71 @@ export async function getSeries(): Promise<Series[]> {
   }
 }
 
+function parseGammaSeries(item: GammaSeries): Series {
+  return {
+    id: item.id,
+    slug: item.slug,
+    name: item.title,
+    description: item.description,
+    imageUrl: item.imageUrl,
+    category: item.category,
+  };
+}
+
 export async function getSeriesById(seriesId: string): Promise<Series | null> {
   try {
-    const response = await fetch(`${GAMMA_API_BASE}/series?id=${encodeURIComponent(seriesId)}`);
-
-    if (!response.ok) {
-      return null;
+    // Try direct path first
+    const pathResponse = await fetch(`${GAMMA_API_BASE}/series/${encodeURIComponent(seriesId)}`);
+    if (pathResponse.ok) {
+      const data = await pathResponse.json();
+      if (data && !Array.isArray(data)) return parseGammaSeries(data as GammaSeries);
+      if (Array.isArray(data) && data.length > 0) return parseGammaSeries(data[0] as GammaSeries);
     }
+
+    const response = await fetch(`${GAMMA_API_BASE}/series?id=${encodeURIComponent(seriesId)}`);
+    if (!response.ok) return null;
 
     const data = await response.json();
-    if (!Array.isArray(data) || data.length === 0) {
-      return null;
-    }
+    if (!Array.isArray(data) || data.length === 0) return null;
 
-    const item = data[0];
-    return {
-      id: item.id,
-      slug: item.slug,
-      name: item.title,
-      description: item.description,
-      imageUrl: item.imageUrl,
-      category: item.category,
-    };
+    return parseGammaSeries(data[0] as GammaSeries);
   } catch (error) {
     console.error("Failed to fetch series:", error);
     return null;
   }
 }
 
-export async function getMarketsBySeries(seriesSlug: string, limit: number = 50): Promise<Market[]> {
+export async function getSeriesBySlug(slug: string): Promise<Series | null> {
   try {
-    const response = await fetch(
-      `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&series=${encodeURIComponent(seriesSlug)}&order=volumeNum&ascending=false`
-    );
-
-    if (!response.ok) {
-      return [];
-    }
+    const response = await fetch(`${GAMMA_API_BASE}/series?slug=${encodeURIComponent(slug)}`);
+    if (!response.ok) return null;
 
     const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
+    if (!Array.isArray(data) || data.length === 0) return null;
 
-    return data
-      .map((item) => parseGammaMarket(item as GammaMarket))
-      .filter((market) => market.outcomes.length > 0);
+    return parseGammaSeries(data[0] as GammaSeries);
+  } catch (error) {
+    console.error("Failed to fetch series by slug:", error);
+    return null;
+  }
+}
+
+export async function getMarketsBySeries(seriesSlug: string, limit: number = 50): Promise<Market[]> {
+  try {
+    // Try both param names
+    for (const paramName of ["seriesSlug", "series"]) {
+      const response = await fetch(
+        `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&active=true&${paramName}=${encodeURIComponent(seriesSlug)}&order=volumeNum&ascending=false`
+      );
+      if (!response.ok) continue;
+      const data = await response.json();
+      if (!Array.isArray(data)) continue;
+      const markets = data
+        .map((item) => parseGammaMarket(item as GammaMarket))
+        .filter((market) => market.outcomes.length > 0);
+      if (markets.length > 0 || paramName === "series") return markets;
+    }
+    return [];
   } catch (error) {
     console.error("Failed to fetch markets by series:", error);
     return [];
