@@ -7,10 +7,14 @@ import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { useTheme } from "../context/theme";
 import {
   enterpriseChatOpen,
+  chatInputFocused,
   orderFormOpen,
   orderHistoryOpen,
+  accountStatsOpen,
+  profilePanelOpen,
+  userSearchOpen,
   settingsPanelOpen,
-  walletState,
+  searchPanelOpen,
   appState,
 } from "../state";
 import { alertsState } from "../hooks/useAlerts";
@@ -25,15 +29,40 @@ interface KeyHint {
 function getContextHints(): KeyHint[] {
   const hints: KeyHint[] = [];
   
-  // Always available
-  hints.push({ key: "↑↓/jk", fullLabel: "Navigate" });
-  hints.push({ key: "Enter", fullLabel: "AI Chat" });
-  hints.push({ key: "/", fullLabel: "Search" });
+  // Always available (outside enterprise chat overlay)
+  if (!enterpriseChatOpen()) {
+    hints.push({ key: "↑↓/jk", fullLabel: "Navigate" });
+    hints.push({ key: "Enter", fullLabel: "AI Chat" });
+    hints.push({ key: "/", fullLabel: "Search" });
+  }
   
   // Context-specific
   if (enterpriseChatOpen()) {
-    hints.push({ key: "Esc", fullLabel: "Close Chat" });
-    hints.push({ key: "Ctrl+L", fullLabel: "Clear" });
+    if (chatInputFocused()) {
+      hints.push({ key: "Enter", fullLabel: "Send" });
+      hints.push({ key: "↑↓", fullLabel: "History" });
+      hints.push({ key: "Ctrl+U", fullLabel: "Clear Line" });
+      hints.push({ key: "Esc", fullLabel: "Blur" });
+      hints.push({ key: "Ctrl+L", fullLabel: "Clear Chat" });
+    } else {
+      hints.push({ key: "I/Enter", fullLabel: "Focus Input" });
+      hints.push({ key: "↑↓", fullLabel: "Tool Select" });
+      hints.push({ key: "Space", fullLabel: "Expand Tool" });
+      hints.push({ key: "Esc", fullLabel: "Close Chat" });
+    }
+  } else if (profilePanelOpen()) {
+    hints.push({ key: "Esc/X", fullLabel: "Close Profile" });
+    hints.push({ key: "S", fullLabel: "Search Users" });
+    hints.push({ key: "E", fullLabel: "Edit Profile" });
+    hints.push({ key: "M", fullLabel: "My Profile" });
+    hints.push({ key: "L", fullLabel: "Logout" });
+  } else if (userSearchOpen()) {
+    hints.push({ key: "Enter", fullLabel: "Search" });
+    hints.push({ key: "Esc", fullLabel: "Close Search" });
+  } else if (accountStatsOpen()) {
+    hints.push({ key: "Esc", fullLabel: "Close Account" });
+    hints.push({ key: "W", fullLabel: "Wallet" });
+    hints.push({ key: "U", fullLabel: "Refresh Stats" });
   } else if (orderFormOpen()) {
     hints.push({ key: "Tab", fullLabel: "Field" });
     hints.push({ key: "T", fullLabel: "Type" });
@@ -52,12 +81,19 @@ function getContextHints(): KeyHint[] {
     hints.push({ key: "←→", fullLabel: "Tab" });
     hints.push({ key: "T", fullLabel: "Theme" });
     hints.push({ key: "Enter", fullLabel: "Select" });
+  } else if (searchPanelOpen()) {
+    hints.push({ key: "↑↓", fullLabel: "Navigate" });
+    hints.push({ key: "Enter", fullLabel: "Open market" });
+    hints.push({ key: "Tab", fullLabel: "Category" });
+    hints.push({ key: "Esc", fullLabel: "Close" });
   } else {
     // Default panel shortcuts
     hints.push({ key: "O/S", fullLabel: "Buy/Sell" });
     hints.push({ key: "H", fullLabel: "Orders" });
     hints.push({ key: "P", fullLabel: "Portfolio" });
     hints.push({ key: "Z", fullLabel: "Alerts" });
+    hints.push({ key: "Ctrl+X", fullLabel: "User Profile" });
+    hints.push({ key: "Ctrl+Y", fullLabel: "User Search" });
     hints.push({ key: "E", fullLabel: "Settings" });
   }
   
@@ -100,10 +136,10 @@ export function Footer() {
   const positionSummary = createMemo(() => {
     const pos = positionsState.positions;
     if (pos.length === 0) return "";
-    const totalValue = pos.reduce((sum, p) => sum + p.currentValue, 0);
     const totalPnl = pos.reduce((sum, p) => sum + p.cashPnl, 0);
+    const arrow = totalPnl >= 0 ? "▲" : "▼";
     const sign = totalPnl >= 0 ? "+" : "";
-    return ` | Pos: ${pos.length} | P&L: ${sign}$${totalPnl.toFixed(0)}`;
+    return ` │ Pos:${pos.length} │ P&L:${arrow}${sign}$${totalPnl.toFixed(0)}`;
   });
 
   const content = createMemo(() => {

@@ -229,9 +229,9 @@ export function OrderBookPanel() {
     <box
       position="absolute"
       top={2}
-      left="10%"
-      width="80%"
-      height={32}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={160}
@@ -303,6 +303,17 @@ export function OrderBookPanel() {
         <Show when={loadingSnapshot()}>
           <text content=" Loading… " fg={theme.textMuted} />
         </Show>
+      </box>
+
+      {/* ── Section labels ── */}
+      <box height={1} width="100%" flexDirection="row">
+        <box width="50%" flexDirection="row" justifyContent="flex-start" paddingLeft={1}>
+          <text content="─── BIDS ───" fg={theme.success} />
+        </box>
+        <box width={2} />
+        <box width="50%" flexDirection="row">
+          <text content="ASKS ───" fg={theme.error} />
+        </box>
       </box>
 
       {/* ── Column headers ── */}

@@ -56,10 +56,10 @@ export function SkillsPanel() {
   return (
     <box
       position="absolute"
-      top={1}
-      left="4%"
-      width="92%"
-      height={30}
+      top={2}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={160}
@@ -100,7 +100,14 @@ export function SkillsPanel() {
             <text content="DESCRIPTION" fg={theme.textMuted} />
           </box>
 
-          <scrollbox height={13} width="100%">
+          <box flexDirection="row" paddingBottom={0}>
+            <text content={`─── SKILLS `} fg={theme.borderSubtle} />
+            <text content={`${enabledCount()} enabled`} fg={theme.success} />
+            <text content=" │ " fg={theme.borderSubtle} />
+            <text content={`${allSkills().length - enabledCount()} disabled`} fg={theme.textMuted} />
+            <text content={` of ${allSkills().length} total ───`} fg={theme.borderSubtle} />
+          </box>
+        <scrollbox height={12} width="100%">
             <For each={allSkills()}>
               {(skill, i) => {
                 const isSelected = () => skillsSelectedIdx() === i();
@@ -113,7 +120,7 @@ export function SkillsPanel() {
                   >
                     <text content={isSelected() ? " ▶ " : "   "} fg={theme.accent} width={3} />
                     <text
-                      content={skill.enabled ? "✓  " : "✗  "}
+                      content={skill.enabled ? "●  " : "○  "}
                       fg={skill.enabled ? theme.success : theme.error}
                       width={4}
                     />

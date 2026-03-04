@@ -97,8 +97,21 @@ export function TopBar() {
   const aiProvider = createMemo(() => getActiveAIProvider());
   const aiStatus = createMemo(() => {
     const provider = aiProvider();
-    if (!provider) return { label: "AI: OFF", color: theme.error };
-    return { label: `AI: ${provider.model.split("-")[0]}`, color: theme.success };
+    if (!provider) return { label: "AI:OFF", color: theme.error };
+    const modelShort = provider.model.split("-").slice(0, 2).join("-").slice(0, 14);
+    return { label: `◉ ${modelShort}`, color: theme.success };
+  });
+
+  const worstMover = createMemo((): Market | null => {
+    const markets = appState.markets;
+    if (markets.length === 0) return null;
+    let worst: Market | null = null;
+    for (const m of markets) {
+      const change = m.change24h ?? Infinity;
+      const worstChange = worst?.change24h ?? Infinity;
+      if (change < worstChange) worst = m;
+    }
+    return worst;
   });
 
   const positionCount = createMemo(() => positionsState.positions.length);
@@ -135,14 +148,25 @@ export function TopBar() {
       <text content=" " fg={theme.primaryMuted} />
       <text content={`─${breadth().u}`} fg={theme.primaryMuted} />
 
-      {/* Market mover */}
+      {/* Top market mover (up) */}
       <Show when={marketMover()}>
         {(m: () => Market) => (
           <>
             <text content="│" fg={theme.primaryMuted} width={1} />
             <text content=" ▲ " fg={theme.success} />
-            <text content={m().title.slice(0, 14)} fg={theme.success} width={15} />
-            <text content={`${fmtPnlPct(m().change24h)}`} fg={theme.success} />
+            <text content={m().title.slice(0, 13)} fg={theme.success} width={14} />
+            <text content={fmtPnlPct(m().change24h)} fg={theme.success} />
+          </>
+        )}
+      </Show>
+      {/* Worst mover (down) */}
+      <Show when={worstMover()}>
+        {(m: () => Market) => (
+          <>
+            <text content=" │" fg={theme.primaryMuted} />
+            <text content=" ▼ " fg={theme.error} />
+            <text content={m().title.slice(0, 13)} fg={theme.error} width={14} />
+            <text content={fmtPnlPct(m().change24h)} fg={theme.error} />
           </>
         )}
       </Show>

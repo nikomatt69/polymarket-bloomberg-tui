@@ -88,7 +88,8 @@ export function ShortcutsPanel() {
           <ShortcutRow keys="B        " description="Automation" />
           <ShortcutRow keys="V        " description="Skills" />
           <ShortcutRow keys="Shift+M  " description="Messages" />
-          <ShortcutRow keys="Shift+U  " description="User profile" />
+          <ShortcutRow keys="Ctrl+X   " description="User profile" />
+          <ShortcutRow keys="Ctrl+Y   " description="User search" />
           <ShortcutRow keys="G        " description="Auth / Login" />
         </box>
 

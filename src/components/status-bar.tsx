@@ -57,40 +57,91 @@ export function StatusBar() {
     return r === "high" ? theme.error : r === "medium" ? theme.warning : theme.success;
   });
 
+  const sep = () => <text content=" │ " fg={theme.borderSubtle} />;
+
   return (
     <box flexDirection="row" width="100%" paddingLeft={1} paddingRight={1}>
-      <text content={appState.loading ? "⟳ REFRESH" : "● READY"} fg={appState.loading ? theme.warning : theme.success} />
-      <text content="  " fg={theme.textMuted} />
-      <text content={`Sort:${sortLabel()}`} fg={theme.textMuted} />
-      <text content="  " fg={theme.textMuted} />
-      <text content={`TF:${tf()}`} fg={theme.textMuted} />
-      <text content="  " fg={theme.textMuted} />
-      <text content={`${idx() + 1}/${filtered().length}`} fg={theme.textMuted} />
-      <text content="  WS:" fg={theme.textMuted} />
+      {/* Refresh state */}
+      <text
+        content={appState.loading ? "⟳ REFRESH" : "● READY"}
+        fg={appState.loading ? theme.warning : theme.success}
+      />
+      {sep()}
+      {/* Sort + Timeframe */}
+      <text content="Sort:" fg={theme.textMuted} />
+      <text content={sortLabel()} fg={theme.text} />
+      <text content=" TF:" fg={theme.textMuted} />
+      <text content={tf()} fg={theme.text} />
+      {sep()}
+      {/* Position in list */}
+      <text content={`${idx() + 1}`} fg={theme.text} />
+      <text content={`/${filtered().length}`} fg={theme.textMuted} />
+      {sep()}
+      {/* WebSocket */}
+      <text content="WS:" fg={theme.textMuted} />
       <text content={wsLabel()} fg={wsColor()} />
-      <text content="  Wallet:" fg={theme.textMuted} />
-      <text content={walletState.connected ? "◉ ON" : "○ OFF"} fg={walletState.connected ? theme.success : theme.error} />
+      {sep()}
+      {/* Wallet */}
+      <text content="Wallet:" fg={theme.textMuted} />
+      <text
+        content={walletState.connected ? "◉ ON" : "○ OFF"}
+        fg={walletState.connected ? theme.success : theme.error}
+      />
       <Show when={walletState.connected}>
-        <text content={realtimeConnected() ? " RT●" : " RT○"} fg={realtimeConnected() ? theme.success : theme.textMuted} />
+        <text
+          content={realtimeConnected() ? " RT●" : " RT○"}
+          fg={realtimeConnected() ? theme.success : theme.textMuted}
+        />
       </Show>
+      {sep()}
+      {/* Portfolio heat */}
       <Show when={positionsState.positions.length > 0}>
-        <text content="  Heat:" fg={theme.textMuted} />
+        <text content="Heat:" fg={theme.textMuted} />
         <text content={heatRisk().toUpperCase()} fg={heatColor()} />
+        {sep()}
       </Show>
-      <text content={watchlistState.filterActive ? "  ★ FILT" : "  ☆ ALL"} fg={theme.textMuted} />
-      <text content={`  Pos:${positionsState.positions.length}`} fg={theme.textMuted} />
+      {/* Watchlist filter */}
+      <text
+        content={watchlistState.filterActive ? "★ FILT" : "☆ ALL"}
+        fg={watchlistState.filterActive ? theme.accent : theme.textMuted}
+      />
+      {sep()}
+      {/* Positions + Orders */}
+      <text content="Pos:" fg={theme.textMuted} />
+      <text content={`${positionsState.positions.length}`} fg={theme.text} />
       <Show when={openOrders() > 0}>
-        <text content={`  Ord:${openOrders()}`} fg={theme.warning} />
+        <text content=" Ord:" fg={theme.textMuted} />
+        <text content={`${openOrders()}`} fg={theme.warning} />
       </Show>
+      {/* Daily P&L */}
       <Show when={dailyPnl() !== 0}>
-        <text content="  Day:" fg={theme.textMuted} />
+        {sep()}
+        <text content="Day:" fg={theme.textMuted} />
+        <text content={dailyPnl() >= 0 ? "▲" : "▼"} fg={dailyPnl() >= 0 ? theme.success : theme.error} />
         <text content={fmtPnl(dailyPnl())} fg={dailyPnl() >= 0 ? theme.success : theme.error} />
       </Show>
-      <text content={`  Alerts:${activeAlerts()}/${triggeredAlerts()}`} fg={theme.textMuted} />
+      {sep()}
+      {/* Alerts */}
+      <text content="Alerts:" fg={theme.textMuted} />
+      <text
+        content={`${activeAlerts()}`}
+        fg={activeAlerts() > 0 ? theme.warning : theme.textMuted}
+      />
+      <text content="/" fg={theme.textMuted} />
+      <text
+        content={`${triggeredAlerts()}`}
+        fg={triggeredAlerts() > 0 ? theme.success : theme.textMuted}
+      />
+      {/* Unread messages */}
       <Show when={totalUnread() > 0}>
-        <text content={`  ✉:${totalUnread()}`} fg={theme.accent} />
+        {sep()}
+        <text content="✉ " fg={theme.accent} />
+        <text content={`${totalUnread()}`} fg={theme.accent} />
       </Show>
-      <text content={`  Upd:${lastRefresh()}`} fg={theme.textMuted} />
+      {sep()}
+      {/* Last refresh */}
+      <text content="Upd:" fg={theme.textMuted} />
+      <text content={lastRefresh()} fg={theme.textMuted} />
     </box>
   );
 }

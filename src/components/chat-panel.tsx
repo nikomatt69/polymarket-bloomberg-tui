@@ -27,10 +27,13 @@ export function ChatPanel() {
       <box height={1} width="100%" paddingLeft={1} backgroundColor={theme.background} flexDirection="row">
         <text content="◈ AI AGENT" fg={theme.accent} />
         <Show when={chatLoading()}>
-          <text content=" ●" fg={theme.primary} />
+          <text content=" ◌ running" fg={theme.warning} />
+        </Show>
+        <Show when={!chatLoading() && previewMessages().length > 0}>
+          <text content={`  ${previewMessages().length} msgs`} fg={theme.textMuted} />
         </Show>
         <box flexGrow={1} />
-        <text content=" [Enter] open " fg={theme.textMuted} />
+        <text content=" [Enter] expand " fg={theme.textMuted} />
       </box>
 
       {/* Separator */}
@@ -53,8 +56,8 @@ export function ChatPanel() {
             {(message) => (
               <box width="100%" flexDirection="column" paddingTop={1}>
                 <text
-                  content={message.role === "user" ? "👤 You:" : "🤖 Agent:"}
-                  fg={message.role === "user" ? theme.accent : theme.textMuted}
+                  content={message.role === "user" ? "▶ You:" : "◈ Agent:"}
+                  fg={message.role === "user" ? theme.accent : theme.primary}
                 />
                 <box width="100%" paddingLeft={1}>
                   <text

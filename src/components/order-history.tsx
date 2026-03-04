@@ -76,6 +76,11 @@ function statusBadge(status: PlacedOrder["status"]): string {
   }
 }
 
+function miniBar(pct: number, width: number): string {
+  const filled = Math.round(Math.max(0, Math.min(100, pct)) / 100 * width);
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
 function statusGuidance(order: PlacedOrder | null): string {
   if (!order) return "Select an order row for execution guidance.";
 
@@ -179,9 +184,9 @@ export function OrderHistory() {
     <box
       position="absolute"
       top={2}
-      left="4%"
-      width="92%"
-      height={30}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={150}
@@ -218,12 +223,11 @@ export function OrderHistory() {
 
         {/* Open Orders section */}
         <box flexDirection="row" height={1} paddingBottom={1}>
-          <text
-            content={orderHistorySection() === "open" ? "▶ OPEN ORDERS" : "  OPEN ORDERS"}
-            fg={orderHistorySection() === "open" ? theme.primary : theme.textMuted}
-          />
-          <text content={`  (${openOrders().length})`} fg={theme.textMuted} />
-          <text content="  [TAB] switch section" fg={theme.borderSubtle} />
+          <text content={`─── OPEN ORDERS (${openOrders().length}) `} fg={theme.borderSubtle} />
+          <Show when={orderHistorySection() === "open"}>
+            <text content="▶ " fg={theme.primary} />
+          </Show>
+          <text content="[TAB] switch" fg={theme.borderSubtle} />
         </box>
 
         <Show
@@ -239,7 +243,7 @@ export function OrderHistory() {
             <text content="SIZE    " fg={theme.textMuted} width={8} />
             <text content="FILLED  " fg={theme.textMuted} width={8} />
             <text content="STATUS    " fg={theme.textMuted} width={10} />
-            <text content="FILL% " fg={theme.textMuted} width={7} />
+            <text content="FILL BAR+%      " fg={theme.textMuted} width={16} />
             <text content="MARKET" fg={theme.textMuted} />
           </box>
 
@@ -275,7 +279,7 @@ export function OrderHistory() {
                       fg={isCancelling() ? theme.warning : statusColor(order.status, theme)}
                       width={10}
                     />
-                    <text content={`${orderFillPct().toFixed(0)}%`.padStart(6, " ")} fg={fillColor()} width={7} />
+                    <text content={`${miniBar(orderFillPct(), 8)} ${orderFillPct().toFixed(0)}%`} fg={fillColor()} width={16} />
                     <text content={truncate((order as any).marketTitle ?? order.tokenId, 20)} fg={theme.textMuted} />
                   </box>
                 );
@@ -288,12 +292,11 @@ export function OrderHistory() {
 
         {/* Trade History section */}
         <box flexDirection="row" height={1} paddingBottom={1}>
-          <text
-            content={orderHistorySection() === "trades" ? "▶ TRADE HISTORY" : "  TRADE HISTORY"}
-            fg={orderHistorySection() === "trades" ? theme.primary : theme.textMuted}
-          />
-          <text content={`  (${tradeHistory().length})`} fg={theme.textMuted} />
-          <text content={`  Fill rate: ${fillRate().toFixed(1)}%`} fg={fillRate() >= 80 ? theme.success : fillRate() >= 50 ? theme.warning : theme.error} />
+          <text content={`─── TRADE HISTORY (${tradeHistory().length}) `} fg={theme.borderSubtle} />
+          <Show when={orderHistorySection() === "trades"}>
+            <text content="▶ " fg={theme.primary} />
+          </Show>
+          <text content={`Fill rate: ${fillRate().toFixed(1)}%`} fg={fillRate() >= 80 ? theme.success : fillRate() >= 50 ? theme.warning : theme.error} />
         </box>
 
         <Show
@@ -345,15 +348,20 @@ export function OrderHistory() {
           </scrollbox>
 
           {/* Stats summary */}
-          <box flexDirection="row" width="100%" paddingTop={1} gap={3}>
+          <box flexDirection="row" width="100%" paddingTop={1} gap={1}>
             <text content={`Trades: ${tradeHistory().length}`} fg={theme.textMuted} />
+            <text content=" │ " fg={theme.borderSubtle} />
             <text content={`Filled: $${totalUSDC().toFixed(2)}`} fg={theme.text} />
+            <text content=" │ " fg={theme.borderSubtle} />
             <text content={`FillRate: ${fillRate().toFixed(1)}%`} fg={fillRate() >= 80 ? theme.success : fillRate() >= 50 ? theme.warning : theme.error} />
           </box>
         </Show>
 
         <text content="" />
-        <text content={`Status Guide: ${statusGuidance(activeOrder())}`} fg={theme.textMuted} />
+        <box flexDirection="column" width="100%" backgroundColor={theme.backgroundPanel} paddingLeft={1} paddingTop={0}>
+          <text content="─── ORDER DETAILS ───" fg={theme.borderSubtle} />
+          <text content={statusGuidance(activeOrder())} fg={theme.textMuted} />
+        </box>
         <Show when={activeCancelReason()}>
           <text content={`Last cancel reason: ${activeCancelReason()}`} fg={theme.error} />
         </Show>

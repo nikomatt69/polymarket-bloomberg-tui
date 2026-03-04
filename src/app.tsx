@@ -72,6 +72,7 @@ import {
   setAnalyticsPanelOpen,
   getSelectedMarket,
   getFilteredMarkets,
+  selectMarket,
   highlightedIndex,
   navigateToIndex,
   walletState,
@@ -142,6 +143,12 @@ import {
   setChatInputFocused,
   searchInputFocused,
   setSearchInputFocused,
+  searchPanelOpen,
+  setSearchPanelOpen,
+  searchPanelCategory,
+  setSearchPanelCategory,
+  searchPanelResultIdx,
+  setSearchPanelResultIdx,
   initializeFilters,
   authModalOpen,
   setAuthModalOpen,
@@ -179,6 +186,8 @@ import {
   setProfilePanelOpen,
   profileViewMode,
   setProfileViewMode,
+  selectedProfileId,
+  setSelectedProfileId,
   userSearchOpen,
   setUserSearchOpen,
   userSearchQuery,
@@ -218,6 +227,10 @@ import {
   setSkillsAddField,
   enterpriseChatOpen,
   setEnterpriseChatOpen,
+  enterpriseToolSelectedId,
+  setEnterpriseToolSelectedId,
+  toggleEnterpriseToolExpanded,
+  clearEnterpriseToolUiState,
 } from "./state";
 import { refreshWalletBalance } from "./hooks/useWallet";
 import { useAssistant } from "./hooks/useAssistant";
@@ -317,17 +330,44 @@ function AppContent() {
   useKeyboard((e: KeyEvent) => {
     // Enterprise chat — highest priority intercept
     if (enterpriseChatOpen()) {
-      const { focused, input, setInput, submitPrompt, blurInput, clearChat, navigateHistoryUp, navigateHistoryDown } = useAssistant();
+      const { focused, input, setInput, submitPrompt, blurInput, clearChat, navigateHistoryUp, navigateHistoryDown, streamingTools } = useAssistant();
       if (focused()) {
         if (e.name === "escape") { blurInput(); return; }
         if (e.name === "return") { void submitPrompt(); return; }
         if (e.name === "up" && !input()) { navigateHistoryUp(); return; }
         if (e.name === "down" && !input()) { navigateHistoryDown(); return; }
+        if (e.ctrl && e.name === "u") { setInput(""); return; }
         if (e.ctrl && e.name === "l") { clearChat(); return; }
-        if (e.name === "backspace") { setInput(input().slice(0, -1)); return; }
-        if (e.sequence && e.sequence.length === 1 && e.sequence >= " ") { setInput(input() + e.sequence); return; }
+        // chars + backspace are handled by <input onInput>
       } else {
-        if (e.name === "escape") { setEnterpriseChatOpen(false); return; }
+        const liveTools = streamingTools();
+
+        if ((e.name === "up" || e.name === "k") && liveTools.length > 0) {
+          const selectedId = enterpriseToolSelectedId();
+          const selectedIdx = liveTools.findIndex((tool) => tool.id === selectedId);
+          const nextIdx = selectedIdx <= 0 ? liveTools.length - 1 : selectedIdx - 1;
+          setEnterpriseToolSelectedId(liveTools[nextIdx].id);
+          return;
+        }
+
+        if ((e.name === "down" || e.name === "j") && liveTools.length > 0) {
+          const selectedId = enterpriseToolSelectedId();
+          const selectedIdx = liveTools.findIndex((tool) => tool.id === selectedId);
+          const nextIdx = selectedIdx < 0 || selectedIdx >= liveTools.length - 1 ? 0 : selectedIdx + 1;
+          setEnterpriseToolSelectedId(liveTools[nextIdx].id);
+          return;
+        }
+
+        if ((e.name === "space" || e.sequence === " ") && enterpriseToolSelectedId()) {
+          toggleEnterpriseToolExpanded(enterpriseToolSelectedId());
+          return;
+        }
+
+        if (e.name === "escape") {
+          setEnterpriseChatOpen(false);
+          clearEnterpriseToolUiState();
+          return;
+        }
         if (e.name === "return" || e.name === "i") { const { focusInput } = useAssistant(); focusInput(); return; }
       }
       return; // block all global keys while enterprise chat is open
@@ -399,6 +439,14 @@ function AppContent() {
             }
           });
         }
+      }
+      return;
+    }
+
+    // Order book panel intercept
+    if (orderBookPanelOpen()) {
+      if (e.name === "escape" || e.name === "d") {
+        setOrderBookPanelOpen(false);
       }
       return;
     }
@@ -534,14 +582,6 @@ function AppContent() {
         }
       } else if (e.sequence === "/" || e.name === "slash") {
         startOrderHistorySearch();
-      }
-      return;
-    }
-
-    // Order book panel intercept
-    if (orderBookPanelOpen()) {
-      if (e.name === "escape" || e.name === "d") {
-        setOrderBookPanelOpen(false);
       }
       return;
     }
@@ -1065,11 +1105,31 @@ function AppContent() {
 
     // User profile panel intercept
     if (profilePanelOpen()) {
-      if (e.name === "escape") {
-        setProfilePanelOpen(false);
-      } else if (e.name === "s" && profileViewMode() === "view") {
+      if (e.name === "escape" || e.name === "x") {
+        if (profileViewMode() === "search") {
+          setProfileViewMode("view");
+          setUserSearchOpen(false);
+          setUserSearchQuery("");
+          setUserSearchResults([]);
+          setUserSearchLoading(false);
+        } else if (profileViewMode() === "edit") {
+          setProfileViewMode("view");
+        } else {
+          setProfilePanelOpen(false);
+          setSelectedProfileId(null);
+        }
+      } else if (e.name === "s" && profileViewMode() !== "search") {
         setProfileViewMode("search");
-      } else if (e.name === "l" && profileViewMode() === "view") {
+        setUserSearchOpen(false);
+        setUserSearchLoading(false);
+      } else if (e.name === "m" && profileViewMode() === "view") {
+        setSelectedProfileId(null);
+      } else if (e.name === "e" && profileViewMode() === "view" && selectedProfileId() === null) {
+        setProfileViewMode("edit");
+      } else if (e.name === "g" && !authState.isAuthenticated) {
+        setAuthModalMode("login");
+        setAuthModalOpen(true);
+      } else if (e.name === "l" && profileViewMode() === "view" && selectedProfileId() === null) {
         const auth = require("./auth/auth") as typeof import("./auth/auth");
         auth.logoutUser();
         setAuthState({
@@ -1078,13 +1138,27 @@ function AppContent() {
           token: null,
         });
         setProfilePanelOpen(false);
+      } else if (profileViewMode() === "search") {
+        if (e.name === "return") {
+          const query = userSearchQuery();
+          if (query.length >= 2) {
+            setUserSearchLoading(true);
+            searchUsers(query)
+              .then((results) => {
+                setUserSearchResults(results);
+              })
+              .finally(() => {
+                setUserSearchLoading(false);
+              });
+          }
+        }
       }
       return;
     }
 
     // User search panel intercept
     if (userSearchOpen()) {
-      if (e.name === "escape") {
+      if (e.name === "escape" || (e.ctrl && e.name === "y")) {
         setUserSearchOpen(false);
         setUserSearchQuery("");
         setUserSearchResults([]);
@@ -1097,10 +1171,6 @@ function AppContent() {
           });
           setUserSearchLoading(true);
         }
-      } else if (e.name === "backspace") {
-        setUserSearchQuery(userSearchQuery().slice(0, -1));
-      } else if (e.sequence && e.sequence.length === 1 && e.sequence >= " ") {
-        setUserSearchQuery(userSearchQuery() + e.sequence);
       }
       return;
     }
@@ -1254,6 +1324,45 @@ function AppContent() {
       return;
     }
 
+    // Search panel intercept
+    if (searchPanelOpen()) {
+      const PANEL_CAT_IDS = ["all", "sports", "politics", "crypto", "business", "ai", "tech", "science", "entertainment"];
+      if (e.name === "escape") {
+        setSearchPanelOpen(false);
+      } else if (e.name === "return") {
+        const market = getFilteredMarkets().find((_, i) => {
+          // find the result at searchPanelResultIdx in filtered+sorted list
+          return false; // handled below via selectMarket
+        });
+        // Simpler: just close and the selected market is whatever navigateToIndex set
+        const idx = searchPanelResultIdx();
+        const filtered = getFilteredMarkets();
+        const cat = searchPanelCategory();
+        const catMatch = PANEL_CAT_IDS.slice(1).find(c => c === cat) ? cat : "";
+        const subset = catMatch === "" ? filtered : filtered.filter(m => (m.category ?? "").toLowerCase().includes(catMatch));
+        const market2 = subset[idx];
+        if (market2) {
+          selectMarket(market2.id);
+          const listIdx = filtered.findIndex(m => m.id === market2.id);
+          if (listIdx >= 0) navigateToIndex(listIdx);
+        }
+        setSearchPanelOpen(false);
+      } else if (e.name === "up") {
+        setSearchPanelResultIdx((i) => Math.max(0, i - 1));
+      } else if (e.name === "down") {
+        setSearchPanelResultIdx((i) => i + 1);
+      } else if (e.name === "tab" && !e.shift) {
+        const cur = PANEL_CAT_IDS.indexOf(searchPanelCategory());
+        setSearchPanelCategory(PANEL_CAT_IDS[(cur + 1) % PANEL_CAT_IDS.length] ?? "all");
+        setSearchPanelResultIdx(0);
+      } else if (e.name === "tab" && e.shift) {
+        const cur = PANEL_CAT_IDS.indexOf(searchPanelCategory());
+        setSearchPanelCategory(PANEL_CAT_IDS[(cur - 1 + PANEL_CAT_IDS.length) % PANEL_CAT_IDS.length] ?? "all");
+        setSearchPanelResultIdx(0);
+      }
+      return;
+    }
+
     // Safety guard: if any overlay/panel is open, never dispatch main shortcuts.
     const anyOverlayOpen =
       orderFormOpen()
@@ -1277,7 +1386,8 @@ function AppContent() {
       || newsPanelOpen()
       || socialPanelOpen()
       || automationPanelOpen()
-      || skillsPanelOpen();
+      || skillsPanelOpen()
+      || searchPanelOpen();
 
     if (anyOverlayOpen) {
       return;
@@ -1311,8 +1421,9 @@ function AppContent() {
 
     switch (e.name) {
       case "slash":
-        // / — focus search input
-        setSearchInputFocused(true);
+        // / — open search panel
+        setSearchPanelOpen(true);
+        setSearchPanelResultIdx(0);
         break;
       case "return":
         // Enter to open enterprise chat
@@ -1410,9 +1521,14 @@ function AppContent() {
         toggleWatchlistFilter();
         break;
       case "x": {
-        // x — toggle watchlist for selected market
-        const wMarket = getSelectedMarket();
-        if (wMarket) toggleWatchlist(wMarket.id);
+        if (e.ctrl) {
+          // Ctrl+X — toggle user profile panel
+          setProfilePanelOpen(!profilePanelOpen());
+        } else {
+          // x — toggle watchlist for selected market
+          const wMarket = getSelectedMarket();
+          if (wMarket) toggleWatchlist(wMarket.id);
+        }
         break;
       }
       case "d":
@@ -1480,9 +1596,21 @@ function AppContent() {
         }
         break;
       }
-      case "U":
-        // Shift+U — toggle user profile panel
-        setProfilePanelOpen(!profilePanelOpen());
+      case "y":
+        if (e.ctrl) {
+          // Ctrl+Y — toggle user search panel
+          if (userSearchOpen()) {
+            setUserSearchOpen(false);
+            setUserSearchQuery("");
+            setUserSearchResults([]);
+            setUserSearchLoading(false);
+          } else {
+            setUserSearchOpen(true);
+            setUserSearchQuery("");
+            setUserSearchResults([]);
+            setUserSearchLoading(false);
+          }
+        }
         break;
       case "A":
       case "a":
@@ -1528,7 +1656,6 @@ function AppContent() {
       case "q":
         savePersistedState();
         process.exit(0);
-        break;
     }
   });
 

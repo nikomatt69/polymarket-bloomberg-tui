@@ -407,6 +407,11 @@ export const [settingsFunderInput, setSettingsFunderInput] = createSignal("");
 // Search input focus state: while typing, global shortcuts must be blocked
 export const [searchInputFocused, setSearchInputFocused] = createSignal(false);
 
+// Search panel (full overlay search with category tabs and sort filters)
+export const [searchPanelOpen, setSearchPanelOpen] = createSignal(false);
+export const [searchPanelCategory, setSearchPanelCategory] = createSignal("all");
+export const [searchPanelResultIdx, setSearchPanelResultIdx] = createSignal(0);
+
 function serializeProvider(provider: AIProviderConfig): AIProviderConfig {
   return {
     id: provider.id,
@@ -665,6 +670,7 @@ export interface GlobalMessage {
   senderName: string;
   content: string;
   timestamp: Date;
+  read?: boolean;
 }
 
 export interface Conversation {
@@ -1224,14 +1230,42 @@ export const [marketListCategoryId, setMarketListCategoryId] = createSignal("tre
 // ─── Enterprise Chat Signals ──────────────────────────────────────────────────
 
 export interface StreamingTool {
+  id: string;
   name: string;
   args: unknown;
   result?: unknown;
+  category?: string;
+  startedAt?: number;
+  completedAt?: number;
+  error?: string;
   status: "calling" | "done" | "error";
 }
 
+export type EnterpriseRunPhase =
+  | "idle"
+  | "streaming_text"
+  | "tool_calling"
+  | "tool_done"
+  | "tool_error"
+  | "finalizing";
+
 export const [enterpriseChatOpen, setEnterpriseChatOpen] = createSignal(false);
 export const [streamingMessage, setStreamingMessage] = createSignal("");
+export const [enterpriseRunPhase, setEnterpriseRunPhase] = createSignal<EnterpriseRunPhase>("idle");
+export const [enterpriseToolSelectedId, setEnterpriseToolSelectedId] = createSignal("");
+export const [enterpriseToolExpandedIds, setEnterpriseToolExpandedIds] = createSignal<string[]>([]);
+
+export function toggleEnterpriseToolExpanded(id: string): void {
+  if (!id) return;
+  setEnterpriseToolExpandedIds((prev) =>
+    prev.includes(id) ? prev.filter((entry) => entry !== id) : [...prev, id],
+  );
+}
+
+export function clearEnterpriseToolUiState(): void {
+  setEnterpriseToolSelectedId("");
+  setEnterpriseToolExpandedIds([]);
+}
 
 // ─── Real-time WebSocket status ───────────────────────────────────────────────
 export const [realtimeConnected, setRealtimeConnected] = createSignal(false);

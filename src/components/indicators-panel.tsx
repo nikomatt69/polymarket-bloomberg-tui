@@ -158,9 +158,9 @@ export function IndicatorsPanel() {
     <box
       position="absolute"
       top={2}
-      left="32%"
-      width="36%"
-      height={20}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={150}
@@ -231,7 +231,7 @@ export function IndicatorsPanel() {
             />
             <DataRow
               label="Direction"
-              value={validIndicator()!.current >= validIndicator()!.prev ? "↑ Rising" : "↓ Falling"}
+              value={validIndicator()!.current >= validIndicator()!.prev ? "▲ Rising" : "▼ Falling"}
               valueColor={validIndicator()!.current >= validIndicator()!.prev ? "success" : "error"}
             />
             <DataRow
@@ -239,6 +239,24 @@ export function IndicatorsPanel() {
               value={validIndicator()!.prev.toFixed(4)}
               valueColor="muted"
             />
+            <box paddingLeft={2} paddingTop={0} flexDirection="row">
+              <text content="Level  " fg={theme.textMuted} />
+              <text
+                content={(() => {
+                  const v = validIndicator()!;
+                  const norm = selectedIndicator() === "rsi"
+                    ? Math.max(0, Math.min(100, v.current)) / 100
+                    : Math.max(0, Math.min(1, Math.abs(v.current)));
+                  const filled = Math.round(norm * 20);
+                  return "█".repeat(filled) + "░".repeat(20 - filled);
+                })()}
+                fg={validIndicator()!.current >= validIndicator()!.prev ? theme.success : theme.error}
+              />
+              <text
+                content={selectedIndicator() === "rsi" ? `  ${validIndicator()!.current.toFixed(1)}` : ""}
+                fg={theme.textMuted}
+              />
+            </box>
 
             <box paddingLeft={2} paddingTop={1}>
               <text content="─── LAST VALUES ─────────────────────────" fg={theme.borderSubtle} />

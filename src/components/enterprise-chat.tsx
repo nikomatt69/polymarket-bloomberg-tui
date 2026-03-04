@@ -1,18 +1,26 @@
 /**
- * EnterpriseChat — full-screen OpenCode-style AI agent overlay.
- * Activated by Enter globally, closed by Escape.
- * Left pane: message history + streaming.
- * Right pane: live tool inspector + context.
- * Bottom: input bar with history hints.
+ * EnterpriseChat - full-screen AI agent overlay.
+ * Integrated stream timeline + live tool call cards.
  */
 
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { useTheme } from "../context/theme";
-import { PanelHeader, SectionTitle, DataRow, Separator, LoadingState, PriceChange, PriceDisplay } from "./ui/panel-components";
+import {
+  PanelHeader,
+  SectionTitle,
+  DataRow,
+  Separator,
+  LoadingState,
+  PriceChange,
+  PriceDisplay,
+  ToolCallList,
+  ChatMessageItem,
+} from "./ui/panel-components";
 import {
   chatMessages,
   chatLoading,
   chatInputValue,
+  setChatInputValue,
   chatInputFocused,
   streamingMessage,
   streamingTools,
@@ -20,169 +28,432 @@ import {
   sessionTokens,
   appState,
   walletState,
+  enterpriseRunPhase,
+  enterpriseToolSelectedId,
+  setEnterpriseToolSelectedId,
+  enterpriseToolExpandedIds,
+  toggleEnterpriseToolExpanded,
+  ToolCall,
 } from "../state";
 import { getSelectedMarket, getActiveAIProvider } from "../state";
-import { ChatMessage, ToolCall } from "../state";
 import { Market } from "../types/market";
 import { positionsState } from "../hooks/usePositions";
 import { calculatePortfolioSummary } from "../api/positions";
 
-function fmtTime(d: Date): string {
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function truncate(s: string, n: number): string {
-  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, Math.max(1, max - 3))}...`;
 }
 
 function wrapText(text: string, maxWidth: number): string[] {
   const lines: string[] = [];
+  const safeWidth = Math.max(16, maxWidth);
   const paragraphs = text.split("\n");
-  for (const para of paragraphs) {
-    if (para.length === 0) {
+
+  for (const paragraph of paragraphs) {
+    if (paragraph.length === 0) {
       lines.push("");
       continue;
     }
-    const words = para.split(" ");
+
+    const words = paragraph.split(" ");
     let current = "";
+
     for (const word of words) {
-      if ((current + (current ? " " : "") + word).length <= maxWidth) {
-        current = current ? current + " " + word : word;
+      if ((current + (current ? " " : "") + word).length <= safeWidth) {
+        current = current ? `${current} ${word}` : word;
       } else {
         if (current) lines.push(current);
-        // long word: split at maxWidth
-        let w = word;
-        while (w.length > maxWidth) {
-          lines.push(w.slice(0, maxWidth));
-          w = w.slice(maxWidth);
+        let pending = word;
+        while (pending.length > safeWidth) {
+          lines.push(pending.slice(0, safeWidth));
+          pending = pending.slice(safeWidth);
         }
-        current = w;
+        current = pending;
       }
     }
+
     if (current) lines.push(current);
   }
+
   return lines;
 }
 
-function ToolIcon(props: { status: "calling" | "done" | "error" }) {
-  const { theme } = useTheme();
-  return (
-    <Show
-      when={props.status === "done"}
-      fallback={
-        <Show
-          when={props.status === "error"}
-          fallback={<text content="⟳ " fg={theme.accent} />}
-        >
-          <text content="✗ " fg={theme.error} />
-        </Show>
-      }
-    >
-      <text content="✓ " fg={theme.success} />
-    </Show>
-  );
+function makeRule(title: string, width: number): string {
+  const cleanTitle = title.trim();
+  if (!cleanTitle) return "-".repeat(Math.max(4, width));
+
+  const body = ` ${cleanTitle} `;
+  const safeWidth = Math.max(body.length + 2, width);
+  const dashCount = safeWidth - body.length;
+  const left = Math.floor(dashCount / 2);
+  const right = dashCount - left;
+
+  return `${"-".repeat(left)}${body}${"-".repeat(right)}`;
 }
 
-function ToolEntry(props: { name: string; args: unknown; result?: unknown; status: "calling" | "done" | "error" }) {
-  const { theme } = useTheme();
-  const resultSummary = createMemo(() => {
-    if (!props.result) return "";
-    const r = props.result as Record<string, unknown>;
-    if (typeof r === "object" && r !== null) {
-      if ("count" in r) return `→ ${r.count} results`;
-      if ("balance" in r) return `→ $${r.balance}`;
-      if ("message" in r) return `→ ${truncate(String(r.message), 30)}`;
-      if ("error" in r) return `→ ${truncate(String(r.error), 30)}`;
-    }
-    return `→ ${truncate(JSON.stringify(props.result), 32)}`;
-  });
-
-  return (
-    <box flexDirection="row" width="100%" paddingLeft={1}>
-      <ToolIcon status={props.status} />
-      <text
-        content={props.name}
-        fg={props.status === "calling" ? theme.accent : props.status === "error" ? theme.error : theme.success}
-      />
-      <Show when={props.status !== "calling" && resultSummary()}>
-        <text content={` ${resultSummary()}`} fg={theme.textMuted} />
-      </Show>
-      <Show when={props.status === "calling"}>
-        <text content=" (calling…)" fg={theme.textMuted} />
-      </Show>
-    </box>
-  );
+function toolCategoryFromName(name: string): string {
+  if (["get_market_details", "get_market_price", "get_order_book", "analyze_market", "compare_outcomes", "search_markets"].includes(name)) return "market";
+  if (["get_portfolio", "get_balance", "get_positions_details", "get_trade_history", "get_open_orders"].includes(name)) return "portfolio";
+  if (["place_order", "cancel_order"].includes(name)) return "order";
+  if (["get_categories", "search_by_category", "get_trending_markets", "get_sports_markets", "get_live_events", "get_events", "get_series_markets", "get_all_series", "get_all_tags", "get_markets_by_tag"].includes(name)) return "discovery";
+  if (["navigate_to_market", "set_timeframe", "set_sort_by", "refresh_markets"].includes(name)) return "navigation";
+  if (["open_wallet_modal", "open_portfolio", "open_order_form", "get_watchlist", "add_watchlist", "remove_watchlist", "get_alerts"].includes(name)) return "ui";
+  return "unknown";
 }
 
-function MessageBubble(props: { message: ChatMessage }) {
-  const { theme } = useTheme();
-  const isUser = () => props.message.role === "user";
-  const lines = createMemo(() => wrapText(props.message.content, 70));
-
-  return (
-    <box width="100%" flexDirection="column" paddingTop={1} paddingBottom={1}>
-      {/* Role + time header */}
-      <box flexDirection="row" paddingLeft={1}>
-        <text
-          content={isUser() ? "👤 You" : "🤖 Agent"}
-          fg={isUser() ? theme.accent : theme.primary}
-        />
-        <text content={`  ${fmtTime(props.message.timestamp)}`} fg={theme.textMuted} />
-      </box>
-
-      {/* Message content */}
-      <box flexDirection="column" paddingLeft={2} paddingRight={1}>
-        <For each={lines()}>
-          {(line) => <text content={line} fg={isUser() ? theme.text : theme.text} />}
-        </For>
-      </box>
-
-      {/* Tool call summary inline */}
-      <Show when={props.message.toolCalls && props.message.toolCalls.length > 0}>
-        <box flexDirection="column" paddingLeft={2} paddingTop={1}>
-          <For each={props.message.toolCalls!}>
-            {(tc: ToolCall) => (
-              <box flexDirection="row">
-                <text content="✓ " fg={theme.success} />
-                <text content={tc.name} fg={theme.textMuted} />
-              </box>
-            )}
-          </For>
-        </box>
-      </Show>
-    </box>
-  );
+function statusFromToolResult(result: unknown): "done" | "error" {
+  if (typeof result !== "object" || result === null || Array.isArray(result)) return "done";
+  const record = result as Record<string, unknown>;
+  if ("success" in record && record.success === false) return "error";
+  if ("error" in record && record.error) return "error";
+  return "done";
 }
 
 export function EnterpriseChat() {
   const { theme } = useTheme();
 
+  const [columns, setColumns] = createSignal(
+    Number.isFinite(process.stdout.columns) ? process.stdout.columns : 120,
+  );
+
+  onMount(() => {
+    const handleResize = () => {
+      if (Number.isFinite(process.stdout.columns)) {
+        setColumns(process.stdout.columns);
+      }
+    };
+
+    process.stdout.on("resize", handleResize);
+    onCleanup(() => {
+      process.stdout.off("resize", handleResize);
+    });
+  });
+
+  const showInspector = createMemo(() => columns() >= 120);
+  const streamWrapWidth = createMemo(() => (showInspector() ? 72 : Math.max(38, columns() - 12)));
+  const introRuleWidth = createMemo(() => {
+    if (showInspector()) return 56;
+    if (columns() >= 100) return 46;
+    return 38;
+  });
+
   const provider = createMemo(() => getActiveAIProvider());
   const resolvedModel = createMemo(() => {
-    const p = provider();
-    return p ? `${p.model}` : "no provider";
+    const activeProvider = provider();
+    return activeProvider ? `${activeProvider.model}` : "no provider";
   });
+
   const sessionLabel = createMemo(() => {
     const id = currentSessionId();
     return id ? id.slice(0, 14) : "new-session";
   });
-  const tokLabel = createMemo(() => {
-    const t = sessionTokens();
-    return t >= 1000 ? `${(t / 1000).toFixed(1)}k tok` : `${t} tok`;
+
+  const tokenLabel = createMemo(() => {
+    const total = sessionTokens();
+    return total >= 1000 ? `${(total / 1000).toFixed(1)}k tok` : `${total} tok`;
+  });
+
+  const providerLabel = createMemo(() => provider()?.name ?? "none");
+
+  const providerKindLabel = createMemo(() => provider()?.kind.toUpperCase() ?? "none");
+
+  const phaseLabel = createMemo(() => enterpriseRunPhase().toUpperCase());
+
+  const phaseColor = createMemo(() => {
+    const phase = enterpriseRunPhase();
+    if (phase === "tool_error") return theme.error;
+    if (phase === "tool_calling" || phase === "finalizing") return theme.warning;
+    if (phase === "streaming_text") return theme.primary;
+    return theme.textMuted;
+  });
+
+  const effortLabel = createMemo(() => {
+    const phase = enterpriseRunPhase();
+    if (phase === "tool_calling" || phase === "finalizing") return "xhigh";
+    if (phase === "streaming_text") return "high";
+    return "standard";
+  });
+
+  const promptMode = createMemo(() => {
+    const value = chatInputValue().trim();
+    if (value.startsWith("/")) return "COMMAND";
+    return "PLAN";
+  });
+
+  const promptProfile = createMemo(() => {
+    const cols = columns();
+    if (cols >= 130) return "wide" as const;
+    if (cols >= 100) return "medium" as const;
+    return "narrow" as const;
+  });
+
+  const promptHeight = createMemo(() => (promptProfile() === "narrow" ? 4 : 5));
+
+  const showMetaRow = createMemo(() => promptProfile() !== "narrow");
+
+  const isNarrow = createMemo(() => promptProfile() === "narrow");
+
+  const promptWidthBudget = createMemo(() => {
+    const cols = columns();
+    if (showInspector()) return Math.max(42, Math.floor(cols * 0.65) - 8);
+    return Math.max(42, cols - 8);
+  });
+
+  const modelLabel = createMemo(() => {
+    if (promptProfile() === "wide") return truncate(resolvedModel(), 34);
+    if (promptProfile() === "medium") return truncate(resolvedModel(), 24);
+    return truncate(resolvedModel(), 16);
+  });
+
+  const headerSubtitle = createMemo(() => {
+    if (promptProfile() === "wide") {
+      return `${resolvedModel()} | ${sessionLabel()} | ${tokenLabel()} | ${phaseLabel()}`;
+    }
+    if (promptProfile() === "medium") {
+      return `${modelLabel()} | ${tokenLabel()} | ${phaseLabel()}`;
+    }
+    return `${phaseLabel()} | ${tokenLabel()}`;
   });
 
   const selectedMarket = createMemo(() => getSelectedMarket());
 
-  // Historical tool calls from last assistant message
   const lastAssistantToolCalls = createMemo(() => {
-    const msgs = chatMessages();
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role === "assistant" && msgs[i].toolCalls?.length) {
-        return msgs[i].toolCalls!;
+    const messages = chatMessages();
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const entry = messages[index];
+      if (entry.role === "assistant" && entry.toolCalls?.length) {
+        return entry.toolCalls;
       }
     }
     return [] as ToolCall[];
   });
+
+  const liveToolCalls = createMemo(() =>
+    streamingTools().map((tool) => ({
+      ...tool,
+      category: tool.category ?? toolCategoryFromName(tool.name),
+    })),
+  );
+
+  const historicalToolCalls = createMemo(() =>
+    lastAssistantToolCalls().map((toolCall) => ({
+      id: toolCall.id,
+      name: toolCall.name,
+      args: toolCall.arguments,
+      result: toolCall.result,
+      status: statusFromToolResult(toolCall.result),
+      category: toolCategoryFromName(toolCall.name),
+    })),
+  );
+
+  const selectedToolId = createMemo(() => {
+    const selected = enterpriseToolSelectedId();
+    if (selected) return selected;
+    return liveToolCalls()[0]?.id ?? historicalToolCalls()[0]?.id ?? "";
+  });
+
+  const inputHints = createMemo(() => {
+    if (chatInputFocused()) {
+      if (promptProfile() === "narrow") return "[Enter] send [Esc] blur";
+      if (!chatInputValue()) return "[Enter] send [Up/Down] history(empty) [Ctrl+U] line [Ctrl+L] chat [Esc] blur";
+      return "[Enter] send [Ctrl+U] line [Ctrl+L] chat [Esc] blur";
+    }
+
+    if (showInspector()) {
+      if (promptProfile() === "medium") return "[I/Enter] focus [Up/Down] tools [Esc] close";
+      return "[I/Enter] focus [Up/Down] tools [Space] expand [Esc] close";
+    }
+
+    return "[I/Enter] focus [Esc] close";
+  });
+
+  const hintLabel = createMemo(() => {
+    const maxLen = promptProfile() === "wide" ? 86 : promptProfile() === "medium" ? 62 : 28;
+    return truncate(inputHints(), maxLen);
+  });
+
+  const promptSupportLine = createMemo(() => {
+    const value = chatInputValue();
+    if (isNarrow()) {
+      if (value.startsWith("/")) return "Command mode";
+      if (chatLoading()) return "Assistant running";
+      if (!value.trim()) return "Press I or Enter to type";
+      return `${value.length} chars in prompt`;
+    }
+
+    if (value.startsWith("/")) return "Slash command mode - Enter to execute";
+    if (chatLoading()) return "Assistant run in progress";
+    if (!value.trim()) return "Type your request or /help for commands";
+    return `${value.length} chars in prompt`;
+  });
+
+  const promptSupportMaxChars = createMemo(() => {
+    if (isNarrow()) return Math.max(18, promptWidthBudget() - 16);
+    const reserve = promptProfile() === "wide" ? 28 : 22;
+    return Math.max(20, promptWidthBudget() - reserve);
+  });
+
+  const inputStatus = createMemo(() => {
+    if (chatLoading()) return "RUNNING";
+    if (chatInputFocused()) return "FOCUSED";
+    return "READY";
+  });
+
+  const inputStatusColor = createMemo(() => {
+    const status = inputStatus();
+    if (status === "RUNNING") return theme.warning;
+    if (status === "FOCUSED") return theme.accent;
+    return theme.success;
+  });
+
+  const inputStatusLabel = createMemo(() => {
+    const status = inputStatus();
+    if (!isNarrow()) return status;
+    if (status === "RUNNING") return "RUN";
+    if (status === "FOCUSED") return "FOC";
+    return "RDY";
+  });
+
+  const promptModeColor = createMemo(() =>
+    promptMode() === "COMMAND" ? theme.warning : theme.primary,
+  );
+
+  const promptPrefix = createMemo(() => (promptMode() === "COMMAND" ? "/" : ">"));
+
+  const promptPrefixColor = createMemo(() =>
+    promptMode() === "COMMAND" ? theme.warning : theme.accent,
+  );
+
+  const promptPlaceholder = createMemo(() =>
+    promptMode() === "COMMAND"
+      ? isNarrow()
+        ? "/help /clear /sessions"
+        : "type slash command..."
+      : isNarrow()
+        ? "type request..."
+        : "ask for market analysis, portfolio or order flow...",
+  );
+
+  const toolQueueLabel = createMemo(() => {
+    const count = liveToolCalls().length;
+    if (chatLoading()) {
+      return count > 0 ? `RUN ${count} TOOL${count > 1 ? "S" : ""}` : "RUN";
+    }
+    return count > 0 ? `${count} TOOL${count > 1 ? "S" : ""} READY` : "IDLE";
+  });
+
+  const toolQueueColor = createMemo(() => {
+    const count = liveToolCalls().length;
+    if (chatLoading()) return theme.warning;
+    if (count > 0) return theme.accent;
+    return theme.textMuted;
+  });
+
+  const phaseShortLabel = createMemo(() => {
+    const phase = enterpriseRunPhase();
+    if (phase === "streaming_text") return "STRM";
+    if (phase === "tool_calling") return "TOOL";
+    if (phase === "tool_done") return "DONE";
+    if (phase === "tool_error") return "ERR";
+    if (phase === "finalizing") return "FIN";
+    return "IDLE";
+  });
+
+  const streamTitleLabel = createMemo(() => (isNarrow() ? "STRM" : "STREAM"));
+
+  const toolQueueCompactLabel = createMemo(() => {
+    const count = liveToolCalls().length;
+    if (chatLoading()) return count > 0 ? `RUN/${count}T` : "RUN";
+    return count > 0 ? `${count}T` : "IDLE";
+  });
+
+  const streamHeaderLeft = createMemo(() => {
+    const tools = liveToolCalls().length;
+    if (promptProfile() === "narrow") {
+      return `p=${phaseShortLabel()} t=${tools}`;
+    }
+    if (promptProfile() === "medium") {
+      return `phase=${phaseLabel()} | tools=${tools}${chatLoading() ? " | running" : ""}`;
+    }
+    return `phase=${phaseLabel()} | tools=${tools}${chatLoading() ? " | status=running" : ""}`;
+  });
+
+  const metaPrimaryLabel = createMemo(() => {
+    const parts = [`MODE:${promptMode()}`, `MODEL:${modelLabel()}`];
+
+    if (promptProfile() === "wide") {
+      parts.push(`PROVIDER:${providerLabel()}`);
+      parts.push(`KIND:${providerKindLabel()}`);
+    }
+
+    parts.push(`EFFORT:${effortLabel()}`);
+    const joined = parts.join("  ");
+    const maxLen = promptProfile() === "wide" ? Math.max(26, promptWidthBudget() - 26) : Math.max(26, promptWidthBudget() - 20);
+    return truncate(joined, maxLen);
+  });
+
+  const metaRightLabel = createMemo(() => {
+    if (promptProfile() === "wide") return `TOK:${tokenLabel()} SID:${sessionLabel()}`;
+    return `TOK:${tokenLabel()}`;
+  });
+
+  const streamActive = createMemo(() => Boolean(streamingMessage() || liveToolCalls().length > 0));
+
+  const lastUserMessageId = createMemo(() => {
+    const items = chatMessages();
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      if (items[i]?.role === "user") {
+        return items[i]?.id ?? "";
+      }
+    }
+    return "";
+  });
+
+  const renderLiveStreamBlock = () => (
+    <box width="100%" flexDirection="column" paddingTop={1} paddingBottom={1}>
+      <box flexDirection="row" width="100%" paddingLeft={1} paddingRight={1}>
+        <text content={streamTitleLabel()} fg={theme.accent} />
+        <text content=" | " fg={theme.textMuted} />
+        <text content={streamHeaderLeft()} fg={phaseColor()} />
+        <box flexGrow={1} />
+        <Show when={promptProfile() !== "narrow"}>
+          <text content={`model=${modelLabel()}`} fg={theme.textMuted} />
+        </Show>
+      </box>
+      <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
+
+      <Show when={streamingMessage()}>
+        <box flexDirection="column" paddingLeft={2} paddingRight={1}>
+          <For each={wrapText(streamingMessage(), streamWrapWidth())}>
+            {(line) => <text content={line} fg={theme.text} />}
+          </For>
+          <text content="_" fg={theme.primary} />
+        </box>
+      </Show>
+
+      <Show when={!streamingMessage() && chatLoading()}>
+        <box flexDirection="row" paddingLeft={2}>
+          <text content="processing tool output..." fg={theme.textMuted} />
+        </box>
+      </Show>
+
+      <Show when={liveToolCalls().length > 0}>
+        <box paddingLeft={1} paddingRight={1} paddingTop={1}>
+          <ToolCallList
+            tools={liveToolCalls()}
+            title="Live Tool Calls"
+            selectedId={selectedToolId()}
+            expandedIds={enterpriseToolExpandedIds()}
+            collapseByDefault
+            compact={!showInspector()}
+            onSelect={(id) => setEnterpriseToolSelectedId(id)}
+            onToggleExpand={(id) => toggleEnterpriseToolExpanded(id)}
+          />
+        </box>
+      </Show>
+    </box>
+  );
 
   return (
     <box
@@ -195,209 +466,278 @@ export function EnterpriseChat() {
       zIndex={200}
       flexDirection="column"
     >
-      {/* Header */}
       <PanelHeader
         title="POLYMARKET AGENT"
-        icon="◈"
-        subtitle={`${resolvedModel()} │ ${sessionLabel()} │ ${tokLabel()}`}
+        icon="|"
+        subtitle={headerSubtitle()}
       />
 
       <Separator />
 
-      {/* Main two-pane area */}
       <box flexGrow={1} width="100%" flexDirection="row">
-
-        {/* Left pane — Messages (65%) */}
-        <box width="65%" flexDirection="column">
-          <scrollbox flexGrow={1} width="100%">
+        <box width={showInspector() ? "65%" : "100%"} flexDirection="column">
+          <scrollbox flexGrow={1} width="100%" stickyScroll stickyStart="bottom">
             <box width="100%" flexDirection="column">
               <Show when={chatMessages().length === 0 && !chatLoading() && !streamingMessage()}>
                 <box flexDirection="column" paddingLeft={2} paddingTop={2}>
-                  <text content="◈ POLYMARKET AI AGENT" fg={theme.primary} />
-                  <text content="" fg={theme.textMuted} />
-                  <text content="Available commands:" fg={theme.textMuted} />
-                  <text content="  /help     show commands" fg={theme.textMuted} />
-                  <text content="  /clear    new session" fg={theme.textMuted} />
-                  <text content="  /sessions list history" fg={theme.textMuted} />
-                  <text content="" fg={theme.textMuted} />
-                  <text content="Example queries:" fg={theme.textMuted} />
-                  <text content="  What are the trending markets?" fg={theme.primary} />
-                  <text content="  Show me live sports markets" fg={theme.primary} />
-                  <text content="  Analyze current market and suggest trade" fg={theme.primary} />
-                  <text content="" fg={theme.textMuted} />
-                  <text content="Suggested quick commands:" fg={theme.textMuted} />
-                  <text content="  Summarize my portfolio risk exposure" fg={theme.accent} />
-                  <text content="  Which open positions should I close today?" fg={theme.accent} />
-                  <text content="  Find high-volume markets with big 24h moves" fg={theme.accent} />
+                  <text content={makeRule("POLYMARKET AI AGENT", introRuleWidth())} fg={theme.borderSubtle} />
+                  <text content="" />
+                  <text content={truncate("  * Intelligent assistant for Polymarket prediction markets", introRuleWidth())} fg={theme.primary} />
+                  <text content="" />
+                  <text content={makeRule("SLASH COMMANDS", introRuleWidth())} fg={theme.borderSubtle} />
+                  <text content="  /help       list all available commands" fg={theme.textMuted} />
+                  <text content="  /clear      start a fresh session" fg={theme.textMuted} />
+                  <text content="  /sessions   browse conversation history" fg={theme.textMuted} />
+                  <text content="" />
+                  <text content={makeRule("EXAMPLE QUERIES", introRuleWidth())} fg={theme.borderSubtle} />
+                  <text content={truncate("  What are the trending markets right now?", introRuleWidth())} fg={theme.accent} />
+                  <text content={truncate("  Analyze the selected market and suggest a trade", introRuleWidth())} fg={theme.accent} />
+                  <Show when={!isNarrow()}>
+                    <>
+                      <text content="  Show my portfolio P&L and top positions" fg={theme.accent} />
+                      <text content="  Compare sports vs crypto market volumes" fg={theme.accent} />
+                    </>
+                  </Show>
+                  <text content="" />
+                  <text content={truncate("  Press [I] or [Enter] to focus the input below.", introRuleWidth())} fg={theme.textMuted} />
                 </box>
               </Show>
 
               <For each={chatMessages()}>
-                {(msg) => <MessageBubble message={msg} />}
+                {(message) => (
+                  <>
+                    <ChatMessageItem
+                      role={message.role}
+                      content={message.content}
+                      timestamp={message.timestamp}
+                      toolCalls={(message.toolCalls ?? []).map((toolCall) => ({
+                        id: toolCall.id,
+                        name: toolCall.name,
+                        args: toolCall.arguments,
+                        result: toolCall.result,
+                        status: statusFromToolResult(toolCall.result),
+                        category: toolCategoryFromName(toolCall.name),
+                      }))}
+                    />
+
+                    <Show when={streamActive() && message.id === lastUserMessageId()}>
+                      {renderLiveStreamBlock()}
+                    </Show>
+                  </>
+                )}
               </For>
 
-              {/* Streaming partial response */}
-              <Show when={streamingMessage()}>
-                <box width="100%" flexDirection="column" paddingTop={1} paddingBottom={1}>
-                  <box flexDirection="row" paddingLeft={1}>
-                    <text content="◈ Agent" fg={theme.primary} />
-                    <text content="  streaming…" fg={theme.textMuted} />
-                  </box>
-                  <box flexDirection="column" paddingLeft={2} paddingRight={1}>
-                    <For each={wrapText(streamingMessage(), 70)}>
-                      {(line) => <text content={line} fg={theme.text} />}
-                    </For>
-                    <text content="▌" fg={theme.primary} />
-                  </box>
-                </box>
+              <Show when={streamActive() && !lastUserMessageId()}>
+                {renderLiveStreamBlock()}
               </Show>
 
-              <Show when={chatLoading() && !streamingMessage()}>
+              <Show when={chatLoading() && !streamingMessage() && liveToolCalls().length === 0}>
                 <LoadingState message="Thinking..." />
               </Show>
             </box>
           </scrollbox>
         </box>
 
-        {/* Vertical separator */}
-        <box width={1} backgroundColor={theme.border} />
+        <Show when={showInspector()}>
+          <>
+            <box width={1} backgroundColor={theme.border} />
 
-        {/* Right pane — Tool Inspector + Context (35%) */}
-        <box flexGrow={1} flexDirection="column">
+            <box flexGrow={1} flexDirection="column">
+              <SectionTitle title="Tool Inspector" icon="|" />
 
-          {/* Tool Inspector */}
-          <SectionTitle title="Tool Inspector" icon="◈" />
-          
-          <scrollbox height={14} width="100%">
-            <box width="100%" flexDirection="column" paddingTop={1}>
-              <Show when={streamingTools().length === 0 && lastAssistantToolCalls().length === 0}>
-                <box paddingLeft={2}>
-                  <text content="○ No tools called yet" fg={theme.textMuted} />
-                </box>
-              </Show>
+              <scrollbox height={15} width="100%">
+                <box width="100%" flexDirection="column" paddingTop={1}>
+                  <Show when={liveToolCalls().length === 0 && historicalToolCalls().length === 0}>
+                    <box paddingLeft={2}>
+                      <text content="No tools called yet" fg={theme.textMuted} />
+                    </box>
+                  </Show>
 
-              <For each={streamingTools()}>
-                {(t) => (
-                  <ToolEntry
-                    name={t.name}
-                    args={t.args}
-                    result={t.result}
-                    status={t.status}
-                  />
-                )}
-              </For>
-
-              <Show when={streamingTools().length === 0}>
-                <For each={lastAssistantToolCalls()}>
-                  {(tc: ToolCall) => (
-                    <ToolEntry
-                      name={tc.name}
-                      args={tc.arguments}
-                      result={tc.result}
-                      status="done"
+                  <Show when={liveToolCalls().length > 0}>
+                    <ToolCallList
+                      tools={liveToolCalls()}
+                      selectedId={selectedToolId()}
+                      expandedIds={enterpriseToolExpandedIds()}
+                      collapseByDefault
+                      compact
+                      onSelect={(id) => setEnterpriseToolSelectedId(id)}
+                      onToggleExpand={(id) => toggleEnterpriseToolExpanded(id)}
                     />
-                  )}
-                </For>
-              </Show>
-            </box>
-          </scrollbox>
+                  </Show>
 
-          <Separator />
+                  <Show when={liveToolCalls().length === 0 && historicalToolCalls().length > 0}>
+                    <ToolCallList
+                      tools={historicalToolCalls()}
+                      title="Last Assistant Tools"
+                      selectedId={selectedToolId()}
+                      expandedIds={enterpriseToolExpandedIds()}
+                      collapseByDefault
+                      compact
+                      onSelect={(id) => setEnterpriseToolSelectedId(id)}
+                      onToggleExpand={(id) => toggleEnterpriseToolExpanded(id)}
+                    />
+                  </Show>
+                </box>
+              </scrollbox>
 
-          {/* Context panel */}
-          <SectionTitle title="Context" icon="◈" />
+              <Separator />
 
-          <box flexGrow={1} flexDirection="column" paddingLeft={1} paddingTop={1}>
-            <Show
-              when={selectedMarket()}
-              fallback={<text content="No market selected" fg={theme.textMuted} />}
-            >
-              {(market: () => Market) => (
-                <>
-                  <DataRow label="Market" value={truncate(market().title, 32)} valueColor="text" />
-                  <box flexDirection="row" paddingLeft={1}>
-                    <text content="Price:  " fg={theme.textMuted} />
-                    <PriceDisplay price={market().outcomes[0]?.price || 0} showCents />
-                    <box paddingLeft={1}>
-                      <PriceChange value={market().change24h} showSign />
-                    </box>
-                  </box>
-                  <DataRow label="Volume" value={`$${(market().volume24h / 1000).toFixed(1)}K`} valueColor="muted" />
-                  <DataRow label="Liquidity" value={`$${(market().liquidity / 1000).toFixed(1)}K`} valueColor="muted" />
-                </>
-              )}
-            </Show>
+              <SectionTitle title="Context" icon="|" />
 
-            <Separator type="light" />
-            <box height={1} />
-
-            <box flexDirection="row">
-              <text content="Wallet: " fg={theme.textMuted} />
-              <Show
-                when={walletState.connected}
-                fallback={<text content="not connected" fg={theme.error} />}
-              >
-                <text
-                  content={walletState.address ? `${walletState.address.slice(0, 8)}…${walletState.address.slice(-4)}` : "connected"}
-                  fg={theme.success}
-                />
-              </Show>
-            </box>
-
-            <Show when={walletState.connected}>
-              <DataRow
-                label="Balance"
-                value={`$${walletState.balance?.toFixed(2) ?? "0.00"}`}
-                valueColor="success"
-              />
-            </Show>
-
-            <box height={1} />
-
-            <DataRow
-              label="Markets"
-              value={`${appState.markets.length} loaded`}
-              valueColor="muted"
-            />
-
-            <Show when={positionsState.positions.length > 0}>
-              <box height={1} />
-              <text content="── Portfolio ──" fg={theme.textMuted} />
-              {(() => {
-                const ps = calculatePortfolioSummary(positionsState.positions);
-                const topPos = [...positionsState.positions].sort((a, b) => Math.abs(b.cashPnl) - Math.abs(a.cashPnl))[0] ?? null;
-                return (
-                  <>
-                    <DataRow label="Value" value={`$${ps.totalValue.toFixed(2)}`} />
-                    <box flexDirection="row" gap={1}>
-                      <text content="P&L: " fg={theme.textMuted} />
-                      <text content={`${ps.totalCashPnl >= 0 ? "+" : ""}$${ps.totalCashPnl.toFixed(2)}`} fg={ps.totalCashPnl >= 0 ? theme.success : theme.error} />
-                    </box>
-                    <DataRow label="Positions" value={`${ps.positionCount}`} valueColor="muted" />
-                    <Show when={topPos !== null}>
-                      <box flexDirection="row" gap={1}>
-                        <text content="Top: " fg={theme.textMuted} />
-                        <text content={topPos!.title.slice(0, 16)} fg={theme.text} />
-                        <text content={`${topPos!.cashPnl >= 0 ? "+" : ""}$${topPos!.cashPnl.toFixed(2)}`} fg={topPos!.cashPnl >= 0 ? theme.success : theme.error} />
+              <box flexGrow={1} flexDirection="column" paddingLeft={1} paddingTop={1}>
+                <Show
+                  when={selectedMarket()}
+                  fallback={<text content="No market selected" fg={theme.textMuted} />}
+                >
+                  {(market: () => Market) => (
+                    <>
+                      <DataRow label="Market" value={truncate(market().title, 32)} valueColor="text" />
+                      <box flexDirection="row" paddingLeft={1}>
+                        <text content="Price:  " fg={theme.textMuted} />
+                        <PriceDisplay price={market().outcomes[0]?.price || 0} showCents />
+                        <box paddingLeft={1}>
+                          <PriceChange value={market().change24h} showSign />
+                        </box>
                       </box>
-                    </Show>
-                  </>
-                );
-              })()}
+                      <DataRow label="Volume" value={`$${(market().volume24h / 1000).toFixed(1)}K`} valueColor="muted" />
+                      <DataRow label="Liquidity" value={`$${(market().liquidity / 1000).toFixed(1)}K`} valueColor="muted" />
+                    </>
+                  )}
+                </Show>
+
+                <Separator type="light" />
+                <box height={1} />
+
+                <box flexDirection="row">
+                  <text content="Wallet: " fg={theme.textMuted} />
+                  <Show
+                    when={walletState.connected}
+                    fallback={<text content="not connected" fg={theme.error} />}
+                  >
+                    <text
+                      content={walletState.address ? `${walletState.address.slice(0, 8)}...${walletState.address.slice(-4)}` : "connected"}
+                      fg={theme.success}
+                    />
+                  </Show>
+                </box>
+
+                <Show when={walletState.connected}>
+                  <DataRow
+                    label="Balance"
+                    value={`$${walletState.balance?.toFixed(2) ?? "0.00"}`}
+                    valueColor="success"
+                  />
+                </Show>
+
+                <box height={1} />
+
+                <DataRow
+                  label="Markets"
+                  value={`${appState.markets.length} loaded`}
+                  valueColor="muted"
+                />
+
+                <Show when={positionsState.positions.length > 0}>
+                  <Separator type="light" />
+                  <text content="--- PORTFOLIO ---" fg={theme.borderSubtle} />
+                  {(() => {
+                    const portfolioSummary = calculatePortfolioSummary(positionsState.positions);
+                    const topPosition = [...positionsState.positions].sort((a, b) => Math.abs(b.cashPnl) - Math.abs(a.cashPnl))[0] ?? null;
+                    return (
+                      <>
+                        <DataRow label="Value" value={`$${portfolioSummary.totalValue.toFixed(2)}`} />
+                        <box flexDirection="row" gap={1}>
+                          <text content="P&L: " fg={theme.textMuted} />
+                          <text
+                            content={`${portfolioSummary.totalCashPnl >= 0 ? "+" : ""}$${portfolioSummary.totalCashPnl.toFixed(2)}`}
+                            fg={portfolioSummary.totalCashPnl >= 0 ? theme.success : theme.error}
+                          />
+                        </box>
+                        <DataRow label="Positions" value={`${portfolioSummary.positionCount}`} valueColor="muted" />
+                        <Show when={topPosition !== null}>
+                          <box flexDirection="row" gap={1}>
+                            <text content="Top: " fg={theme.textMuted} />
+                            <text content={topPosition!.title.slice(0, 16)} fg={theme.text} />
+                            <text
+                              content={`${topPosition!.cashPnl >= 0 ? "+" : ""}$${topPosition!.cashPnl.toFixed(2)}`}
+                              fg={topPosition!.cashPnl >= 0 ? theme.success : theme.error}
+                            />
+                          </box>
+                        </Show>
+                      </>
+                    );
+                  })()}
+                </Show>
+              </box>
+            </box>
+          </>
+        </Show>
+      </box>
+
+      <box height={promptHeight()} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="column">
+        <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
+
+        <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
+          <box width={1} backgroundColor={theme.accent} />
+          <box flexGrow={1} flexDirection="row" paddingLeft={1} paddingRight={1}>
+            <text content="PROMPT" fg={theme.accent} />
+            <text content=" " />
+            <text content={promptMode()} fg={promptModeColor()} />
+            <box flexGrow={1} />
+            <text content={hintLabel()} fg={theme.textMuted} />
+          </box>
+        </box>
+
+        <box
+          flexDirection="row"
+          width="100%"
+          backgroundColor={chatInputFocused() ? theme.background : theme.backgroundPanel}
+        >
+          <box width={1} backgroundColor={theme.accent} />
+          <box flexGrow={1} flexDirection="row" paddingLeft={1} paddingRight={1}>
+            <text content={chatInputFocused() ? promptPrefix() : "|"} fg={chatInputFocused() ? promptPrefixColor() : theme.accent} />
+            <text content=" " />
+            <input
+              flexGrow={1}
+              value={chatInputValue()}
+              onInput={setChatInputValue}
+              placeholder={promptPlaceholder()}
+              focused={chatInputFocused()}
+            />
+            <text content={` ${inputStatusLabel()}`} fg={inputStatusColor()} />
+          </box>
+        </box>
+
+        <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
+          <box width={1} backgroundColor={theme.accent} />
+          <box flexGrow={1} flexDirection="row" paddingLeft={1} paddingRight={1}>
+            <text content={truncate(promptSupportLine(), promptSupportMaxChars())} fg={theme.textMuted} />
+            <box flexGrow={1} />
+            <Show
+              when={!isNarrow()}
+              fallback={
+                <>
+                  <text content={`${toolQueueCompactLabel()} `} fg={toolQueueColor()} />
+                  <text content={phaseShortLabel()} fg={phaseColor()} />
+                </>
+              }
+            >
+              <text content={`${toolQueueLabel()} `} fg={toolQueueColor()} />
+              <text content={`PHASE ${phaseLabel()}`} fg={phaseColor()} />
             </Show>
           </box>
         </box>
-      </box>
 
-      {/* Input bar */}
-      <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
-        <text content=" > " fg={theme.accent} />
-        <text content={chatInputValue() || (chatInputFocused() ? "" : "(type message...)")} fg={theme.text} />
-        <Show when={chatInputFocused() && !chatLoading()}>
-          <text content="▌" fg={theme.primary} />
+        <Show when={showMetaRow()}>
+          <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
+            <box width={1} backgroundColor={theme.accent} />
+            <box flexGrow={1} flexDirection="row" paddingLeft={1} paddingRight={1}>
+              <text content={metaPrimaryLabel()} fg={theme.text} />
+              <box flexGrow={1} />
+              <text content={metaRightLabel()} fg={theme.textMuted} />
+            </box>
+          </box>
         </Show>
-        <box flexGrow={1} />
-        <text content=" [↑↓]:history [Ctrl+L]:clear [Esc]:close" fg={theme.textMuted} />
       </box>
     </box>
   );

@@ -59,9 +59,9 @@ export function ComparisonPanel(props: ComparisonPanelProps) {
     <box
       position="absolute"
       top={2}
-      left="4%"
-      width="92%"
-      height={28}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={160}
@@ -140,17 +140,18 @@ export function ComparisonPanel(props: ComparisonPanelProps) {
                   <DataRow label="Liquidity" value={fmtVol(primaryMarket()!.liquidity || 0)} valueColor="muted" />
 
                   <text content="" />
-                  <text content="OUTCOMES" fg={theme.primary} />
+                  <text content="─── OUTCOMES ───" fg={theme.borderSubtle} />
                   <For each={primaryMarket()!.outcomes}>
-                    {(outcome) => (
-                      <box flexDirection="row" gap={2}>
-                        <text content={outcome.title.slice(0, 20)} fg={theme.textMuted} width={22} />
-                        <text
-                          content={`${(outcome.price * 100).toFixed(1)}¢`}
-                          fg={outcome.price > 0.6 ? theme.success : outcome.price > 0.4 ? theme.warning : theme.error}
-                        />
-                      </box>
-                    )}
+                    {(outcome) => {
+                      const bar = "█".repeat(Math.round(outcome.price * 10)) + "░".repeat(10 - Math.round(outcome.price * 10));
+                      return (
+                        <box flexDirection="row" gap={1}>
+                          <text content={outcome.title.slice(0, 12).padEnd(13, " ")} fg={theme.textMuted} width={14} />
+                          <text content={bar} fg={outcome.price > 0.6 ? theme.success : outcome.price > 0.4 ? theme.warning : theme.error} />
+                          <text content={` ${(outcome.price * 100).toFixed(1)}¢`} fg={outcome.price > 0.6 ? theme.success : outcome.price > 0.4 ? theme.warning : theme.error} />
+                        </box>
+                      );
+                    }}
                   </For>
                 </box>
               </Show>
@@ -180,17 +181,18 @@ export function ComparisonPanel(props: ComparisonPanelProps) {
                   <DataRow label="Liquidity" value={fmtVol(secondaryMarket()!.liquidity || 0)} valueColor="muted" />
 
                   <text content="" />
-                  <text content="OUTCOMES" fg={theme.accent} />
+                  <text content="─── OUTCOMES ───" fg={theme.borderSubtle} />
                   <For each={secondaryMarket()!.outcomes}>
-                    {(outcome) => (
-                      <box flexDirection="row" gap={2}>
-                        <text content={outcome.title.slice(0, 20)} fg={theme.textMuted} width={22} />
-                        <text
-                          content={`${(outcome.price * 100).toFixed(1)}¢`}
-                          fg={outcome.price > 0.6 ? theme.success : outcome.price > 0.4 ? theme.warning : theme.error}
-                        />
-                      </box>
-                    )}
+                    {(outcome) => {
+                      const bar = "█".repeat(Math.round(outcome.price * 10)) + "░".repeat(10 - Math.round(outcome.price * 10));
+                      return (
+                        <box flexDirection="row" gap={1}>
+                          <text content={outcome.title.slice(0, 12).padEnd(13, " ")} fg={theme.textMuted} width={14} />
+                          <text content={bar} fg={outcome.price > 0.6 ? theme.success : outcome.price > 0.4 ? theme.warning : theme.error} />
+                          <text content={` ${(outcome.price * 100).toFixed(1)}¢`} fg={outcome.price > 0.6 ? theme.success : outcome.price > 0.4 ? theme.warning : theme.error} />
+                        </box>
+                      );
+                    }}
                   </For>
                 </box>
               </Show>
@@ -204,17 +206,17 @@ export function ComparisonPanel(props: ComparisonPanelProps) {
               <text content="─── DIFFERENTIAL " fg={theme.borderSubtle} />
               <box flexGrow={1} />
               <text
-                content={`Vol: ${comparisonStats()!.volumeDiff >= 0 ? "+" : ""}${fmtVol(comparisonStats()!.volumeDiff)} (${fmtPct(comparisonStats()!.volumeDiffPct)})`}
+                content={`Vol ${comparisonStats()!.volumeDiff >= 0 ? "▲" : "▼"} ${comparisonStats()!.volumeDiff >= 0 ? "+" : ""}${fmtVol(comparisonStats()!.volumeDiff)} (${fmtPct(comparisonStats()!.volumeDiffPct)})`}
                 fg={comparisonStats()!.volumeDiff >= 0 ? theme.success : theme.error}
               />
-              <text content="  " />
+              <text content=" │ " fg={theme.borderSubtle} />
               <text
-                content={`Chg: ${fmtPct(comparisonStats()!.priceChangeDiff)}`}
+                content={`Chg ${comparisonStats()!.priceChangeDiff >= 0 ? "▲" : "▼"} ${fmtPct(comparisonStats()!.priceChangeDiff)}`}
                 fg={comparisonStats()!.priceChangeDiff >= 0 ? theme.success : theme.error}
               />
-              <text content="  " />
+              <text content=" │ " fg={theme.borderSubtle} />
               <text
-                content={`Liq: ${comparisonStats()!.liquidityDiff >= 0 ? "+" : ""}${fmtVol(comparisonStats()!.liquidityDiff)}`}
+                content={`Liq ${comparisonStats()!.liquidityDiff >= 0 ? "▲" : "▼"} ${comparisonStats()!.liquidityDiff >= 0 ? "+" : ""}${fmtVol(comparisonStats()!.liquidityDiff)}`}
                 fg={comparisonStats()!.liquidityDiff >= 0 ? theme.success : theme.error}
               />
             </box>

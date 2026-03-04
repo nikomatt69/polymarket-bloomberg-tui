@@ -80,8 +80,8 @@ export function SentimentPanel() {
       position="absolute"
       top={2}
       left="8%"
-      width="44%"
-      height={22}
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={150}
@@ -118,6 +118,10 @@ export function SentimentPanel() {
             <box flexDirection="row" paddingTop={0}>
               <text content="Signal : " fg={theme.textMuted} />
               <text
+                content={sentimentData()!.sentiment === "bullish" ? "▲ " : sentimentData()!.sentiment === "bearish" ? "▼ " : "─ "}
+                fg={sentimentColor(sentimentData()!.sentiment)}
+              />
+              <text
                 content={sentimentData()!.sentiment.toUpperCase()}
                 fg={sentimentColor(sentimentData()!.sentiment)}
               />
@@ -136,9 +140,12 @@ export function SentimentPanel() {
             <text content="" />
             <text content="─── KEY FACTORS ─────────────────────────────" fg={theme.borderSubtle} />
             <For each={sentimentData()!.keyFactors.slice(0, 4)}>
-              {(factor) => (
+              {(factor, i) => (
                 <box flexDirection="row">
-                  <text content="▸ " fg={theme.accent} />
+                  <text
+                    content="● "
+                    fg={i() === 0 ? sentimentColor(sentimentData()!.sentiment) : i() <= 1 ? theme.accent : theme.textMuted}
+                  />
                   <text content={factor} fg={theme.text} />
                 </box>
               )}

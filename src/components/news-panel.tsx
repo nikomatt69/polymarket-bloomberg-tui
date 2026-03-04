@@ -61,10 +61,10 @@ export function NewsPanel() {
   return (
     <box
       position="absolute"
-      top={1}
-      left="5%"
-      width="90%"
-      height={30}
+      top={2}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={160}
@@ -110,11 +110,14 @@ export function NewsPanel() {
               </box>
             }
           >
-            <scrollbox height={17} width="100%">
+            <text content={`─── NEWS FEED (${newsItems().length} articles) ─────────────────────────────────────`} fg={theme.borderSubtle} />
+            <scrollbox height={16} width="100%">
               <For each={newsItems()}>
                 {(item, i) => {
                   const isSelected = () => selectedNewsIndex() === i();
                   const isRelevant = () => relevantIds().has(item.id);
+                  const ageMinutes = () => Math.floor((Date.now() - item.publishedAt) / 60000);
+                  const ageColor = () => isSelected() ? theme.highlightText : ageMinutes() < 60 ? theme.success : ageMinutes() < 360 ? theme.warning : theme.textMuted;
                   return (
                     <box
                       flexDirection="row"
@@ -133,7 +136,7 @@ export function NewsPanel() {
                       />
                       <text
                         content={fmtAge(item.publishedAt).padEnd(8, " ")}
-                        fg={theme.textMuted}
+                        fg={ageColor()}
                         width={9}
                       />
                       <text

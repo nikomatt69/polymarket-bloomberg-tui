@@ -98,6 +98,21 @@ function probBar(price: number): string {
   return "█".repeat(filled) + "░".repeat(10 - filled);
 }
 
+/** 20-char Fear/Greed bar (0–100) */
+function fgBar(value: number): string {
+  const width = 20;
+  const filled = Math.round(Math.max(0, Math.min(100, value)) / 100 * width);
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
+/** 15-char Smart Money bar (0–50% → full) */
+function smBar(value: number): string {
+  const width = 15;
+  const pct = Math.min(100, value * 2);
+  const filled = Math.round(pct / 100 * width);
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
 /** Labeled section divider: ─── LABEL ────────── */
 function sectionLine(label: string, totalWidth: number = 50): string {
   const prefix = `─── ${label} `;
@@ -308,21 +323,19 @@ export function MarketDetails() {
             {/* ── OVERVIEW section ───────────────────────────────────────── */}
             <text content={sectionLine("OVERVIEW")} fg={theme.borderSubtle} />
 
-            <box flexDirection="row" gap={3} height={1}>
+            <box flexDirection="row" gap={2} height={1}>
+              <text content="Vol(24h)" fg={theme.textMuted} />
+              <text content={formatVolume(market().volume24h)} fg={theme.text} />
+              <text content="│" fg={theme.borderSubtle} />
+              <text content="Liq" fg={theme.textMuted} />
+              <text content={formatVolume(market().liquidity)} fg={theme.accent} />
+              <text content="│" fg={theme.borderSubtle} />
+              <text content="Outcomes" fg={theme.textMuted} />
+              <text content={market().outcomes.length.toString()} fg={theme.text} />
+              <text content="│" fg={theme.borderSubtle} />
+              <text content="Chg(24h)" fg={theme.textMuted} />
               <text
-                content={`Vol(24h): ${formatVolume(market().volume24h)}`}
-                fg={theme.textMuted}
-              />
-              <text
-                content={`Liq: ${formatVolume(market().liquidity)}`}
-                fg={theme.textMuted}
-              />
-              <text
-                content={`Outcomes: ${market().outcomes.length}`}
-                fg={theme.textMuted}
-              />
-              <text
-                content={`Chg(24h): ${market().change24h >= 0 ? "+" : ""}${market().change24h.toFixed(2)}%`}
+                content={`${market().change24h >= 0 ? "+" : ""}${market().change24h.toFixed(2)}%`}
                 fg={market().change24h >= 0 ? theme.success : theme.error}
               />
             </box>
@@ -335,15 +348,17 @@ export function MarketDetails() {
                   fg={theme.text}
                 />
                 <text
-                  content={`${formatCents(leadOutcome()!.price)}`}
+                  content={formatCents(leadOutcome()!.price)}
                   fg={theme.success}
                 />
                 <Show when={leadBook()}>
                   <text content="│" fg={theme.borderSubtle} />
+                  <text content="▲" fg={theme.success} />
                   <text
                     content={`Bid ${leadBook()?.bestBid !== null ? formatCents(leadBook()!.bestBid!) : "--"}`}
                     fg={theme.success}
                   />
+                  <text content="▼" fg={theme.error} />
                   <text
                     content={`Ask ${leadBook()?.bestAsk !== null ? formatCents(leadBook()!.bestAsk!) : "--"}`}
                     fg={theme.error}
@@ -354,6 +369,16 @@ export function MarketDetails() {
                   />
                 </Show>
               </box>
+              <Show when={resolutionComparison()}>
+                <box flexDirection="row" height={1} gap={1}>
+                  <text content="YES" fg={theme.success} />
+                  <text content={probBar(resolutionComparison()!.currentYes)} fg={theme.success} />
+                  <text content={`${(resolutionComparison()!.currentYes * 100).toFixed(0)}%`} fg={theme.success} />
+                  <text content="  NO" fg={theme.error} />
+                  <text content={probBar(resolutionComparison()!.currentNo)} fg={theme.error} />
+                  <text content={`${(resolutionComparison()!.currentNo * 100).toFixed(0)}%`} fg={theme.error} />
+                </box>
+              </Show>
             </Show>
 
             {/* ── PROBABILITIES section ───────────────────────────────────── */}
@@ -425,37 +450,30 @@ export function MarketDetails() {
               </box>
             </Show>
 
-            <Show when={fearGreed() !== null || smartMoney() !== null}>
-              <box flexDirection="row" gap={2} height={1}>
-                <Show when={fearGreed() !== null}>
-                  <text content="Fear/Greed:" fg={theme.textMuted} />
-                  <text
-                    content={`${getFearGreedLabel(fearGreed()!)} (${fearGreed()!.toFixed(0)})`}
-                    fg={
-                      fearGreed()! >= 55
-                        ? theme.success
-                        : fearGreed()! <= 45
-                          ? theme.error
-                          : theme.warning
-                    }
-                  />
-                </Show>
-                <Show when={fearGreed() !== null && smartMoney() !== null}>
-                  <text content="│" fg={theme.borderSubtle} />
-                </Show>
-                <Show when={smartMoney() !== null}>
-                  <text content="Smart$:" fg={theme.textMuted} />
-                  <text
-                    content={`${getSmartMoneyLabel(smartMoney()!)} (${smartMoney()!.toFixed(1)}%)`}
-                    fg={
-                      smartMoney()! >= 15
-                        ? theme.success
-                        : smartMoney()! >= 5
-                          ? theme.warning
-                          : theme.textMuted
-                    }
-                  />
-                </Show>
+            <Show when={fearGreed() !== null}>
+              <box flexDirection="row" height={1} gap={1}>
+                <text content="Fear/Greed" fg={theme.textMuted} />
+                <text
+                  content={fgBar(fearGreed()!)}
+                  fg={fearGreed()! >= 55 ? theme.success : fearGreed()! <= 45 ? theme.error : theme.warning}
+                />
+                <text
+                  content={`${fearGreed()!.toFixed(0)} ${getFearGreedLabel(fearGreed()!)}`}
+                  fg={fearGreed()! >= 55 ? theme.success : fearGreed()! <= 45 ? theme.error : theme.warning}
+                />
+              </box>
+            </Show>
+            <Show when={smartMoney() !== null}>
+              <box flexDirection="row" height={1} gap={1}>
+                <text content="Smart$     " fg={theme.textMuted} />
+                <text
+                  content={smBar(smartMoney()!)}
+                  fg={smartMoney()! >= 15 ? theme.success : smartMoney()! >= 5 ? theme.warning : theme.textMuted}
+                />
+                <text
+                  content={`${smartMoney()!.toFixed(1)}% ${getSmartMoneyLabel(smartMoney()!)}`}
+                  fg={smartMoney()! >= 15 ? theme.success : smartMoney()! >= 5 ? theme.warning : theme.textMuted}
+                />
               </box>
             </Show>
 

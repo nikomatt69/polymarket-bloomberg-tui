@@ -80,10 +80,10 @@ export function AutomationPanel() {
   return (
     <box
       position="absolute"
-      top={1}
-      left="5%"
-      width="90%"
-      height={28}
+      top={2}
+      left="8%"
+      width="84%"
+      height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={160}
@@ -133,6 +133,12 @@ export function AutomationPanel() {
       {/* Rules tab */}
       <Show when={automationTab() === "rules"}>
         <box flexGrow={1} flexDirection="column" paddingLeft={1}>
+          <box flexDirection="row" paddingTop={0}>
+            <text content={`─── RULES (${rules().length}) `} fg={theme.borderSubtle} />
+            <text content={`${rules().filter(r => r.enabled).length} enabled`} fg={theme.success} />
+            <text content=" │ " fg={theme.borderSubtle} />
+            <text content={`${rules().filter(r => !r.enabled).length} disabled`} fg={theme.textMuted} />
+          </box>
           {/* Column headers */}
           <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
             <text content="   " width={3} fg={theme.textMuted} />
@@ -167,7 +173,7 @@ export function AutomationPanel() {
                     >
                       <text content={isSelected() ? " ▶ " : "   "} fg={theme.warning} width={3} />
                       <text
-                        content={rule.enabled ? " ✓  " : " ✗  "}
+                        content={rule.enabled ? "●  " : "○  "}
                         fg={rule.enabled ? theme.success : theme.error}
                         width={4}
                       />
@@ -211,6 +217,14 @@ export function AutomationPanel() {
       {/* Scanner Alerts tab */}
       <Show when={automationTab() === "alerts"}>
         <box flexGrow={1} flexDirection="column" paddingLeft={1}>
+          <box flexDirection="row" paddingTop={0}>
+            <text content={`─── SCANNER (${alerts().length}) `} fg={theme.borderSubtle} />
+            <text content={`${alerts().filter(a => a.severity === "high").length} high`} fg={theme.error} />
+            <text content=" │ " fg={theme.borderSubtle} />
+            <text content={`${alerts().filter(a => a.severity === "medium").length} med`} fg={theme.warning} />
+            <text content=" │ " fg={theme.borderSubtle} />
+            <text content={`${alerts().filter(a => a.severity === "low").length} low`} fg={theme.textMuted} />
+          </box>
           {/* Column headers */}
           <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
             <text content="   " width={3} fg={theme.textMuted} />

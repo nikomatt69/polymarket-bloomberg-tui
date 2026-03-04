@@ -353,7 +353,14 @@ export function AnalyticsPanel() {
           value={volumeProfile()?.level || "N/A"}
           valueColor={volumeProfile()?.level === "Very High" || volumeProfile()?.level === "High" ? "success" : "warning"}
         />
-        <DataRow label="Score" value={`${volumeProfile()?.score || 0}/100`} valueColor="muted" />
+        <box paddingLeft={2} flexDirection="row">
+          <text content="Score  " fg={theme.textMuted} />
+          <text
+            content={"█".repeat(Math.round((volumeProfile()?.score ?? 0) / 100 * 20)) + "░".repeat(20 - Math.round((volumeProfile()?.score ?? 0) / 100 * 20))}
+            fg={volumeProfile()?.level === "Very High" || volumeProfile()?.level === "High" ? theme.success : theme.warning}
+          />
+          <text content={` ${volumeProfile()?.score || 0}/100`} fg={theme.textMuted} />
+        </box>
 
         <box paddingLeft={1} paddingTop={0}>
           <text content="Vol  " fg={theme.textMuted} />
@@ -405,12 +412,14 @@ export function AnalyticsPanel() {
           valueColor={spreadScore().spread < 3 ? "success" : spreadScore().spread < 5 ? "warning" : "error"}
         />
         <DataRow label="Spread Rating" value={spreadScore().label} valueColor="muted" />
-        <DataRow
-          label="Depth Score"
-          value={`${depthScore().score}/100`}
-          valueColor={depthScore().score > 60 ? "success" : depthScore().score > 40 ? "warning" : "error"}
-        />
-        <DataRow label="Depth Rating" value={depthScore().label} valueColor="muted" />
+        <box paddingLeft={2} flexDirection="row">
+          <text content="Depth  " fg={theme.textMuted} />
+          <text
+            content={"█".repeat(Math.round(depthScore().score / 100 * 20)) + "░".repeat(20 - Math.round(depthScore().score / 100 * 20))}
+            fg={depthScore().score > 60 ? theme.success : depthScore().score > 40 ? theme.warning : theme.error}
+          />
+          <text content={` ${depthScore().score}/100 ${depthScore().label}`} fg={theme.textMuted} />
+        </box>
 
         <box paddingLeft={2} paddingTop={1}>
           <text content={sectionLine("MARKET DEPTH")} fg={theme.borderSubtle} />
@@ -463,7 +472,7 @@ export function AnalyticsPanel() {
         />
         <DataRow
           label="24h Change"
-          value={`${selectedMarket()!.change24h >= 0 ? "+" : ""}${selectedMarket()!.change24h.toFixed(2)}%`}
+          value={`${selectedMarket()!.change24h >= 0 ? "▲ +" : "▼ "}${selectedMarket()!.change24h.toFixed(2)}%`}
           valueColor={selectedMarket()!.change24h >= 0 ? "success" : "error"}
         />
 
@@ -575,8 +584,8 @@ export function AnalyticsPanel() {
     <box
       position="absolute"
       top={2}
-      left="5%"
-      width="38%"
+      left="8%"
+      width="84%"
       height={24}
       backgroundColor={theme.panelModal}
       flexDirection="column"

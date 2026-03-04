@@ -29,7 +29,7 @@ export function ChatInput() {
           <box flexDirection="row">
             <text content={chatInputValue()} fg={theme.text} />
             <Show when={chatLoading()}>
-              <text content=" ⏳" fg={theme.accent} />
+              <text content=" ◌" fg={theme.accent} />
             </Show>
             <Show when={!chatLoading()}>
               <text content="_" fg={theme.textMuted} />
@@ -42,7 +42,7 @@ export function ChatInput() {
         <text content=" ●" fg={theme.success} />
       </Show>
       <Show when={chatLoading()}>
-        <text content=" ◐" fg={theme.accent} />
+        <text content=" ◌" fg={theme.accent} />
       </Show>
     </box>
   );

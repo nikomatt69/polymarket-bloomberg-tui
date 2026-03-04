@@ -5,7 +5,6 @@
 import { For, Show } from "solid-js";
 import { useTheme } from "../context/theme";
 import {
-  userSearchOpen,
   setUserSearchOpen,
   userSearchQuery,
   setUserSearchQuery,
@@ -13,11 +12,9 @@ import {
   setUserSearchResults,
   userSearchLoading,
   setUserSearchLoading,
-  contactsList,
-  setContactsList,
 } from "../state";
 import { searchUsers } from "../api/users";
-import { UserProfile, UserContact } from "../types/user";
+import { PanelHeader, Separator, LoadingState } from "./ui/panel-components";
 
 export function UserSearch() {
   const { theme } = useTheme();
@@ -25,85 +22,118 @@ export function UserSearch() {
   const handleSearch = async () => {
     const query = userSearchQuery();
     if (query.length < 2) return;
-    
     setUserSearchLoading(true);
-    const results = await searchUsers(query);
-    setUserSearchResults(results);
-    setUserSearchLoading(false);
-  };
-
-  const handleKeyDown = (e: { name: string; sequence?: string }) => {
-    if (e.name === "return") {
-      handleSearch();
-    } else if (e.name === "backspace") {
-      setUserSearchQuery(userSearchQuery().slice(0, -1));
-    } else if (e.name === "escape") {
-      setUserSearchOpen(false);
-      setUserSearchQuery("");
-      setUserSearchResults([]);
-    } else if (e.sequence && e.sequence.length === 1 && e.sequence >= " ") {
-      setUserSearchQuery(userSearchQuery() + e.sequence);
+    try {
+      const results = await searchUsers(query);
+      setUserSearchResults(results);
+    } finally {
+      setUserSearchLoading(false);
     }
   };
 
+  const handleClose = () => {
+    setUserSearchOpen(false);
+    setUserSearchQuery("");
+    setUserSearchResults([]);
+  };
+
   return (
-    <Show when={userSearchOpen()}>
-      <box
-        position="absolute"
-        top={2}
-        left="15%"
-        width="70%"
-        height={18}
-        backgroundColor={theme.panelModal}
-        flexDirection="column"
-        zIndex={170}
-      >
-        {/* Header */}
-        <box height={1} width="100%" backgroundColor={theme.success} flexDirection="row">
-          <text content=" ◈ USER SEARCH " fg={theme.highlightText} />
-          <box flexGrow={1} />
-          <text content={` ${userSearchResults().length} results `} fg={theme.highlightText} />
-          <box onMouseDown={() => { setUserSearchOpen(false); setUserSearchQuery(""); setUserSearchResults([]); }}>
-            <text content=" [ESC] ✕ " fg={theme.highlightText} />
-          </box>
+    <box
+      position="absolute"
+      top={2}
+      left="8%"
+      width="84%"
+      height={24}
+      backgroundColor={theme.panelModal}
+      flexDirection="column"
+      zIndex={170}
+    >
+      {/* Header */}
+      <PanelHeader
+        title="USER SEARCH"
+        icon="◈"
+        subtitle={userSearchResults().length > 0 ? `${userSearchResults().length} results` : "find users"}
+        onClose={handleClose}
+      />
+
+      {/* Search input row */}
+      <box height={1} width="100%" flexDirection="row" paddingLeft={2} backgroundColor={theme.background}>
+        <text content="▶ " fg={theme.accent} />
+        <input
+          width="70%"
+          value={userSearchQuery()}
+          focused={true}
+          onInput={(v: string) => setUserSearchQuery(v)}
+        />
+        <box flexGrow={1} />
+        <box onMouseDown={handleSearch}>
+          <text content="[Enter] Search  " fg={theme.textMuted} />
         </box>
-
-        {/* Search input */}
-        <box height={1} width="100%" paddingLeft={2}>
-          <text content="Search: " fg={theme.text} />
-          <input
-            width={40}
-            value={userSearchQuery()}
-            focused={true}
-          />
-          <text content="  " />
-          <box onMouseDown={handleSearch}>
-            <text content="[Enter]" fg={theme.accent} />
-          </box>
-        </box>
-
-        <Show when={userSearchLoading()}>
-          <text content="Searching..." fg={theme.warning} paddingLeft={2} />
-        </Show>
-
-        <Show when={!userSearchLoading() && userSearchResults().length > 0}>
-          <scrollbox height={12} width="100%" paddingLeft={2}>
-            <For each={userSearchResults()}>
-              {(profile) => (
-                <box flexDirection="row" width="100%">
-                  <text content="👤 " fg={theme.accent} />
-                  <text content={profile.username.padEnd(20)} fg={theme.text} width={21} />
-                  <text content={profile.bio || "No bio"} fg={theme.textMuted} />
-                </box>
-              )}
-            </For>
-          </scrollbox>
-        </Show>
-
-        <Show when={!userSearchLoading() && userSearchQuery().length >= 2 && userSearchResults().length === 0}>
-          <text content="No users found" fg={theme.textMuted} paddingLeft={2} />
-        </Show>
       </box>
-    </Show>
+
+      <Separator />
+
+      {/* Column headers */}
+      <Show when={userSearchResults().length > 0}>
+        <text content={`─── RESULTS (${userSearchResults().length}) ──────────────────────────────────────────`} fg={theme.borderSubtle} />
+        <box height={1} width="100%" flexDirection="row" backgroundColor={theme.backgroundPanel} paddingLeft={2}>
+          <text content={"USER".padEnd(16)} fg={theme.textMuted} width={17} />
+          <text content={"EMAIL".padEnd(22)} fg={theme.textMuted} width={23} />
+          <text content={"LAST SEEN".padEnd(12)} fg={theme.textMuted} width={13} />
+          <text content={"BIO"} fg={theme.textMuted} />
+        </box>
+      </Show>
+
+      {/* Loading */}
+      <Show when={userSearchLoading()}>
+        <LoadingState message={`Searching for "${userSearchQuery()}"…`} />
+      </Show>
+
+      {/* Results */}
+      <Show when={!userSearchLoading() && userSearchResults().length > 0}>
+        <scrollbox flexGrow={1} width="100%" stickyScroll stickyStart="top">
+          <For each={userSearchResults()}>
+            {(profile) => (
+              <box flexDirection="row" width="100%" paddingLeft={2}>
+                <text content="◈ " fg={theme.accent} width={2} />
+                <text
+                  content={profile.username.padEnd(16)}
+                  fg={theme.text}
+                  width={17}
+                />
+                <text content={(profile.email || "—").slice(0, 22).padEnd(22)} fg={theme.textMuted} width={23} />
+                <text content={(profile.lastSeen ? new Date(profile.lastSeen).toLocaleDateString() : "—").slice(0, 12).padEnd(12)} fg={theme.textMuted} width={13} />
+                <text
+                  content={profile.bio || "No bio available"}
+                  fg={theme.textMuted}
+                />
+              </box>
+            )}
+          </For>
+        </scrollbox>
+      </Show>
+
+      {/* Empty states */}
+      <Show when={!userSearchLoading() && userSearchQuery().length >= 2 && userSearchResults().length === 0}>
+        <box flexGrow={1} paddingLeft={2} paddingTop={1} flexDirection="column">
+          <text content={`No users found for "${userSearchQuery()}".`} fg={theme.textMuted} />
+          <text content="" />
+          <text content="Try a different username or partial address." fg={theme.textMuted} />
+        </box>
+      </Show>
+
+      <Show when={!userSearchLoading() && userSearchQuery().length < 2}>
+        <box flexGrow={1} paddingLeft={2} paddingTop={1}>
+          <text content="Type at least 2 characters to search." fg={theme.textMuted} />
+        </box>
+      </Show>
+
+      {/* Footer */}
+      <Separator type="light" />
+      <box height={1} paddingLeft={2} flexDirection="row">
+        <text content="[Enter] Search  " fg={theme.textMuted} />
+        <text content="[ESC] Close" fg={theme.textMuted} />
+      </box>
+    </box>
   );
 }
