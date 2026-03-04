@@ -7,6 +7,49 @@ import { PriceHistory, PricePoint, Timeframe } from "../../types/market";
 
 const CLOB_API_BASE = "https://clob.polymarket.com";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Price History Cache
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface CacheEntry<T> {
+  data: T;
+  expires: number;
+}
+
+const priceHistoryCache = new Map<string, CacheEntry<PriceHistory>>();
+const CACHE_TTL_MS = 60_000; // 1 minute
+
+function getCacheKey(marketId: string, timeframe: Timeframe): string {
+  return `${marketId}:${timeframe}`;
+}
+
+export async function getPriceHistoryCached(
+  marketId: string,
+  timeframe: Timeframe = "1d"
+): Promise<PriceHistory | null> {
+  const key = getCacheKey(marketId, timeframe);
+  const cached = priceHistoryCache.get(key);
+
+  if (cached && Date.now() < cached.expires) {
+    return cached.data;
+  }
+
+  const result = await getPriceHistory(marketId, timeframe);
+
+  if (result) {
+    priceHistoryCache.set(key, {
+      data: result,
+      expires: Date.now() + CACHE_TTL_MS,
+    });
+  }
+
+  return result;
+}
+
+export function clearPriceHistoryCache(): void {
+  priceHistoryCache.clear();
+}
+
 interface ClobPriceHistoryResponse {
   history?: Array<{ t: number; p: number | string }>;
 }

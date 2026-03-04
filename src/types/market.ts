@@ -16,6 +16,7 @@ export interface Market {
   id: string;
   title: string;
   description?: string;
+  slug?: string;
   outcomes: Outcome[];
   volume24h: number;
   volume: number;

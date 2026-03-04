@@ -1,4 +1,4 @@
-import { Show } from "solid-js";
+import { Show, For } from "solid-js";
 import { RGBA } from "@opentui/core";
 import { TopBar } from "./top-bar";
 import { SearchBar } from "./search-bar";
@@ -42,6 +42,8 @@ import {
   skillsPanelOpen,
   enterpriseChatOpen,
   searchPanelOpen,
+  toastQueue,
+  dismissToast,
 } from "../state";
 import { alertsState } from "../hooks/useAlerts";
 import { AccountStatsPanel } from "./account-stats";
@@ -260,6 +262,34 @@ export function Layout() {
       {/* Search Panel Overlay */}
       <Show when={searchPanelOpen()}>
         <SearchPanel />
+      </Show>
+
+      {/* Toast Notifications */}
+      <Show when={toastQueue().length > 0}>
+        <box
+          position="absolute"
+          bottom={2}
+          right={2}
+          flexDirection="column"
+          gap={1}
+          zIndex={200}
+        >
+          <For each={toastQueue()}>
+            {(toast) => (
+              <box
+                backgroundColor={toast.type === "error" ? theme.error : toast.type === "success" ? theme.success : toast.type === "warning" ? theme.warning : theme.primary}
+                paddingX={2}
+                paddingY={1}
+                onMouseDown={() => dismissToast(toast.id)}
+              >
+                <text
+                  content={toast.message}
+                  fg={toast.type === "error" || toast.type === "warning" ? theme.background : theme.background}
+                />
+              </box>
+            )}
+          </For>
+        </box>
       </Show>
     </box>
   );

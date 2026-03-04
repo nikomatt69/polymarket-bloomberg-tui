@@ -77,6 +77,7 @@ import {
   highlightedIndex,
   navigateToIndex,
   walletState,
+  showToast,
   portfolioTab,
   setPortfolioTab,
   marketListCategoryId,
@@ -1588,6 +1589,17 @@ function AppContent() {
         // c — open comparison panel in select mode
         setComparisonPanelOpen(true);
         setComparisonSelectMode(true);
+        break;
+      case "U":
+        // Shift+U — copy market URL to clipboard (or show in toast)
+        {
+          const market = getSelectedMarket();
+          if (market) {
+            const slug = market.slug || market.id;
+            const url = `https://polymarket.com/market/${slug}`;
+            showToast(`URL: ${url}`, "info");
+          }
+        }
         break;
       case "L":
         // Shift+L — toggle watchlist panel

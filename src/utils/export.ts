@@ -106,7 +106,7 @@ export function exportWatchlistCsv(): string {
       formatCsvValue(market.volume24h.toFixed(2)),
       formatCsvValue(market.liquidity.toFixed(2)),
       formatCsvValue(leadOutcome ? (leadOutcome.price * 100).toFixed(2) + "¢" : ""),
-      formatCsvValue(market.change24h?.toFixed(2) + "%" ?? ""),
+      formatCsvValue(market.change24h != null ? market.change24h.toFixed(2) + "%" : ""),
       formatCsvValue(`https://polymarket.com/market/${market.slug ?? market.id}`),
     ].join(","));
   }
@@ -144,7 +144,7 @@ export function exportAlertsCsv(): string {
   for (const alert of alerts) {
     rows.push([
       formatCsvValue(alert.marketTitle ?? alert.marketId),
-      formatCsvValue(alert.outcome ?? ""),
+      formatCsvValue(alert.outcomeTitle ?? ""),
       formatCsvValue(alert.metric),
       formatCsvValue(alert.threshold.toFixed(4)),
       formatCsvValue(alert.condition),

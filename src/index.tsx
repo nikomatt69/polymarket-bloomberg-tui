@@ -1,6 +1,15 @@
-import { render } from "@opentui/solid";
+import { render, extend } from "@opentui/solid";
 import { App } from "./app";
 import pkg from "../package.json";
+import { ThreeRenderable } from "@opentui/core/3d";
+
+extend({ three: ThreeRenderable });
+
+declare module "@opentui/solid" {
+  interface OpenTUIComponents {
+    three: typeof ThreeRenderable;
+  }
+}
 
 declare const POLYMARKET_BLOOMBERG_TUI_VERSION: string | undefined;
 

@@ -127,6 +127,7 @@ function parseGammaMarket(market: GammaMarket): Market {
     id: market.id,
     title: market.question || "Unknown Market",
     description: market.description || "",
+    slug: market.slug || undefined,
     outcomes: outcomeList,
     volume24h: parseNumeric(market.volume24hr, 0),
     volume: parseNumeric(market.volume, 0),

@@ -101,7 +101,7 @@ type StatusHandler = (status: WsStatus) => void;
 
 const CLOB_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
 const MAX_RECONNECT_DELAY_MS = 30_000;
-const HEARTBEAT_INTERVAL_MS = 10_000;
+const HEARTBEAT_INTERVAL_MS = 20_000;
 
 /**
  * Creates an auto-reconnecting WebSocket manager for CLOB market data.
@@ -503,7 +503,7 @@ export function createUserWebSocket(creds: UserWsCredentials, conditionIds: stri
       }
     };
 
-    ws.onerror = () => {};
+    ws.onerror = () => { };
 
     ws.onclose = () => {
       stopHeartbeat();

@@ -8,6 +8,7 @@ import {
   userWsConnected,
   sportsScores,
   getLastPrice,
+  showToast,
 } from "../state";
 import { usePriceHistory } from "../hooks/useMarketData";
 import { PriceHistory, Market, Timeframe } from "../types/market";
@@ -146,7 +147,20 @@ export function MarketDetails() {
   const { theme } = useTheme();
   const [priceHistory, setPriceHistory] = createSignal<PriceHistory | undefined>();
   const [orderBooks, setOrderBooks] = createSignal<Record<string, OrderBookSummary>>({});
+  const [copyConfirm, setCopyConfirm] = createSignal(false);
   const selectedMarket = createMemo(() => getSelectedMarket());
+
+  // Copy market URL - show in toast for TUI
+  const copyMarketUrl = () => {
+    const market = selectedMarket();
+    if (!market) return;
+
+    const slug = market.slug || market.id;
+    const url = `https://polymarket.com/market/${slug}`;
+    showToast(`URL: ${url}`, "info");
+    setCopyConfirm(true);
+    setTimeout(() => setCopyConfirm(false), 2000);
+  };
 
   // ── Derived stats ──────────────────────────────────────────────────────────
 
@@ -644,6 +658,14 @@ export function MarketDetails() {
             {/* ── OUTCOMES section ────────────────────────────────────────── */}
             <text content={sectionLine("OUTCOMES")} fg={theme.borderSubtle} />
             <OutcomeTable market={market()} orderBooks={orderBooks()} />
+
+            {/* Footer hint */}
+            <box flexDirection="row" paddingTop={1}>
+              <text content="[C] Copy URL" fg={copyConfirm() ? theme.success : theme.textMuted} />
+              <Show when={copyConfirm()}>
+                <text content=" ✓ Copied!" fg={theme.success} />
+              </Show>
+            </box>
           </box>
         )}
       </Show>

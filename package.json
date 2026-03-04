@@ -24,12 +24,14 @@
     "@ai-sdk/openai": "1.0.0",
     "@opentui/core": "^0.1.80",
     "@opentui/solid": "^0.1.80",
+    "@types/three": "^0.183.1",
     "ai": "^4.0.0",
+    "bun-webgpu": "^0.1.5",
     "graphql": "^16.9.0",
     "graphql-request": "7.4.0",
     "pmxtjs": "^2.18.1",
-    "simple-ascii-chart": "^1.0.2",
     "solid-js": "^1.9.3",
+    "three": "^0.183.2",
     "viem": "^2.46.1"
   },
   "devDependencies": {
