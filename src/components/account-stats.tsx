@@ -314,7 +314,7 @@ export function AccountStatsPanel() {
                     })();
                     return (
                       <box flexDirection="row" gap={1}>
-                        <text content={asset.outcome.slice(0, 10).padEnd(10)} fg={theme.textMuted} width={11} />
+                        <text content={(asset.outcome || "—").slice(0, 10).padEnd(10)} fg={theme.textMuted} width={11} />
                         <text content={bar} fg={theme.accent} />
                         <text content={` ${asset.percentage.toFixed(1)}%`} fg={theme.text} width={7} />
                         <text content={`$${asset.value.toFixed(2)}`} fg={theme.textMuted} />

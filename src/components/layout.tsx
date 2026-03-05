@@ -29,6 +29,7 @@ import {
   accountStatsOpen,
   settingsPanelOpen,
   shortcutsPanelOpen,
+  bankingPanelOpen,
   orderBookPanelOpen,
   filterPanelOpen,
   analyticsPanelOpen,
@@ -64,6 +65,7 @@ import { ShortcutsPanel } from "./shortcuts-panel";
 import { UserSearch } from "./user-search";
 import { WalletConnect } from "./wallet-connect";
 import { WatchlistPanel } from "./watchlist-panel";
+import { BankingPanel } from "./banking-panel";
 
 export function Layout() {
   const { theme } = useTheme();
@@ -197,6 +199,11 @@ export function Layout() {
       {/* Settings Panel Modal */}
       <Show when={settingsPanelOpen()}>
         <SettingsPanel />
+      </Show>
+
+      {/* Banking Panel Modal */}
+      <Show when={bankingPanelOpen()}>
+        <BankingPanel />
       </Show>
 
       {/* Shortcuts Panel Modal */}

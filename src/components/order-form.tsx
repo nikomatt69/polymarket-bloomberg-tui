@@ -117,17 +117,22 @@ export function OrderForm() {
     return Number.isInteger(sharesTimes100) || sharesTimes100 % 1 < 0.01;
   });
 
+  // Use funder/proxy balance for trading (funds are in the proxy wallet)
+  const tradingBalance = createMemo(() =>
+    walletState.funderAddress ? walletState.funderBalance : walletState.balance
+  );
+
   const buyBalanceExceeded = createMemo(() =>
     side() === "BUY"
     && estimatedCost() !== null
-    && estimatedCost()! > walletState.balance + 1e-6
+    && estimatedCost()! > tradingBalance() + 1e-6
   );
 
   const buyBalanceTight = createMemo(() =>
     side() === "BUY"
     && estimatedCost() !== null
     && !buyBalanceExceeded()
-    && estimatedCost()! > walletState.balance * 0.9
+    && estimatedCost()! > tradingBalance() * 0.9
   );
 
   const tickSizeInvalid = createMemo(() => {
@@ -240,7 +245,8 @@ export function OrderForm() {
     const b = (1 - p) / p;
     const k = (p * (b + 1) - 1) / b;
     if (k <= 0) return 0;
-    return Math.min(k * walletState.balance, walletState.balance * 0.25);
+    const bal = tradingBalance();
+    return Math.min(k * bal, bal * 0.25);
   });
 
   const positionImpact = createMemo(() => {
@@ -335,7 +341,7 @@ export function OrderForm() {
         <box flexDirection="row" alignItems="center">
           <text content="Order Type   : " fg={theme.textMuted} width={16} />
           <box onMouseDown={() => {
-            const types: Array<"GTC"|"FOK"|"GTD"> = ["GTC","FOK","GTD"];
+            const types: Array<"GTC"|"FOK"|"GTD"|"FAK"> = ["GTC","FOK","GTD","FAK"];
             setOrderFormType(types[(types.indexOf(orderFormType()) + 1) % types.length]);
           }}>
             <text content={`[${orderFormType()}]`} fg={theme.warning} />
@@ -404,7 +410,7 @@ export function OrderForm() {
           <box flexDirection="row">
             <text content="  Est. Cost    : " fg={theme.textMuted} width={17} />
             <text content={`$${estimatedCost()!.toFixed(4)} USDC`} fg={theme.warning} />
-            <text content={`  (Bal: $${walletState.balance.toFixed(2)})`} fg={theme.textMuted} />
+            <text content={`  (Bal: $${tradingBalance().toFixed(2)}${walletState.funderAddress ? " proxy" : ""})`} fg={theme.textMuted} />
           </box>
         </Show>
 
@@ -430,7 +436,7 @@ export function OrderForm() {
         <box flexDirection="column" paddingLeft={2} paddingRight={2}>
           <text content="─── RISK ANALYSIS ───────────────────────────────────" fg={theme.borderSubtle} />
           {(() => {
-            const pct = Math.min(1, (estimatedCost() ?? 0) / Math.max(1, walletState.balance));
+            const pct = Math.min(1, (estimatedCost() ?? 0) / Math.max(1, tradingBalance()));
             const barWidth = 30;
             const filled = Math.round(pct * barWidth);
             const empty = barWidth - filled;

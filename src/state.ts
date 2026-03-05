@@ -4,7 +4,7 @@
 
 import { createSignal, createEffect } from "solid-js";
 import { createStore } from "solid-js/store";
-import { AppState, PersistentState, Market, WalletState, Timeframe } from "./types/market";
+import { AppState, PersistentState, Market, WalletState, Timeframe, Category } from "./types/market";
 import { UserProfile, UserContact, ProfileState } from "./types/user";
 import { homedir } from "os";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
@@ -357,6 +357,7 @@ const initialWalletState: WalletState = {
   address: null,
   connected: false,
   balance: 0,
+  funderBalance: 0,
   loading: false,
   error: null,
 };
@@ -402,7 +403,7 @@ export const [orderFormCurrentPrice, setOrderFormCurrentPrice] = createSignal(0)
 export const [orderFormPriceInput, setOrderFormPriceInput] = createSignal("");
 export const [orderFormSharesInput, setOrderFormSharesInput] = createSignal("");
 export const [orderFormFocusField, setOrderFormFocusField] = createSignal<"price" | "shares">("price");
-export const [orderFormType, setOrderFormType] = createSignal<"GTC" | "FOK" | "GTD">("GTC");
+export const [orderFormType, setOrderFormType] = createSignal<"GTC" | "FOK" | "GTD" | "FAK">("GTC");
 export const [orderFormPostOnly, setOrderFormPostOnly] = createSignal(false);
 export const [orderFormNegRisk, setOrderFormNegRisk] = createSignal(false);
 
@@ -410,6 +411,8 @@ export const [orderFormNegRisk, setOrderFormNegRisk] = createSignal(false);
 export const [orderHistorySelectedIdx, setOrderHistorySelectedIdx] = createSignal(0);
 export const [orderHistoryTradeSelectedIdx, setOrderHistoryTradeSelectedIdx] = createSignal(0);
 export const [orderHistorySection, setOrderHistorySection] = createSignal<"open" | "trades">("open");
+export const [orderHistoryPage, setOrderHistoryPage] = createSignal(0);
+export const ORDER_HISTORY_PAGE_SIZE = 20;
 
 // Panel visibility signals
 export const [orderBookPanelOpen, setOrderBookPanelOpen] = createSignal(false);
@@ -429,6 +432,18 @@ export const [settingsThemeQuery, setSettingsThemeQuery] = createSignal("");
 export const [settingsThemeSearchEditing, setSettingsThemeSearchEditing] = createSignal(false);
 export const [settingsFunderEditing, setSettingsFunderEditing] = createSignal(false);
 export const [settingsFunderInput, setSettingsFunderInput] = createSignal("");
+
+// Banking panel visibility and state
+export const [bankingPanelOpen, setBankingPanelOpen] = createSignal(false);
+export const [bankingPanelTab, setBankingPanelTab] = createSignal<"deposit" | "withdraw" | "transfer">("deposit");
+export const [bankingAsset, setBankingAsset] = createSignal("USDC");
+export const [bankingAmount, setBankingAmount] = createSignal("");
+export const [bankingSourceChain, setBankingSourceChain] = createSignal("ethereum");
+export const [bankingDestChain, setBankingDestChain] = createSignal("polygon");
+export const [bankingAddress, setBankingAddress] = createSignal("");
+export const [bankingLoading, setBankingLoading] = createSignal(false);
+export const [bankingError, setBankingError] = createSignal<string | null>(null);
+export const [bankingSuccess, setBankingSuccess] = createSignal<string | null>(null);
 
 // Search input focus state: while typing, global shortcuts must be blocked
 export const [searchInputFocused, setSearchInputFocused] = createSignal(false);
@@ -1322,6 +1337,11 @@ export function setSportsScore(gameId: string, score: {
 
 // Category filter for market list
 export const [selectedCategory, setSelectedCategory] = createSignal<string>("All");
+
+// Categories from API
+export const [categoriesList, setCategoriesList] = createSignal<Category[]>([]);
+export const [subCategoriesMap, setSubCategoriesMap] = createSignal<Record<string, Category[]>>({});
+export const [selectedSubCategory, setSelectedSubCategory] = createSignal<string | null>(null);
 
 // Live tags fetched from /tags endpoint
 export interface LiveTag { id: number; slug: string; label: string; count: number }

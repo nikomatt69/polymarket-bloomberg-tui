@@ -28,6 +28,8 @@ import {
   sportsScores,
   getLastPrice,
   setSelectedCategory,
+  selectedSubCategory,
+  setSelectedSubCategory,
 } from "../state";
 import { formatVolume, formatChange, truncateString } from "../utils/format";
 import { useTheme } from "../context/theme";
@@ -37,6 +39,8 @@ import {
   getTrendingMarkets,
   getMarkets,
   getLiveSportsMarkets,
+  getMarketsByTag,
+  getCategories,
 } from "../api/polymarket";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -125,7 +129,62 @@ export interface CategoryDef {
   live?: boolean;
   /** True for client-side virtual categories (no separate API call needed) */
   virtual?: boolean;
+  /** Whether this category has sub-categories */
+  hasSubCategories?: boolean;
+  /** Parent category ID for sub-categories */
+  parentId?: string;
 }
+
+export const SUB_CATEGORIES: Record<string, CategoryDef[]> = {
+  Sports: [
+    { id: "basketball", label: "NBA", apiValue: "basketball", parentId: "Sports" },
+    { id: "nfl", label: "NFL", apiValue: "nfl", parentId: "Sports" },
+    { id: "soccer", label: "Soccer", apiValue: "soccer", parentId: "Sports" },
+    { id: "mlb", label: "MLB", apiValue: "mlb", parentId: "Sports" },
+    { id: "nhl", label: "NHL", apiValue: "nhl", parentId: "Sports" },
+    { id: "boxing-mma", label: "MMA", apiValue: "boxing-mma", parentId: "Sports" },
+    { id: "tennis", label: "Tennis", apiValue: "tennis", parentId: "Sports" },
+    { id: "golf", label: "Golf", apiValue: "golf", parentId: "Sports" },
+    { id: "football", label: "CFB", apiValue: "football", parentId: "Sports" },
+    { id: "esports", label: "Esports", apiValue: "esports", parentId: "Sports" },
+    { id: "racing", label: "Racing", apiValue: "racing", parentId: "Sports" },
+    { id: "olympics", label: "Olympics", apiValue: "olympics", parentId: "Sports" },
+  ],
+  Politics: [
+    { id: "elections", label: "Elections", apiValue: "elections", parentId: "Politics" },
+    { id: "trump", label: "Trump", apiValue: "trump", parentId: "Politics" },
+    { id: "biden", label: "Biden", apiValue: "biden", parentId: "Politics" },
+    { id: "us-politics", label: "US Pol", apiValue: "us-politics", parentId: "Politics" },
+    { id: "global-politics", label: "Global", apiValue: "global-politics", parentId: "Politics" },
+    { id: "courts", label: "Courts", apiValue: "courts", parentId: "Politics" },
+    { id: "polls", label: "Polls", apiValue: "polls", parentId: "Politics" },
+  ],
+  Crypto: [
+    { id: "bitcoin", label: "Bitcoin", apiValue: "bitcoin", parentId: "Crypto" },
+    { id: "ethereum", label: "Ethereum", apiValue: "ethereum", parentId: "Crypto" },
+    { id: "solana", label: "Solana", apiValue: "solana", parentId: "Crypto" },
+    { id: "defi", label: "DeFi", apiValue: "defi", parentId: "Crypto" },
+  ],
+  Business: [
+    { id: "economy", label: "Economy", apiValue: "economy", parentId: "Business" },
+    { id: "fed-interest-rates", label: "Fed", apiValue: "fed-interest-rates", parentId: "Business" },
+    { id: "finance", label: "Finance", apiValue: "finance", parentId: "Business" },
+    { id: "tech", label: "Tech", apiValue: "tech", parentId: "Business" },
+  ],
+  Tech: [
+    { id: "ai", label: "AI", apiValue: "ai", parentId: "Tech" },
+    { id: "chat-bots", label: "Chatbots", apiValue: "chat-bots", parentId: "Tech" },
+  ],
+  Science: [
+    { id: "climate-and-weather", label: "Climate", apiValue: "climate-and-weather", parentId: "Science" },
+    { id: "space", label: "Space", apiValue: "space", parentId: "Science" },
+  ],
+  Entertainment: [
+    { id: "film-and-tv", label: "Film/TV", apiValue: "film-and-tv", parentId: "Entertainment" },
+    { id: "music", label: "Music", apiValue: "music", parentId: "Entertainment" },
+    { id: "celebrities", label: "Celebs", apiValue: "celebrities", parentId: "Entertainment" },
+  ],
+};
 
 export const CATEGORIES: CategoryDef[] = [
   { id: "trending",      label: "Hot🔥",   apiValue: "trending"       },
@@ -133,14 +192,14 @@ export const CATEGORIES: CategoryDef[] = [
   { id: "closing_soon",  label: "Soon⚠",   apiValue: "all",  virtual: true },
   { id: "watchlist_cat", label: "★Watch",  apiValue: "all",  virtual: true },
   { id: "sports_live",   label: "Live⚡",  apiValue: "sports_live", live: true },
-  { id: "Sports",        label: "⚽Sports",  apiValue: "Sports"         },
-  { id: "Politics",      label: "🏛Pol",    apiValue: "Politics"       },
-  { id: "Crypto",        label: "₿Crypto",  apiValue: "Crypto"         },
-  { id: "Business",      label: "💼Biz",    apiValue: "Business"       },
+  { id: "Sports",        label: "⚽Sports",  apiValue: "Sports", hasSubCategories: true },
+  { id: "Politics",      label: "🏛Pol",    apiValue: "Politics", hasSubCategories: true },
+  { id: "Crypto",        label: "₿Crypto",  apiValue: "Crypto", hasSubCategories: true },
+  { id: "Business",      label: "💼Biz",    apiValue: "Business", hasSubCategories: true },
   { id: "AI",            label: "🤖AI",     apiValue: "AI"             },
-  { id: "Tech",          label: "💻Tech",   apiValue: "Tech"           },
-  { id: "Science",       label: "🔬Sci",    apiValue: "Science"        },
-  { id: "Entertainment", label: "🎬Ent",    apiValue: "Entertainment"  },
+  { id: "Tech",          label: "💻Tech",   apiValue: "Tech", hasSubCategories: true },
+  { id: "Science",       label: "🔬Sci",    apiValue: "Science", hasSubCategories: true },
+  { id: "Entertainment", label: "🎬Ent",    apiValue: "Entertainment", hasSubCategories: true },
   { id: "World",         label: "🌍World",  apiValue: "World"          },
   { id: "Health",        label: "🏥Health", apiValue: "Health"         },
   { id: "Climate",       label: "🌿Clim",  apiValue: "Climate"        },
@@ -154,7 +213,13 @@ async function fetchForCategory(
   apiValue: string,
   limit: number,
   offset: number,
+  tagSlug?: string,
 ) {
+  // If we have a tag slug (sub-category), use getMarketsByTag
+  if (tagSlug) {
+    return getMarketsByTag(tagSlug, limit);
+  }
+
   switch (apiValue) {
     case "trending":
       return getTrendingMarkets(limit);
@@ -213,10 +278,28 @@ export function MarketList() {
   createEffect(on(activeCategory, (cat) => {
     const def = CATEGORIES.find(c => c.id === cat);
     setSelectedCategory(def?.apiValue ?? "All");
+    // Reset sub-category when changing main category
+    setSelectedSubCategory(null);
   }));
 
+  // Get current category definition
+  const currentCategoryDef = () => CATEGORIES.find(c => c.id === activeCategory());
+
+  // Check if current category has sub-categories
+  const hasSubCategories = () => currentCategoryDef()?.hasSubCategories === true;
+
+  // Get sub-categories for current category
+  const currentSubCategories = () => {
+    const cat = currentCategoryDef();
+    if (!cat) return [];
+    return SUB_CATEGORIES[cat.apiValue] || [];
+  };
+
+  // Active sub-category
+  const activeSubCategory = selectedSubCategory;
+
   // ── Category switch ────────────────────────────────────────────────────────
-  createEffect(on(activeCategory, (category) => {
+  createEffect(on([activeCategory, activeSubCategory], ([category, subCat]) => {
     const cat = CATEGORIES.find((c) => c.id === category);
     if (!cat) return;
 
@@ -229,14 +312,19 @@ export function MarketList() {
     let cancelled = false;
     setLocalLoading(true);
     setHasMore(true);
-    setOffsets((prev) => ({ ...prev, [category]: 0 }));
+    
+    // Use a key that includes both category and sub-category
+    const fetchKey = subCat ? `${category}:${subCat}` : category;
+    setOffsets((prev) => ({ ...prev, [fetchKey]: 0 }));
 
     void (async () => {
       try {
-        const markets = await fetchForCategory(cat.apiValue, PAGE_SIZE, 0);
+        // If we have a sub-category, use its tag slug
+        const tagSlug = subCat || undefined;
+        const markets = await fetchForCategory(cat.apiValue, PAGE_SIZE, 0, tagSlug);
         if (cancelled) return;
         setMarkets(markets);
-        setOffsets((prev) => ({ ...prev, [category]: markets.length }));
+        setOffsets((prev) => ({ ...prev, [fetchKey]: markets.length }));
         setHasMore(!cat.live && markets.length >= PAGE_SIZE);
       } catch {
         // Keep existing data on error
@@ -265,17 +353,20 @@ export function MarketList() {
 
   async function loadMore() {
     const category = activeCategory();
+    const subCat = activeSubCategory();
     const cat = CATEGORIES.find((c) => c.id === category);
     if (!cat || cat.live || cat.virtual || loadingMore()) return;
 
     setLoadingMore(true);
-    const currentOffset = offsets()[category] ?? 0;
+    const fetchKey = subCat ? `${category}:${subCat}` : category;
+    const currentOffset = offsets()[fetchKey] ?? 0;
 
     try {
-      const markets = await fetchForCategory(cat.apiValue, LOAD_MORE_SIZE, currentOffset);
+      const tagSlug = subCat || undefined;
+      const markets = await fetchForCategory(cat.apiValue, LOAD_MORE_SIZE, currentOffset, tagSlug);
       if (markets.length > 0) {
         appendMarkets(markets);
-        setOffsets((prev) => ({ ...prev, [category]: currentOffset + markets.length }));
+        setOffsets((prev) => ({ ...prev, [fetchKey]: currentOffset + markets.length }));
         setHasMore(markets.length >= LOAD_MORE_SIZE);
       } else {
         setHasMore(false);
@@ -341,6 +432,43 @@ export function MarketList() {
           <text content="◌ " fg={theme.textMuted} />
         </Show>
       </box>
+
+      {/* ── Sub-category bar (shown when category has sub-categories) ───────────── */}
+      <Show when={hasSubCategories()}>
+        <box width="100%" flexDirection="row" height={1} backgroundColor={theme.backgroundPanel}>
+          <text content="  " fg={theme.textMuted} />
+          <For each={currentSubCategories()}>
+            {(subCat) => {
+              const active = () => activeSubCategory() === subCat.id;
+              return (
+                <box
+                  height={1}
+                  paddingLeft={1}
+                  paddingRight={1}
+                  backgroundColor={active() ? theme.accent : "transparent"}
+                  onMouseDown={() => setSelectedSubCategory(active() ? null : subCat.id)}
+                >
+                  <text
+                    content={subCat.label}
+                    fg={active() ? theme.background : theme.textMuted}
+                  />
+                </box>
+              );
+            }}
+          </For>
+          <Show when={activeSubCategory()}>
+            <text content=" │" fg={theme.textMuted} />
+            <box
+              height={1}
+              paddingLeft={1}
+              paddingRight={1}
+              onMouseDown={() => setSelectedSubCategory(null)}
+            >
+              <text content="✕ Clear" fg={theme.error} />
+            </box>
+          </Show>
+        </box>
+      </Show>
 
       {/* ── Column headers ─────────────────────────────────────────────────── */}
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">

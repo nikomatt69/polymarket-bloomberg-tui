@@ -91,6 +91,7 @@ export interface WalletState {
   address: string | null;
   connected: boolean;
   balance: number;
+  funderBalance: number; // Balance of the founder/proxy wallet
   username?: string;
   apiKey?: string;
   apiSecret?: string;

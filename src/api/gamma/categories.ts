@@ -10,6 +10,7 @@ export async function getCategories(): Promise<Category[]> {
   try {
     const tags = await getTags();
     return tags.map((tag) => ({
+      id: tag.id,
       slug: tag.slug,
       name: tag.name,
       marketsCount: 0,
@@ -17,6 +18,7 @@ export async function getCategories(): Promise<Category[]> {
   } catch (error) {
     console.error("Failed to fetch categories:", error);
     return POLYMARKET_CATEGORIES.map((c) => ({
+      id: c.tagSlug,
       slug: c.tagSlug,
       name: c.label,
       marketsCount: 0,
@@ -31,7 +33,7 @@ export async function getCategoryBySlug(slug: string): Promise<Category | null> 
       (t) => t.slug.toLowerCase() === slug.toLowerCase() || t.name.toLowerCase() === slug.toLowerCase()
     );
     if (!found) return null;
-    return { slug: found.slug, name: found.name, marketsCount: 0 };
+    return { id: found.id, slug: found.slug, name: found.name, marketsCount: 0 };
   } catch (error) {
     console.error("Failed to fetch category:", error);
     return null;

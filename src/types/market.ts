@@ -70,7 +70,8 @@ export interface PersistentState {
 export interface WalletState {
   address: string | null;
   connected: boolean;
-  balance: number; // USDC
+  balance: number; // USDC (EOA wallet)
+  funderBalance: number; // USDC (founder/proxy wallet)
   username?: string;
   apiKey?: string;
   apiSecret?: string;
@@ -117,7 +118,9 @@ export interface Tag {
 
 // Category info for filtering markets
 export interface Category {
+  id: string;
   slug: string;
   name: string;
-  marketsCount: number;
+  parentCategory?: string;
+  marketsCount?: number;
 }

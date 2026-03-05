@@ -1136,7 +1136,8 @@ export async function getCategories(): Promise<Category[]> {
       return [];
     }
 
-    return data.map((item: { category?: string; slug?: string; count?: number }) => ({
+    return data.map((item: { id?: string; category?: string; slug?: string; count?: number }) => ({
+      id: item.id || item.category || item.slug || "",
       slug: item.category || item.slug || "",
       name: item.category || item.slug || "",
       marketsCount: item.count || 0,

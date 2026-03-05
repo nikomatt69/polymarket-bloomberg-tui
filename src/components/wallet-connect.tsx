@@ -15,7 +15,7 @@ import {
   setWalletModalMode,
 } from "../state";
 import { truncateAddress } from "../auth/wallet";
-import { disconnectWalletHook, connectWallet } from "../hooks/useWallet";
+import { disconnectWalletHook, connectWallet, refreshWalletBalance } from "../hooks/useWallet";
 import { PanelHeader, DataRow, Separator } from "./ui/panel-components";
 
 function BalanceBar(props: { balance: number; maxBalance?: number }) {
@@ -90,7 +90,7 @@ export function WalletConnect() {
 
           <DataRow label="Address" value={truncateAddress(walletState.address!)} valueColor="accent" />
           <DataRow
-            label="Balance"
+            label="EOA Balance"
             value={`$${walletState.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`}
             valueColor="success"
           />
@@ -106,11 +106,19 @@ export function WalletConnect() {
 
           <Show when={walletState.funderAddress}>
             <DataRow label="Proxy Wlt" value={truncateAddress(walletState.funderAddress!)} valueColor="muted" />
+            <DataRow
+              label="Proxy Balance"
+              value={`$${walletState.funderBalance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`}
+              valueColor="warning"
+            />
           </Show>
 
           <Separator type="light" />
 
           <box flexDirection="row" gap={3}>
+            <box onMouseDown={() => refreshWalletBalance()}>
+              <text content="[R] Refresh" fg={theme.accent} />
+            </box>
             <box onMouseDown={() => disconnectWalletHook()}>
               <text content="[D] Disconnect" fg={theme.error} />
             </box>

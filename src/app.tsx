@@ -50,6 +50,9 @@ import {
   setOrderHistoryTradeSelectedIdx,
   orderHistorySection,
   setOrderHistorySection,
+  orderHistoryPage,
+  setOrderHistoryPage,
+  ORDER_HISTORY_PAGE_SIZE,
   portfolioOpen,
   setPortfolioOpen,
   orderBookPanelOpen,
@@ -82,8 +85,10 @@ import {
   setPortfolioTab,
   marketListCategoryId,
   setMarketListCategoryId,
+  selectedSubCategory,
+  setSelectedSubCategory,
 } from "./state";
-import { CATEGORIES } from "./components/market-list";
+import { CATEGORIES, SUB_CATEGORIES } from "./components/market-list";
 import { useMarketsFetch, useRefreshInterval, manualRefresh } from "./hooks/useMarketData";
 import { initializeWallet, connectWallet, disconnectWalletHook, saveFunderAddress } from "./hooks/useWallet";
 import {
@@ -143,6 +148,10 @@ import {
   removeAIProvider,
   shortcutsPanelOpen,
   setShortcutsPanelOpen,
+  bankingPanelOpen,
+  setBankingPanelOpen,
+  bankingPanelTab,
+  setBankingPanelTab,
   setChatInputFocused,
   searchInputFocused,
   setSearchInputFocused,
@@ -386,7 +395,7 @@ function AppContent() {
       } else if (e.name === "tab") {
         setOrderFormFocusField(orderFormFocusField() === "price" ? "shares" : "price");
       } else if (e.name === "t") {
-        const types: Array<"GTC" | "FOK" | "GTD"> = ["GTC", "FOK", "GTD"];
+        const types: Array<"GTC" | "FOK" | "GTD" | "FAK"> = ["GTC", "FOK", "GTD", "FAK"];
         const cur = types.indexOf(orderFormType());
         setOrderFormType(types[(cur + 1) % types.length]);
       } else if (e.name === "p") {
@@ -590,6 +599,15 @@ function AppContent() {
         }
       } else if (e.sequence === "/" || e.name === "slash") {
         startOrderHistorySearch();
+      } else if (e.name === "right" && activeSection === "trades") {
+        // Pagination: next page
+        const maxPage = Math.ceil(filteredTrades.length / ORDER_HISTORY_PAGE_SIZE) - 1;
+        setOrderHistoryPage((p) => Math.min(maxPage, p + 1));
+        setOrderHistoryTradeSelectedIdx(0);
+      } else if (e.name === "left" && activeSection === "trades") {
+        // Pagination: previous page
+        setOrderHistoryPage((p) => Math.max(0, p - 1));
+        setOrderHistoryTradeSelectedIdx(0);
       }
       return;
     }
@@ -771,6 +789,22 @@ function AppContent() {
           const i = sorts.indexOf(appState.sortBy as typeof sorts[number]);
           setSortBy(sorts[(i + 1) % 3]);
         }
+      }
+      return;
+    }
+
+    // Banking panel intercept
+    if (bankingPanelOpen()) {
+      if (e.name === "escape" || e.name === "y") {
+        setBankingPanelOpen(false);
+      } else if (e.name === "tab" || e.name === "right") {
+        const tabs = ["deposit", "withdraw", "transfer"] as const;
+        const idx = tabs.indexOf(bankingPanelTab());
+        setBankingPanelTab(tabs[(idx + 1) % tabs.length]);
+      } else if (e.name === "left") {
+        const tabs = ["deposit", "withdraw", "transfer"] as const;
+        const idx = tabs.indexOf(bankingPanelTab());
+        setBankingPanelTab(tabs[(idx - 1 + tabs.length) % tabs.length]);
       }
       return;
     }
@@ -1052,6 +1086,8 @@ function AppContent() {
         }
       } else if (e.name === "d" && walletModalMode() === "view") {
         disconnectWalletHook();
+      } else if (e.name === "r" && walletModalMode() === "view") {
+        refreshWalletBalance();
       }
       return;
     }
@@ -1383,6 +1419,7 @@ function AppContent() {
       || accountStatsOpen()
       || settingsPanelOpen()
       || shortcutsPanelOpen()
+      || bankingPanelOpen()
       || alertsState.panelOpen
       || walletModalOpen()
       || filterPanelOpen()
@@ -1424,6 +1461,34 @@ function AppContent() {
       const ids = CATEGORIES.map(c => c.id);
       const cur = ids.indexOf(marketListCategoryId());
       setMarketListCategoryId(ids[(cur + 1) % ids.length]!);
+      return;
+    }
+
+    // Sub-category navigation: ; (prev) and ' (next)
+    if (!portfolioOpen() && (e.name === "semicolon" || e.sequence === ";")) {
+      const catDef = CATEGORIES.find(c => c.id === marketListCategoryId());
+      if (catDef && catDef.hasSubCategories) {
+        const subs = SUB_CATEGORIES[catDef.apiValue] || [];
+        if (subs.length > 0) {
+          const ids = subs.map(s => s.id);
+          const cur = ids.indexOf(selectedSubCategory() || "");
+          const newIdx = (cur - 1 + ids.length) % ids.length;
+          setSelectedSubCategory(ids[newIdx]);
+        }
+      }
+      return;
+    }
+    if (!portfolioOpen() && (e.name === "quote" || e.sequence === "'")) {
+      const catDef = CATEGORIES.find(c => c.id === marketListCategoryId());
+      if (catDef && catDef.hasSubCategories) {
+        const subs = SUB_CATEGORIES[catDef.apiValue] || [];
+        if (subs.length > 0) {
+          const ids = subs.map(s => s.id);
+          const cur = ids.indexOf(selectedSubCategory() || "");
+          const newIdx = (cur + 1) % ids.length;
+          setSelectedSubCategory(ids[newIdx]);
+        }
+      }
       return;
     }
 
@@ -1671,6 +1736,10 @@ function AppContent() {
         // e — toggle settings panel
         setSettingsPanelOpen(!settingsPanelOpen());
         setSettingsThemeSearchEditing(false);
+        break;
+      case "y":
+        // y — toggle banking panel
+        setBankingPanelOpen(!bankingPanelOpen());
         break;
       case "q":
         savePersistedState();

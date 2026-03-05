@@ -102,6 +102,25 @@ export async function initializeWallet(): Promise<void> {
     setWalletState("balance", 0);
   }
 
+  // Also fetch the EOA balance separately
+  try {
+    const eoaBalance = await fetchUsdcBalance(config.address);
+    setWalletState("balance", eoaBalance);
+  } catch (err) {
+    console.warn("EOA balance fetch failed:", err);
+  }
+
+  // Fetch funder/proxy balance if configured
+  if (walletState.funderAddress) {
+    try {
+      const funderBalance = await fetchUsdcBalance(walletState.funderAddress);
+      setWalletState("funderBalance", funderBalance);
+    } catch (err) {
+      console.warn("Funder balance fetch failed:", err);
+      setWalletState("funderBalance", 0);
+    }
+  }
+
   try {
     const creds = await fetchOrCreateApiCredentials(config.privateKey as `0x${string}`);
     if (creds) {
@@ -207,6 +226,7 @@ export function disconnectWalletHook(): void {
   setWalletState("address", null);
   setWalletState("connected", false);
   setWalletState("balance", 0);
+  setWalletState("funderBalance", 0);
   setWalletState("apiKey", undefined);
   setWalletState("apiSecret", undefined);
   setWalletState("apiPassphrase", undefined);
@@ -217,18 +237,27 @@ export function disconnectWalletHook(): void {
 }
 
 /**
- * Refresh balance for currently connected wallet
+ * Refresh balance for currently connected wallet (both EOA and funder/proxy)
  */
 export async function refreshWalletBalance(): Promise<void> {
   if (!walletState.address) return;
-  const balanceAddress = walletState.funderAddress ?? walletState.address;
+
+  // Fetch main wallet balance (EOA)
   try {
-    const balance = await fetchUsdcBalance(balanceAddress);
-    setWalletState("balance", balance);
+    const mainBalance = await fetchUsdcBalance(walletState.address);
+    setWalletState("balance", mainBalance);
   } catch (err) {
-    const errorMessage = formatWalletError(err);
-    setWalletState("error", `Failed to refresh balance: ${errorMessage}`);
-    console.error("Balance refresh error:", err);
+    console.error("Main balance refresh error:", err);
+  }
+
+  // Fetch funder/proxy wallet balance if configured
+  if (walletState.funderAddress) {
+    try {
+      const funderBalance = await fetchUsdcBalance(walletState.funderAddress);
+      setWalletState("funderBalance", funderBalance);
+    } catch (err) {
+      console.error("Funder balance refresh error:", err);
+    }
   }
 }
 

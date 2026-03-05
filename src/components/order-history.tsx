@@ -26,6 +26,9 @@ import {
   setOrderHistorySection,
   setOrderHistoryOpen,
   getSelectedMarket,
+  orderHistoryPage,
+  setOrderHistoryPage,
+  ORDER_HISTORY_PAGE_SIZE,
 } from "../state";
 import { PlacedOrder } from "../types/orders";
 
@@ -143,6 +146,14 @@ export function OrderHistory() {
 
   const openOrders = createMemo(() => getFilteredOpenOrders(selectedMarketTokenIds()));
   const tradeHistory = createMemo(() => getFilteredTradeHistory(selectedMarketTokenIds()));
+
+  // Pagination
+  const totalPages = createMemo(() => Math.ceil(tradeHistory().length / ORDER_HISTORY_PAGE_SIZE));
+  const paginatedTradeHistory = createMemo(() => {
+    const page = orderHistoryPage();
+    const start = page * ORDER_HISTORY_PAGE_SIZE;
+    return tradeHistory().slice(start, start + ORDER_HISTORY_PAGE_SIZE);
+  });
 
   const selectedOpenOrder = createMemo(() =>
     openOrders()[Math.max(0, Math.min(openOrders().length - 1, orderHistorySelectedIdx()))] ?? null
@@ -348,7 +359,7 @@ export function OrderHistory() {
 
         {/* Trade History section */}
         <box flexDirection="row" height={1} paddingBottom={1}>
-          <text content={`─── TRADE HISTORY (${tradeHistory().length}) `} fg={theme.borderSubtle} />
+          <text content={`─── TRADE HISTORY (${tradeHistory().length}) PAGE ${orderHistoryPage() + 1}/${totalPages() || 1} `} fg={theme.borderSubtle} />
           <Show when={orderHistorySection() === "trades"}>
             <text content="▶ " fg={theme.primary} />
           </Show>
@@ -371,7 +382,7 @@ export function OrderHistory() {
           </box>
 
           <scrollbox flexGrow={1} width="100%">
-            <For each={tradeHistory()}>
+            <For each={paginatedTradeHistory()}>
               {(order, idx) => {
                 const totalUsdc = order.price * order.sizeMatched;
                 const isSelected = () => idx() === orderHistoryTradeSelectedIdx();

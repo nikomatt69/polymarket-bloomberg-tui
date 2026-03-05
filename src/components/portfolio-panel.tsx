@@ -254,9 +254,33 @@ export function PortfolioPanel() {
               {/* ══════════════════════════════════════════════════════════ */}
               <Show when={portfolioTab() === "overview"}>
                 <box flexDirection="column" width="100%">
+                  {/* Account Balance Row - Polymarket style */}
+                  <box flexDirection="row" width="100%" gap={2} paddingTop={1}>
+                    <text content="─── ACCOUNT ───" fg={theme.borderSubtle} />
+                  </box>
+                  <box flexDirection="row" width="100%" gap={3} paddingTop={0}>
+                    <box>
+                      <text content="EOA: " fg={theme.textMuted} />
+                      <text content={`$${walletState.balance.toFixed(2)}`} fg={theme.textBright} />
+                    </box>
+                    <Show when={walletState.funderAddress}>
+                      <box>
+                        <text content="Proxy: " fg={theme.textMuted} />
+                        <text content={`$${walletState.funderBalance.toFixed(2)}`} fg={theme.warning} />
+                      </box>
+                    </Show>
+                    <box>
+                      <text content="In Pos: " fg={theme.textMuted} />
+                      <text content={`$${summary().totalValue.toFixed(2)}`} fg={theme.warning} />
+                    </box>
+                  </box>
+
                   {/* Key metrics row */}
                   <box flexDirection="row" width="100%" gap={2} paddingTop={1}>
-                    <text content={`Value: $${summary().totalValue.toFixed(2)}`} fg={theme.textBright} />
+                    <text content="─── PORTFOLIO ───" fg={theme.borderSubtle} />
+                  </box>
+                  <box flexDirection="row" width="100%" gap={2}>
+                    <text content={`Total Value: $${summary().totalValue.toFixed(2)}`} fg={theme.textBright} />
                     <text
                       content={`P&L: ${fmtUsd(summary().totalCashPnl)}`}
                       fg={summary().totalCashPnl >= 0 ? theme.success : theme.error}
@@ -265,7 +289,7 @@ export function PortfolioPanel() {
                       content={fmtPct(summary().totalPercentPnl)}
                       fg={summary().totalPercentPnl >= 0 ? theme.success : theme.error}
                     />
-                    <text content={`${summary().positionCount} positions`} fg={theme.textMuted} />
+                    <text content={`${summary().positionCount} pos`} fg={theme.textMuted} />
                   </box>
 
                   {/* Equity sparkline */}
@@ -273,6 +297,43 @@ export function PortfolioPanel() {
                     <box flexDirection="row" gap={2} paddingTop={1}>
                       <text content="Equity: " fg={theme.textMuted} />
                       <text content={equitySparkline()} fg={summary().totalCashPnl >= 0 ? theme.success : theme.error} />
+                    </box>
+                  </Show>
+
+                  {/* Daily P&L Chart */}
+                  <Show when={pnlTimeSeries().length > 1}>
+                    <box flexDirection="column" paddingTop={1}>
+                      <text content="─── P&L HISTORY ───" fg={theme.borderSubtle} />
+                      <box flexDirection="row" width="100%">
+                        <text content="DATE       " fg={theme.textMuted} width={11} />
+                        <text content="VALUE  " fg={theme.textMuted} width={9} />
+                        <text content="P&L    " fg={theme.textMuted} width={9} />
+                        <text content="CHART (last 14 days)" fg={theme.textMuted} width={22} />
+                      </box>
+                      <For each={pnlTimeSeries().slice(-14)}>
+                        {(entry) => {
+                          const dateStr = entry.date.slice(5); // MM-DD
+                          const isPositive = entry.pnl >= 0;
+                          const chartWidth = 18;
+                          const maxVal = Math.max(...pnlTimeSeries().slice(-14).map(e => Math.abs(e.pnl)), 1);
+                          const barLen = Math.round((Math.abs(entry.pnl) / maxVal) * chartWidth);
+                          const bar = isPositive
+                            ? "▓".repeat(barLen) + " ".repeat(chartWidth - barLen)
+                            : " ".repeat(chartWidth - barLen) + "▓".repeat(barLen);
+                          return (
+                            <box flexDirection="row" width="100%">
+                              <text content={dateStr.padEnd(10, " ")} fg={theme.textMuted} width={11} />
+                              <text content={`$${entry.value.toFixed(0)}`.padStart(8, " ")} fg={theme.text} width={9} />
+                              <text
+                                content={`${isPositive ? "+" : ""}$${entry.pnl.toFixed(0)}`.padStart(8, " ")}
+                                fg={isPositive ? theme.success : theme.error}
+                                width={9}
+                              />
+                              <text content={bar} fg={isPositive ? theme.successMuted : theme.errorMuted} width={chartWidth} />
+                            </box>
+                          );
+                        }}
+                      </For>
                     </box>
                   </Show>
 
@@ -378,15 +439,15 @@ export function PortfolioPanel() {
                 <box flexDirection="column" width="100%">
                   {/* Column headers */}
                   <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel} paddingTop={1}>
-                    <text content="MARKET" fg={theme.textMuted} width={19} />
-                    <text content="OUT" fg={theme.textMuted} width={5} />
-                    <text content="SHR" fg={theme.textMuted} width={7} />
-                    <text content="ENTRY" fg={theme.textMuted} width={7} />
-                    <text content="CUR" fg={theme.textMuted} width={7} />
-                    <text content="P&L $" fg={theme.textMuted} width={9} />
-                    <text content="ROI" fg={theme.textMuted} width={7} />
-                    <text content="RSK" fg={theme.textMuted} width={5} />
-                    <text content="ACTION" fg={theme.textMuted} width={6} />
+                    <text content="MARKET" fg={theme.textMuted} width={18} />
+                    <text content="OUTCOME" fg={theme.textMuted} width={8} />
+                    <text content="SHARES" fg={theme.textMuted} width={7} />
+                    <text content="ENTRY" fg={theme.textMuted} width={6} />
+                    <text content="CURRENT" fg={theme.textMuted} width={7} />
+                    <text content="P&L" fg={theme.textMuted} width={9} />
+                    <text content="ROI%" fg={theme.textMuted} width={6} />
+                    <text content="RISK" fg={theme.textMuted} width={5} />
+                    <text content="CASH" fg={theme.textMuted} width={5} />
                   </box>
                   <Separator type="light" />
 
@@ -416,7 +477,7 @@ export function PortfolioPanel() {
                             setOrderFormTokenId(position.asset);
                             setOrderFormSide("SELL");
                             setOrderFormMarketTitle(position.title);
-                            setOrderFormOutcomeTitle(position.outcome);
+                            setOrderFormOutcomeTitle(position.outcome || "");
                             setOrderFormCurrentPrice(position.curPrice);
                             // Default to market price
                             setOrderFormPriceInput(position.curPrice.toFixed(2));
@@ -444,10 +505,10 @@ export function PortfolioPanel() {
                               backgroundColor={rowBg()}
                               onMouseDown={handleClick}
                             >
-                              <text content={truncate(position.title, 18)} fg={theme.text} width={19} />
-                              <text content={position.outcome.slice(0, 4).padEnd(4, " ")} fg={theme.accent} width={5} />
+                              <text content={truncate(position.title, 17)} fg={theme.text} width={18} />
+                              <text content={truncate(position.outcome || "—", 7).padEnd(7, " ")} fg={theme.accent} width={8} />
                               <text content={position.size.toFixed(1).padStart(6, " ")} fg={theme.text} width={7} />
-                              <text content={fmtPrice(position.avgPrice).padStart(6, " ")} fg={theme.textMuted} width={7} />
+                              <text content={fmtPrice(position.avgPrice).padStart(5, " ")} fg={theme.textMuted} width={6} />
                               <text content={fmtPrice(position.curPrice).padStart(6, " ")} fg={theme.text} width={7} />
                               <text
                                 content={fmtUsd(position.cashPnl).padStart(8, " ")}
@@ -455,16 +516,29 @@ export function PortfolioPanel() {
                                 width={9}
                               />
                               <text
-                                content={fmtPct(position.percentPnl).padStart(6, " ")}
+                                content={fmtPct(position.percentPnl).padStart(5, " ")}
                                 fg={position.percentPnl >= 0 ? theme.success : theme.error}
-                                width={7}
+                                width={6}
                               />
                               <text
                                 content={riskScore().toString().padStart(4, " ")}
                                 fg={riskColor()}
                                 width={5}
                               />
-                              <text content="SELL" fg={theme.error} width={5} />
+                              <box onMouseDown={(e) => {
+                                e.stopPropagation();
+                                // Cashout: sell all shares at market price
+                                setOrderFormTokenId(position.asset);
+                                setOrderFormSide("SELL");
+                                setOrderFormMarketTitle(position.title);
+                                setOrderFormOutcomeTitle(position.outcome || "");
+                                setOrderFormCurrentPrice(position.curPrice);
+                                setOrderFormPriceInput(position.curPrice.toFixed(2));
+                                setOrderFormSharesInput(position.size.toFixed(4));
+                                setOrderFormOpen(true);
+                              }}>
+                                <text content="SELL" fg={theme.error} width={5} />
+                              </box>
                             </box>
                           );
                         }}
@@ -559,69 +633,133 @@ export function PortfolioPanel() {
               {/* ══════════════════════════════════════════════════════════ */}
               <Show when={portfolioTab() === "history"}>
                 <box flexDirection="column" width="100%">
-                  {/* Realized / Unrealized summary */}
-                  <SectionTitle title="P&L Summary" icon="◈" />
+                  {/* Account Summary - Polymarket style */}
                   <box flexDirection="row" width="100%" gap={3}>
-                    <text content={`Realized: ${fmtUsd(realizedPnl())}`} fg={realizedPnl() >= 0 ? theme.success : theme.error} />
-                    <text content={`Unrealized: ${fmtUsd(unrealizedPnl())}`} fg={unrealizedPnl() >= 0 ? theme.success : theme.error} />
+                    <box>
+                      <text content="Realized: " fg={theme.textMuted} />
+                      <text content={fmtUsd(realizedPnl())} fg={realizedPnl() >= 0 ? theme.success : theme.error} />
+                    </box>
+                    <box>
+                      <text content="Unrealized: " fg={theme.textMuted} />
+                      <text content={fmtUsd(unrealizedPnl())} fg={unrealizedPnl() >= 0 ? theme.success : theme.error} />
+                    </box>
                   </box>
                   <box flexDirection="row" width="100%" gap={3}>
-                    <text content={`Daily Vol: ${fmtUsd(dailyPnl())}`} fg={theme.textMuted} />
-                    <text content={`Weekly Vol: ${fmtUsd(weeklyPnl())}`} fg={theme.textMuted} />
+                    <text content={`Today: ${fmtUsd(dailyPnl())}`} fg={theme.textMuted} />
+                    <text content={`This Week: ${fmtUsd(weeklyPnl())}`} fg={theme.textMuted} />
                   </box>
 
-                  {/* Monthly P&L */}
-                  <Show when={monthlyStats().length > 0}>
-                    <SectionTitle title="Monthly P&L" icon="📅" />
-                    <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
-                      <text content="MONTH" fg={theme.textMuted} width={10} />
-                      <text content="TRADES" fg={theme.textMuted} width={9} />
-                      <text content="VOLUME" fg={theme.textMuted} width={12} />
-                      <text content="P&L" fg={theme.textMuted} width={12} />
-                    </box>
-                    <For each={monthlyStats()}>
-                      {(stat) => (
-                        <box flexDirection="row" width="100%">
-                          <text content={stat.month.padEnd(9, " ")} fg={theme.text} width={10} />
-                          <text content={stat.tradeCount.toString().padStart(8, " ")} fg={theme.textMuted} width={9} />
-                          <text content={`$${stat.volume.toFixed(0)}`.padStart(11, " ")} fg={theme.textMuted} width={12} />
-                          <text
-                            content={fmtUsd(stat.pnl).padStart(11, " ")}
-                            fg={stat.pnl >= 0 ? theme.success : theme.error}
-                            width={12}
-                          />
-                        </box>
-                      )}
-                    </For>
-                  </Show>
-
-                  {/* Recent fills */}
-                  <Show when={ordersState.tradeHistory.length > 0}>
-                    <SectionTitle title="Recent Fills" icon="⬛" />
-                    <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
-                      <text content="MARKET" fg={theme.textMuted} width={28} />
-                      <text content="SIDE" fg={theme.textMuted} width={5} />
-                      <text content="PRICE" fg={theme.textMuted} width={7} />
-                      <text content="FILLED" fg={theme.textMuted} width={9} />
-                      <text content="STATUS" fg={theme.textMuted} width={10} />
-                    </box>
-                    <scrollbox width="100%">
-                      <For each={ordersState.tradeHistory.slice(0, 20)}>
+                  {/* Open Orders */}
+                  <Show when={ordersState.openOrders.length > 0}>
+                    <box flexDirection="column" paddingTop={1}>
+                      <text content="─── OPEN ORDERS ───" fg={theme.borderSubtle} />
+                      <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
+                        <text content="MARKET" fg={theme.textMuted} width={20} />
+                        <text content="SIDE" fg={theme.textMuted} width={5} />
+                        <text content="PRICE" fg={theme.textMuted} width={7} />
+                        <text content="SIZE" fg={theme.textMuted} width={8} />
+                        <text content="FILLED" fg={theme.textMuted} width={8} />
+                        <text content="TYPE" fg={theme.textMuted} width={5} />
+                      </box>
+                      <For each={ordersState.openOrders.slice(0, 10)}>
                         {(order) => (
                           <box flexDirection="row" width="100%">
-                            <text content={truncate(order.marketTitle ?? "—", 27)} fg={theme.text} width={28} />
+                            <text content={truncate(order.marketTitle ?? "—", 19)} fg={theme.text} width={20} />
                             <text
                               content={order.side.padEnd(4, " ")}
                               fg={order.side === "BUY" ? theme.success : theme.error}
                               width={5}
                             />
                             <text content={`${(order.price * 100).toFixed(1)}¢`.padStart(6, " ")} fg={theme.text} width={7} />
-                            <text content={order.sizeMatched.toFixed(1).padStart(8, " ")} fg={theme.textMuted} width={9} />
-                            <text content={order.status} fg={theme.textMuted} width={10} />
+                            <text content={order.originalSize.toFixed(1).padStart(7, " ")} fg={theme.textMuted} width={8} />
+                            <text content={order.sizeMatched.toFixed(1).padStart(7, " ")} fg={theme.textMuted} width={8} />
+                            <text content={order.status.slice(0, 4)} fg={theme.warning} width={5} />
                           </box>
                         )}
                       </For>
-                    </scrollbox>
+                    </box>
+                  </Show>
+
+                  {/* Trade History - Full Details */}
+                  <Show when={ordersState.tradeHistory.length > 0}>
+                    <box flexDirection="column" paddingTop={1}>
+                      <text content="─── TRADE HISTORY ───" fg={theme.borderSubtle} />
+                      <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
+                        <text content="TIME     " fg={theme.textMuted} width={10} />
+                        <text content="MARKET" fg={theme.textMuted} width={16} />
+                        <text content="OUTCOME" fg={theme.textMuted} width={8} />
+                        <text content="SIDE" fg={theme.textMuted} width={5} />
+                        <text content="PRICE" fg={theme.textMuted} width={7} />
+                        <text content="FILLED" fg={theme.textMuted} width={7} />
+                        <text content="TOTAL $" fg={theme.textMuted} width={9} />
+                      </box>
+                      <scrollbox flexGrow={1} width="100%">
+                        <For each={ordersState.tradeHistory.slice(0, 30)}>
+                          {(order) => {
+                            const totalValue = order.price * order.sizeMatched;
+                            const time = new Date(order.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                            const date = new Date(order.createdAt).toLocaleDateString([], { month: "numeric", day: "numeric" });
+                            return (
+                              <box flexDirection="row" width="100%">
+                                <text content={`${date} ${time}`.padEnd(9, " ")} fg={theme.textMuted} width={10} />
+                                <text content={truncate(order.marketTitle ?? "—", 15)} fg={theme.text} width={16} />
+                                <text content={truncate(order.outcomeTitle ?? "—", 7)} fg={theme.accent} width={8} />
+                                <text
+                                  content={order.side.padEnd(4, " ")}
+                                  fg={order.side === "BUY" ? theme.success : theme.error}
+                                  width={5}
+                                />
+                                <text content={`${(order.price * 100).toFixed(1)}¢`.padStart(6, " ")} fg={theme.text} width={7} />
+                                <text content={order.sizeMatched.toFixed(1).padStart(6, " ")} fg={theme.textMuted} width={7} />
+                                <text
+                                  content={`$${totalValue.toFixed(2)}`.padStart(8, " ")}
+                                  fg={order.side === "BUY" ? theme.error : theme.success}
+                                  width={9}
+                                />
+                              </box>
+                            );
+                          }}
+                        </For>
+                      </scrollbox>
+                    </box>
+                  </Show>
+
+                  {/* Monthly Summary */}
+                  <Show when={monthlyStats().length > 0}>
+                    <box flexDirection="column" paddingTop={1}>
+                      <text content="─── MONTHLY P&L ───" fg={theme.borderSubtle} />
+                      <box flexDirection="row" width="100%" backgroundColor={theme.backgroundPanel}>
+                        <text content="MONTH" fg={theme.textMuted} width={10} />
+                        <text content="TRADES" fg={theme.textMuted} width={8} />
+                        <text content="VOLUME" fg={theme.textMuted} width={11} />
+                        <text content="P&L" fg={theme.textMuted} width={11} />
+                        <text content="AVG TRADE" fg={theme.textMuted} width={11} />
+                      </box>
+                      <For each={monthlyStats()}>
+                        {(stat) => {
+                          const avgTrade = stat.tradeCount > 0 ? stat.volume / stat.tradeCount : 0;
+                          return (
+                            <box flexDirection="row" width="100%">
+                              <text content={stat.month.padEnd(9, " ")} fg={theme.text} width={10} />
+                              <text content={stat.tradeCount.toString().padStart(7, " ")} fg={theme.textMuted} width={8} />
+                              <text content={`$${stat.volume.toFixed(0)}`.padStart(10, " ")} fg={theme.textMuted} width={11} />
+                              <text
+                                content={fmtUsd(stat.pnl).padStart(10, " ")}
+                                fg={stat.pnl >= 0 ? theme.success : theme.error}
+                                width={11}
+                              />
+                              <text content={`$${avgTrade.toFixed(0)}`.padStart(10, " ")} fg={theme.textMuted} width={11} />
+                            </box>
+                          );
+                        }}
+                      </For>
+                    </box>
+                  </Show>
+
+                  <Show when={ordersState.tradeHistory.length === 0 && ordersState.openOrders.length === 0}>
+                    <box padding={1}>
+                      <text content="No trading history yet" fg={theme.textMuted} />
+                    </box>
                   </Show>
                 </box>
               </Show>
