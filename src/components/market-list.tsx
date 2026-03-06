@@ -36,8 +36,10 @@ import { useTheme } from "../context/theme";
 import { isWatched, watchlistState } from "../hooks/useWatchlist";
 import {
   getMarketsByCategory,
+  getAllMarketsByCategory,
   getTrendingMarkets,
   getMarkets,
+  getAllMarkets,
   getLiveSportsMarkets,
   getMarketsByTag,
   getCategories,
@@ -116,8 +118,8 @@ function wsStatusDot(status: string): { char: string; level: "ok" | "warn" | "of
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 30;
-const LOAD_MORE_SIZE = 20;
+const PAGE_SIZE = 50;
+const LOAD_MORE_SIZE = 50;
 /** Start prefetching when cursor is this many rows from the bottom */
 const PRELOAD_AHEAD = 10;
 
@@ -214,10 +216,25 @@ async function fetchForCategory(
   limit: number,
   offset: number,
   tagSlug?: string,
+  showAll: boolean = false,
 ) {
   // If we have a tag slug (sub-category), use getMarketsByTag
   if (tagSlug) {
     return getMarketsByTag(tagSlug, limit);
+  }
+
+  // Use "All" APIs when showAllMarkets is enabled
+  if (showAll) {
+    switch (apiValue) {
+      case "trending":
+        return getTrendingMarkets(limit); // Trending doesn't have closed variant
+      case "all":
+        return getAllMarkets(limit, offset);
+      case "sports_live":
+        return getLiveSportsMarkets(); // Live sports doesn't have closed variant
+      default:
+        return getAllMarketsByCategory(apiValue, limit, offset);
+    }
   }
 
   switch (apiValue) {
@@ -256,6 +273,7 @@ export function MarketList() {
   const [loadingMore, setLoadingMore] = createSignal(false);
   const [hasMore, setHasMore] = createSignal(true);
   const [offsets, setOffsets] = createSignal<Record<string, number>>({});
+  const [showAllMarkets, setShowAllMarkets] = createSignal(false); // Toggle to show closed markets
 
   // Virtual category filters applied on top of getFilteredMarkets()
   const displayMarkets = createMemo(() => {
@@ -321,7 +339,7 @@ export function MarketList() {
       try {
         // If we have a sub-category, use its tag slug
         const tagSlug = subCat || undefined;
-        const markets = await fetchForCategory(cat.apiValue, PAGE_SIZE, 0, tagSlug);
+        const markets = await fetchForCategory(cat.apiValue, PAGE_SIZE, 0, tagSlug, showAllMarkets());
         if (cancelled) return;
         setMarkets(markets);
         setOffsets((prev) => ({ ...prev, [fetchKey]: markets.length }));
@@ -363,7 +381,7 @@ export function MarketList() {
 
     try {
       const tagSlug = subCat || undefined;
-      const markets = await fetchForCategory(cat.apiValue, LOAD_MORE_SIZE, currentOffset, tagSlug);
+      const markets = await fetchForCategory(cat.apiValue, LOAD_MORE_SIZE, currentOffset, tagSlug, showAllMarkets());
       if (markets.length > 0) {
         appendMarkets(markets);
         setOffsets((prev) => ({ ...prev, [fetchKey]: currentOffset + markets.length }));

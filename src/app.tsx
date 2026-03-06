@@ -29,6 +29,8 @@ import {
   setOrderFormSide,
   orderFormTokenId,
   setOrderFormTokenId,
+  orderFormOutcomeIdx,
+  setOrderFormOutcomeIdx,
   setOrderFormMarketTitle,
   setOrderFormOutcomeTitle,
   orderFormOutcomeTitle,
@@ -394,6 +396,18 @@ function AppContent() {
         setOrderFormPostOnly(false);
       } else if (e.name === "tab") {
         setOrderFormFocusField(orderFormFocusField() === "price" ? "shares" : "price");
+      } else if (e.name === "i") {
+        // Toggle outcome index (cycle through outcomes)
+        const market = getSelectedMarket();
+        if (market && market.outcomes.length > 1) {
+          const newIdx = (orderFormOutcomeIdx() + 1) % market.outcomes.length;
+          setOrderFormOutcomeIdx(newIdx);
+          const outcome = market.outcomes[newIdx];
+          setOrderFormTokenId(outcome.id);
+          setOrderFormOutcomeTitle(outcome.title);
+          setOrderFormCurrentPrice(outcome.price);
+          setOrderFormPriceInput(outcome.price.toFixed(4));
+        }
       } else if (e.name === "t") {
         const types: Array<"GTC" | "FOK" | "GTD" | "FAK"> = ["GTC", "FOK", "GTD", "FAK"];
         const cur = types.indexOf(orderFormType());
@@ -1540,7 +1554,8 @@ function AppContent() {
         // o — open buy order
         const market = getSelectedMarket();
         if (market && market.outcomes.length > 0) {
-          const outcome = market.outcomes[0];
+          const outcomeIdx = Math.min(orderFormOutcomeIdx(), market.outcomes.length - 1);
+          const outcome = market.outcomes[outcomeIdx];
           setOrderFormSide("BUY");
           setOrderFormTokenId(outcome.id);
           setOrderFormMarketTitle(market.title);
@@ -1558,7 +1573,8 @@ function AppContent() {
         // s — open sell order
         const market = getSelectedMarket();
         if (market && market.outcomes.length > 0) {
-          const outcome = market.outcomes[0];
+          const outcomeIdx = Math.min(orderFormOutcomeIdx(), market.outcomes.length - 1);
+          const outcome = market.outcomes[outcomeIdx];
           setOrderFormSide("SELL");
           setOrderFormTokenId(outcome.id);
           setOrderFormMarketTitle(market.title);
@@ -1694,6 +1710,9 @@ function AppContent() {
             setUserSearchResults([]);
             setUserSearchLoading(false);
           }
+        } else {
+          // y — toggle banking panel
+          setBankingPanelOpen(!bankingPanelOpen());
         }
         break;
       case "A":
@@ -1736,10 +1755,6 @@ function AppContent() {
         // e — toggle settings panel
         setSettingsPanelOpen(!settingsPanelOpen());
         setSettingsThemeSearchEditing(false);
-        break;
-      case "y":
-        // y — toggle banking panel
-        setBankingPanelOpen(!bankingPanelOpen());
         break;
       case "q":
         savePersistedState();

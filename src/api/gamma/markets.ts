@@ -205,6 +205,35 @@ export async function getMarkets(limit: number = 50, offset: number = 0): Promis
     .filter((market) => market.outcomes.length > 0);
 }
 
+/**
+ * Get ALL markets including both active and closed.
+ * Use this when you need comprehensive market data.
+ */
+export async function getAllMarkets(limit: number = 100, offset: number = 0): Promise<Market[]> {
+  const query = buildMarketsQuery({
+    limit,
+    offset,
+    closed: true,
+    active: true, // Include both active and closed
+    order: "volumeNum",
+    ascending: false
+  });
+  const response = await fetch(`${GAMMA_API_BASE}/markets?${query}`);
+
+  if (!response.ok) {
+    throw new Error(`Gamma API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  if (!Array.isArray(data)) {
+    throw new Error("Unexpected Gamma API response format");
+  }
+
+  return data
+    .map((item) => parseGammaMarket(item as GammaMarket))
+    .filter((market) => market.outcomes.length > 0);
+}
+
 export async function getMarketDetails(marketId: string): Promise<Market | null> {
   try {
     // Try direct path first (returns single object)

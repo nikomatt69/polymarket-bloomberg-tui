@@ -408,6 +408,23 @@ export async function getMarkets(limit: number = 50, offset: number = 0): Promis
   return enrichMarketsWithOrderBook(baseMarkets);
 }
 
+/**
+ * Get ALL markets including both active and closed.
+ * Use this when you need comprehensive market data from Polymarket.
+ */
+export async function getAllMarkets(limit: number = 100, offset: number = 0): Promise<Market[]> {
+  const baseMarkets = await fetchGammaMarkets({
+    limit,
+    offset,
+    active: true,
+    closed: true, // Include both active and closed
+    order: "volumeNum",
+    ascending: false,
+  });
+
+  return enrichMarketsWithOrderBook(baseMarkets);
+}
+
 export async function getMarketDetails(marketId: string): Promise<Market | null> {
   try {
     const safeId = encodeURIComponent(marketId);
@@ -479,6 +496,50 @@ export async function getMarketsByCategory(category: string, limit: number = 50,
     return enrichMarketsWithOrderBook(filtered.slice(0, limit));
   } catch (error) {
     console.error("Failed to fetch markets by category:", error);
+    return [];
+  }
+}
+
+/**
+ * Get ALL markets for a category including both active and closed.
+ * Use this when you need comprehensive category data.
+ */
+export async function getAllMarketsByCategory(category: string, limit: number = 100, offset: number = 0): Promise<Market[]> {
+  const catSlug = CATEGORY_SLUG_MAP[category] ?? category.toLowerCase();
+
+  const categoryKeywords: Record<string, string[]> = {
+    sports: ["nba", "nfl", "nhl", "mlb", "soccer", "football", "ufc", "mma", "tennis", "world cup", "fifa", "qualif", "championship", "season", "win the", "beat", "score", "game"],
+    politics: ["trump", "biden", "election", "president", "congress", "senate", "republican", "democrat", "governor", "polling", "vote", "cabinet", "ukraine", "russia", "china", "taiwan", "policy", "law", "bill", "supreme court"],
+    crypto: ["bitcoin", "btc", "ethereum", "eth", "solana", "xrp", "binance", "coinbase", "crypto", "defi", "blockchain", "token"],
+    tech: ["ai ", "openai", "gpt", "chatgpt", "anthropic", "claude", "google ", "microsoft", "apple ", "meta ", "twitter", "amazon ", "tesla", "spacex", "tech", "software", "startup", "ipo", "valuation"],
+    entertainment: ["album", "music", "song", "artist", "movie", "film", "netflix", "disney", "spotify", "gta", "video game", "grammy", "oscar", "emmy", "tony"],
+    science: ["vaccine", "covid", "coronavirus", "health", "medical", "disease", "fda", "cdc", "science", "research", "study", "trial"],
+    business: ["market", "stock", "economy", "gdp", "fed", "inflation", "unemployment", "interest", "recession", "bank", "finance", "oil", "energy"],
+  };
+
+  const keywords = categoryKeywords[catSlug] ?? [catSlug];
+
+  try {
+    // Fetch more than needed since we'll filter client-side - include BOTH active and closed
+    const baseMarkets = await fetchGammaMarkets({
+      limit: Math.max(limit * 4, 200),
+      offset,
+      active: true,
+      closed: true, // Include both active and closed
+      order: "volumeNum",
+      ascending: false,
+    });
+
+    // Client-side filter by keyword match in title or inferred category
+    const filtered = baseMarkets.filter((m) => {
+      if (m.category === catSlug) return true;
+      const titleLower = m.title.toLowerCase();
+      return keywords.some((kw) => titleLower.includes(kw));
+    });
+
+    return enrichMarketsWithOrderBook(filtered.slice(0, limit));
+  } catch (error) {
+    console.error("Failed to fetch all markets by category:", error);
     return [];
   }
 }

@@ -396,6 +396,7 @@ export const [orderHistoryOpen, setOrderHistoryOpen] = createSignal(false);
 // Order form signals
 export const [orderFormOpen, setOrderFormOpen] = createSignal(false);
 export const [orderFormTokenId, setOrderFormTokenId] = createSignal("");
+export const [orderFormOutcomeIdx, setOrderFormOutcomeIdx] = createSignal(0); // 0 = first outcome (Yes), 1 = second (No), etc.
 export const [orderFormSide, setOrderFormSide] = createSignal<"BUY" | "SELL">("BUY");
 export const [orderFormMarketTitle, setOrderFormMarketTitle] = createSignal("");
 export const [orderFormOutcomeTitle, setOrderFormOutcomeTitle] = createSignal("");

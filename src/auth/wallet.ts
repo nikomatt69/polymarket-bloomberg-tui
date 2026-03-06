@@ -151,6 +151,38 @@ export function persistApiCredentials(creds: ApiCredentials): void {
   });
 }
 
+export function persistApiCredentialsForFunder(funderAddress: string, creds: ApiCredentials): void {
+  const config = loadWalletConfig();
+  if (!config) return;
+
+  const funderCredentialsKey = `funderApiKey_${funderAddress.toLowerCase()}`;
+  const funderSecretKey = `funderApiSecret_${funderAddress.toLowerCase()}`;
+  const funderPassphraseKey = `funderApiPassphrase_${funderAddress.toLowerCase()}`;
+
+  saveWalletConfig({
+    ...config,
+    [funderCredentialsKey]: creds.apiKey,
+    [funderSecretKey]: creds.apiSecret,
+    [funderPassphraseKey]: creds.apiPassphrase,
+  } as unknown as WalletConfig);
+}
+
+export function loadApiCredentialsForFunder(funderAddress: string): ApiCredentials | null {
+  const config = loadWalletConfig();
+  if (!config) return null;
+
+  const funderCredentialsKey = `funderApiKey_${funderAddress.toLowerCase()}`;
+  const funderSecretKey = `funderApiSecret_${funderAddress.toLowerCase()}`;
+  const funderPassphraseKey = `funderApiPassphrase_${funderAddress.toLowerCase()}`;
+
+  const apiKey = (config as unknown as Record<string, unknown>)[funderCredentialsKey] as string | undefined;
+  const apiSecret = (config as unknown as Record<string, unknown>)[funderSecretKey] as string | undefined;
+  const apiPassphrase = (config as unknown as Record<string, unknown>)[funderPassphraseKey] as string | undefined;
+
+  if (!apiKey || !apiSecret || !apiPassphrase) return null;
+  return { apiKey, apiSecret, apiPassphrase };
+}
+
 /**
  * Validates and normalizes a private key
  * @throws InvalidPrivateKeyError if the key is invalid
@@ -188,7 +220,7 @@ function validatePrivateKey(privateKey: string): `0x${string}` {
 /**
  * Wraps a fetch call with timeout
  */
-async function fetchWithTimeout(
+export async function fetchWithTimeout(
   url: string,
   options: RequestInit = {},
   timeoutMs: number = DEFAULT_TIMEOUT
@@ -254,7 +286,7 @@ function getStoredApiCredentials(): ApiCredentials | null {
   };
 }
 
-function parseApiCredentials(payload: unknown): ApiCredentials | null {
+export function parseApiCredentials(payload: unknown): ApiCredentials | null {
   if (!payload || typeof payload !== "object") return null;
 
   const candidate = payload as {

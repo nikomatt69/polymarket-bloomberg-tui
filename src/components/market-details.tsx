@@ -543,6 +543,7 @@ export function MarketDetails() {
               <Show when={probabilityDistribution()!.length > 6}>
                 <text content={`  …and ${probabilityDistribution()!.length - 6} more outcomes`} fg={theme.textMuted} />
               </Show>
+              <text content="  ↓ Scroll down for OUTCOMES with [BUY]/[SELL] buttons" fg={theme.textMuted} />
             </Show>
 
             {/* ── MARKET ANALYSIS section ─────────────────────────────────── */}

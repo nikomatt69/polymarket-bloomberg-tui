@@ -2,9 +2,12 @@
  * Search Panel — full overlay market search with category tabs and sort filters.
  * Opens when user clicks the search bar or presses [/].
  * Keyboard: ESC close, ↑↓ navigate, Enter select, Tab cycle category.
+ *
+ * IMPORTANT: This panel searches the LIVE Polymarket API, not just locally loaded markets.
+ * When user types a query, it calls gamma-api.polymarket.com to find ALL matching markets.
  */
 
-import { createSignal, createMemo, For, Show } from "solid-js";
+import { createSignal, createMemo, For, Show, createEffect } from "solid-js";
 import { useTheme } from "../context/theme";
 import {
   appState,
@@ -17,9 +20,13 @@ import {
   searchPanelResultIdx,
   setSearchPanelResultIdx,
   setSearchPanelOpen,
+  setMarkets,
 } from "../state";
 import { formatVolume } from "../utils/format";
 import { isWatched } from "../hooks/useWatchlist";
+import { searchMarketsByQuery } from "../api/gamma/search";
+import { getMarketDetails } from "../api/gamma/markets";
+import { Market } from "../types/market";
 
 // ─── Panel category definitions ───────────────────────────────────────────────
 
@@ -76,8 +83,63 @@ function formatExpiry(resolutionDate: Date | undefined): { text: string; level: 
 export function SearchPanel() {
   const { theme } = useTheme();
   const [sort, setSort] = createSignal<SortKey>("volume");
+  const [apiResults, setApiResults] = createSignal<Market[]>([]);
+  const [searching, setSearching] = createSignal(false);
+
+  // Debounced search - call Polymarket API when user types
+  let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  createEffect(() => {
+    const query = appState.searchQuery;
+
+    // Clear previous timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+      searchTimeout = null;
+    }
+
+    // If no query, use local markets
+    if (!query || query.trim().length === 0) {
+      setApiResults([]);
+      setSearching(false);
+      return;
+    }
+
+    // Debounce API calls (300ms)
+    setSearching(true);
+    searchTimeout = setTimeout(async () => {
+      try {
+        // Call Polymarket's live API search
+        const results = await searchMarketsByQuery(query.trim(), 50, 0);
+        setApiResults(results);
+      } catch (error) {
+        console.error("API search error:", error);
+        setApiResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  });
 
   const results = createMemo(() => {
+    // If we have API results (user typed a query), use those
+    const api = apiResults();
+    if (api.length > 0) {
+      const s = sort();
+      let sorted = [...api];
+      if (s === "volume") {
+        sorted = sorted.sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0));
+      } else if (s === "change") {
+        sorted = sorted.sort((a, b) => Math.abs(b.change24h ?? 0) - Math.abs(a.change24h ?? 0));
+      } else if (s === "liquidity") {
+        sorted = sorted.sort((a, b) => (b.liquidity ?? 0) - (a.liquidity ?? 0));
+      } else if (s === "name") {
+        sorted = sorted.sort((a, b) => (a.title ?? "").localeCompare(b.title ?? ""));
+      }
+      return sorted;
+    }
+
+    // Otherwise, fall back to local filtered markets
     const all = getFilteredMarkets();
     const catId = searchPanelCategory();
     const catDef = PANEL_CATEGORIES.find((c) => c.id === catId);
@@ -113,13 +175,36 @@ export function SearchPanel() {
     return counts;
   });
 
-  function selectResult(idx: number) {
+  async function selectResult(idx: number) {
     const market = results()[idx];
     if (!market) return;
+
+    // Check if market is already in local state
     const allFiltered = getFilteredMarkets();
     const listIdx = allFiltered.findIndex((m) => m.id === market.id);
-    selectMarket(market.id);
-    if (listIdx >= 0) navigateToIndex(listIdx);
+
+    if (listIdx >= 0) {
+      // Market is in local list - just navigate to it
+      selectMarket(market.id);
+      navigateToIndex(listIdx);
+    } else {
+      // Market not in local list - fetch details and add it
+      try {
+        const details = await getMarketDetails(market.id);
+        if (details) {
+          // Add to local markets
+          setMarkets([details, ...appState.markets]);
+          selectMarket(details.id);
+          navigateToIndex(0);
+        } else {
+          // Fallback: just select by ID (may lack full details)
+          selectMarket(market.id);
+        }
+      } catch (error) {
+        console.error("Failed to fetch market details:", error);
+        selectMarket(market.id);
+      }
+    }
     setSearchPanelOpen(false);
   }
 
@@ -143,7 +228,13 @@ export function SearchPanel() {
           fg={theme.primaryMuted}
         />
         <box flexGrow={1} />
+        <Show when={searching()}>
+          <text content="⟳ " fg={theme.warning} />
+        </Show>
         <text content={`${results().length} results `} fg={theme.primaryMuted} />
+        <Show when={apiResults().length > 0}>
+          <text content="(API) " fg={theme.accent} />
+        </Show>
         <box onMouseDown={() => setSearchPanelOpen(false)}>
           <text content=" [ESC] ✕ " fg={theme.highlightText} />
         </box>
@@ -229,19 +320,25 @@ export function SearchPanel() {
       {/* ── Results list ── */}
       <Show when={results().length === 0}>
         <box flexGrow={1} paddingLeft={2} paddingTop={1} flexDirection="column">
-          <text
-            content={appState.searchQuery
-              ? `✗ No markets match "${appState.searchQuery}".`
-              : "○ No markets in this category."}
-            fg={theme.textMuted}
-          />
-          <text content="" />
-          <text
-            content={appState.searchQuery
-              ? "Try clearing the query or switching to All."
-              : "Switch category or wait for markets to load."}
-            fg={theme.textMuted}
-          />
+          <Show when={searching()}>
+            <text content="⟳ Searching Polymarket..." fg={theme.warning} />
+            <text content="" />
+          </Show>
+          <Show when={!searching()}>
+            <text
+              content={appState.searchQuery
+                ? `✗ No markets found on Polymarket for "${appState.searchQuery}".`
+                : "○ No markets in this category."}
+              fg={theme.textMuted}
+            />
+            <text content="" />
+            <text
+              content={appState.searchQuery
+                ? "Try different keywords or check spelling."
+                : "Switch category or wait for markets to load."}
+              fg={theme.textMuted}
+            />
+          </Show>
         </box>
       </Show>
 

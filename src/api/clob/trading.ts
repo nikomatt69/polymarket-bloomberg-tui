@@ -4,7 +4,7 @@
  * Base: https://clob.polymarket.com
  */
 
-import { createWalletClient, http, getAddress } from "viem";
+import { createWalletClient, http, getAddress, getCreate2Address, encodePacked, encodeAbiParameters, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
 import {
@@ -12,6 +12,11 @@ import {
   fetchOrCreateApiCredentials,
   getClobL2Headers,
   loadWalletConfig,
+  getClobAuthHeaders,
+  fetchWithTimeout,
+  parseApiCredentials,
+  persistApiCredentialsForFunder,
+  loadApiCredentialsForFunder,
 } from "../../auth/wallet";
 import { Order, PlacedOrder, OrderStatus } from "../../types/orders";
 
@@ -236,7 +241,7 @@ async function ensureTradingAllowed(): Promise<void> {
   throw new Error(`Trading unavailable from your region (${geoblock.country ?? "unknown"}${region}).`);
 }
 
-async function sendHeartbeat(privateKey: `0x${string}`, creds: ApiCredentials): Promise<void> {
+async function sendHeartbeat(privateKey: `0x${string}`, creds: ApiCredentials, heartbeatId?: string): Promise<string | undefined> {
   const requestPath = "/heartbeats";
   const headers = await createL2Headers(privateKey, creds, "POST", requestPath);
   const response = await fetch(`${CLOB_BASE}${requestPath}`, {
@@ -246,6 +251,13 @@ async function sendHeartbeat(privateKey: `0x${string}`, creds: ApiCredentials): 
 
   if (!response.ok) {
     throw new Error(`Heartbeat rejected with HTTP ${response.status}`);
+  }
+
+  try {
+    const data = await response.json() as { heartbeat_id?: string };
+    return data.heartbeat_id;
+  } catch {
+    return undefined;
   }
 }
 
@@ -329,6 +341,7 @@ async function resolveMarketByAssetId(
 async function getAuthContext(): Promise<{
   privateKey: `0x${string}`;
   creds: ApiCredentials;
+  funderAddress?: string;
 }> {
   const config = loadWalletConfig();
   if (!config?.privateKey) {
@@ -336,21 +349,86 @@ async function getAuthContext(): Promise<{
   }
 
   const privateKey = config.privateKey as `0x${string}`;
-  const credsFromConfig =
-    config.apiKey && config.apiSecret && config.apiPassphrase
+  const funderAddress = config.funderAddress;
+
+  let creds: ApiCredentials | null = null;
+
+  if (funderAddress && funderAddress.toLowerCase() !== privateKeyToAccount(privateKey).address.toLowerCase()) {
+    creds = loadApiCredentialsForFunder(funderAddress);
+    if (!creds) {
+      creds = await fetchOrCreateApiCredentialsForFunder(privateKey, funderAddress);
+    }
+  } else {
+    creds = config.apiKey && config.apiSecret && config.apiPassphrase
       ? {
           apiKey: config.apiKey,
           apiSecret: config.apiSecret,
           apiPassphrase: config.apiPassphrase,
         }
       : null;
+    if (!creds) {
+      creds = await fetchOrCreateApiCredentials(privateKey);
+    }
+  }
 
-  const creds = credsFromConfig ?? (await fetchOrCreateApiCredentials(privateKey));
   if (!creds) {
     throw new Error("Unable to derive CLOB API credentials");
   }
 
-  return { privateKey, creds };
+  return { privateKey, creds, funderAddress };
+}
+
+async function fetchOrCreateApiCredentialsForFunder(
+  eoaPrivateKey: `0x${string}`,
+  funderAddress: string
+): Promise<ApiCredentials | null> {
+  const cached = loadApiCredentialsForFunder(funderAddress);
+  if (cached) return cached;
+
+  try {
+    const l1Headers = await getClobAuthHeaders(eoaPrivateKey, 0);
+
+    const deriveResponse = await fetchWithTimeout(`${CLOB_BASE}/auth/derive-api-key`, {
+      method: "GET",
+      headers: {
+        ...l1Headers,
+        "Content-Type": "application/json",
+      },
+    });
+
+    if (deriveResponse.ok) {
+      const derivedPayload = await deriveResponse.json();
+      const derived = parseApiCredentials(derivedPayload);
+      if (derived) {
+        persistApiCredentialsForFunder(funderAddress, derived);
+        return derived;
+      }
+    }
+
+    const createResponse = await fetchWithTimeout(`${CLOB_BASE}/auth/api-key`, {
+      method: "POST",
+      headers: {
+        ...l1Headers,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    });
+
+    if (!createResponse.ok) {
+      return null;
+    }
+
+    const createdPayload = await createResponse.json();
+    const created = parseApiCredentials(createdPayload);
+    if (created) {
+      persistApiCredentialsForFunder(funderAddress, created);
+      return created;
+    }
+  } catch {
+    // fall through
+  }
+
+  return null;
 }
 
 async function createL2Headers(
@@ -375,10 +453,39 @@ async function createL2Headers(
 const CTF_EXCHANGE = "0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E";
 const NEG_RISK_CTF_EXCHANGE = "0xC5d563A36AE78145C45a50134d48A1215220f80a";
 
+const PROXY_FACTORY_POLYGON = "0xaB45c5A4B0c941a2F231C04C3f49182e1A254052";
+const SAFE_FACTORY_POLYGON = "0xaacFeEa03eb1561C4e67d661e40682Bd20E3541b";
+const PROXY_INIT_CODE_HASH = "0xd21df8dc65880a8606f09fe0ce3df9b8869287ab0b058be05aa9e8af6330a00b";
+const SAFE_INIT_CODE_HASH = "0x2bce2127ff07fb632d16c8347c4ebf501f4841168bed00d9e6ef715ddb6fcecf";
+
+function derivePolymarketProxyWallet(eoaAddress: string): string {
+  return getCreate2Address({
+    bytecodeHash: PROXY_INIT_CODE_HASH as `0x${string}`,
+    from: PROXY_FACTORY_POLYGON as `0x${string}`,
+    salt: keccak256(encodePacked(["address"], [eoaAddress as `0x${string}`])),
+  });
+}
+
+function derivePolymarketSafeWallet(eoaAddress: string): string {
+  return getCreate2Address({
+    bytecodeHash: SAFE_INIT_CODE_HASH as `0x${string}`,
+    from: SAFE_FACTORY_POLYGON as `0x${string}`,
+    salt: keccak256(encodeAbiParameters([{ name: "owner", type: "address" }], [eoaAddress as `0x${string}`])),
+  });
+}
+
 // signatureType: 0 = EOA, 1 = POLY_PROXY, 2 = POLY_GNOSIS_SAFE
 function resolveSignatureType(eoaAddress: string, funderAddress: string | undefined): number {
   if (!funderAddress || funderAddress.toLowerCase() === eoaAddress.toLowerCase()) return 0;
-  return 2; // POLY_GNOSIS_SAFE — most common for Polymarket proxy wallets
+  
+  const funderLower = funderAddress.toLowerCase();
+  const proxyAddr = derivePolymarketProxyWallet(eoaAddress).toLowerCase();
+  const safeAddr = derivePolymarketSafeWallet(eoaAddress).toLowerCase();
+  
+  if (funderLower === proxyAddr) return 1;
+  if (funderLower === safeAddr) return 2;
+  
+  return 2;
 }
 
 async function buildSignedOrder(
@@ -484,9 +591,7 @@ async function buildSignedOrder(
 
 export async function placeOrder(order: Order): Promise<PlacedOrder> {
   await ensureTradingAllowed();
-  const { privateKey, creds } = await getAuthContext();
-  const config = loadWalletConfig();
-  const funderAddress = config?.funderAddress;
+  const { privateKey, creds, funderAddress } = await getAuthContext();
   const signedOrder = await buildSignedOrder(
     privateKey,
     order.tokenId,
@@ -551,9 +656,7 @@ export async function placeBatchOrders(orders: Order[]): Promise<PlacedOrder[]> 
   if (orders.length > 15) throw new Error("Batch order limit is 15 orders per call");
 
   await ensureTradingAllowed();
-  const { privateKey, creds } = await getAuthContext();
-  const config = loadWalletConfig();
-  const funderAddress = config?.funderAddress;
+  const { privateKey, creds, funderAddress } = await getAuthContext();
 
   const signedOrders = await Promise.all(
     orders.map((order) =>
@@ -802,10 +905,9 @@ export async function fetchOpenOrders(): Promise<PlacedOrder[]> {
 
 export async function fetchTradeHistory(): Promise<PlacedOrder[]> {
   try {
-    const { privateKey, creds } = await getAuthContext();
-    const config = loadWalletConfig();
+    const { privateKey, creds, funderAddress } = await getAuthContext();
     // Trades are recorded against the funder/proxy wallet, not the EOA signer
-    const makerAddress = config?.funderAddress ?? privateKeyToAccount(privateKey).address;
+    const makerAddress = funderAddress ?? privateKeyToAccount(privateKey).address;
     const basePath = `/trades?maker_address=${encodeURIComponent(makerAddress)}`;
     const rows = await fetchAllPagedRows<ClobTrade>(privateKey, creds, basePath);
 
@@ -830,5 +932,29 @@ export async function fetchTradeHistory(): Promise<PlacedOrder[]> {
       .slice(0, 50);
   } catch {
     return [];
+  }
+}
+
+let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+let currentHeartbeatId: string | undefined = undefined;
+
+export function startHeartbeat(): void {
+  if (heartbeatInterval !== null) return;
+
+  heartbeatInterval = setInterval(async () => {
+    try {
+      const { privateKey, creds } = await getAuthContext();
+      currentHeartbeatId = await sendHeartbeat(privateKey, creds, currentHeartbeatId);
+    } catch {
+      // Silently ignore heartbeat errors - will retry on next interval
+    }
+  }, 5000);
+}
+
+export function stopHeartbeat(): void {
+  if (heartbeatInterval !== null) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+    currentHeartbeatId = undefined;
   }
 }

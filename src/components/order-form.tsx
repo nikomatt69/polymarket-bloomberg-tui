@@ -304,7 +304,7 @@ export function OrderForm() {
         <box flexDirection="row">
           <text content="Outcome: " fg={theme.textMuted} width={10} />
           <text content={orderFormOutcomeTitle()} fg={sideColor()} />
-          <text content="  curr:" fg={theme.textMuted} />
+          <text content="  [i] toggle  curr:" fg={theme.textMuted} />
           <text content={`${(orderFormCurrentPrice() * 100).toFixed(1)}¢`} fg={theme.text} />
         </box>
         <Show when={bookLoading()}>

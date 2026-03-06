@@ -3,6 +3,7 @@
  */
 
 import { createStore } from "solid-js/store";
+import { createEffect, onCleanup } from "solid-js";
 import { PlacedOrder } from "../types/orders";
 import {
   placeOrder,
@@ -14,6 +15,7 @@ import {
   cancelOrdersForAssetIds,
   getOrderScoringStatus,
 } from "../api/orders";
+import { startHeartbeat, stopHeartbeat } from "../api/clob/trading";
 import { Order } from "../types/orders";
 import { OrderStatus } from "../types/orders";
 import { homedir } from "os";
@@ -582,3 +584,17 @@ export async function refreshOrderScoring(orderIds?: string[]): Promise<void> {
     setOrdersState("scoringRefreshInFlight", (value) => Math.max(0, value - 1));
   }
 }
+
+createEffect(() => {
+  const hasOpenOrders = ordersState.openOrders.length > 0;
+  
+  if (hasOpenOrders) {
+    startHeartbeat();
+  } else {
+    stopHeartbeat();
+  }
+});
+
+onCleanup(() => {
+  stopHeartbeat();
+});

@@ -63,11 +63,8 @@ export function OrderBookPanel() {
   const [lastTrade, setLastTrade] = createSignal<LastTrade | null>(null);
   const [selectedOutcomeIdx, setSelectedOutcomeIdx] = createSignal(0);
   const [loadingSnapshot, setLoadingSnapshot] = createSignal(true);
-  const [noDataReason, setNoDataReason] = createSignal<string | null>(null);
-  const [bookTab, setBookTab] = createSignal<"book" | "trades">("book");
 
   const [book, setBook] = createStore<BookState>({ bids: [], asks: [] });
-  const [recentTrades, setRecentTrades] = createSignal<Array<{price: number; size: number; side: string; time: number}>>([]);
 
   const selectedMarket = createMemo(() =>
     appState.markets.find((m) => m.id === appState.selectedMarketId)
@@ -144,21 +141,12 @@ export function OrderBookPanel() {
   // Bootstrap REST snapshot, then switch to live WebSocket deltas
   createEffect(() => {
     const outcome = selectedOutcome();
-    // Check for valid token ID (not a placeholder like "outcome_0")
-    const tokenId = outcome?.id && !outcome.id.startsWith("outcome_") ? outcome.id : null;
-    if (!outcome) {
-      setNoDataReason("No market selected");
+    if (!outcome || !outcome.id) {
       setBook({ bids: [], asks: [] });
-      setLoadingSnapshot(false);
       return;
     }
-    if (!tokenId) {
-      setNoDataReason("Market data not loaded yet");
-      setBook({ bids: [], asks: [] });
-      setLoadingSnapshot(false);
-      return;
-    }
-    setNoDataReason(null);
+
+    const tokenId = outcome.id;
     let cancelled = false;
 
     // Fetch initial REST snapshot
@@ -181,7 +169,7 @@ export function OrderBookPanel() {
     const offStatus = ws.onStatus((status) => setWsStatus(status));
 
     const offMsg = ws.onMessage((msg) => {
-      if (!("assetId" in msg) || msg.assetId !== tokenId) return;
+      if (msg.type !== "book" && msg.type !== "price_change" && msg.type !== "last_trade_price") return;
 
       if (msg.type === "book") {
         const snap = msg as WsBookSnapshot;
@@ -237,17 +225,13 @@ export function OrderBookPanel() {
     setSelectedOutcomeIdx((i) => (i + 1) % market.outcomes.length);
   };
 
-  const handleToggleBookTrades = () => {
-    setBookTab(bookTab() === "book" ? "trades" : "book");
-  };
-
   return (
     <box
       position="absolute"
       top={2}
-      left="8%"
-      width="84%"
-      height={24}
+      left="10%"
+      width="80%"
+      height={32}
       backgroundColor={theme.panelModal}
       flexDirection="column"
       zIndex={160}
@@ -256,15 +240,14 @@ export function OrderBookPanel() {
       <box height={1} width="100%" backgroundColor={theme.primary} flexDirection="row">
         <text content=" ▤ LIVE ORDER BOOK " fg={theme.highlightText} />
         <Show when={selectedMarket()}>
-          <text content="│ " fg={theme.primaryMuted} />
           <text
-            content={`${(selectedMarket()!.title ?? "").slice(0, 34)}`}
+            content={` ${(selectedMarket()!.title ?? "").slice(0, 30)}`}
             fg={theme.highlightText}
           />
         </Show>
         <box flexGrow={1} />
         <text
-          content={wsStatus() === "connected" ? " ● LIVE " : wsStatus() === "connecting" ? " ◌ SYNC… " : " ○ OFFLINE "}
+          content={wsStatus() === "connected" ? " ● LIVE " : wsStatus() === "connecting" ? " ◌ CONNECTING " : " ○ OFFLINE "}
           fg={wsStatus() === "connected" ? theme.success : wsStatus() === "connecting" ? theme.warning : theme.error}
         />
         <box onMouseDown={() => setOrderBookPanelOpen(false)}>
@@ -272,16 +255,8 @@ export function OrderBookPanel() {
         </box>
       </box>
 
-      {/* ── Sub-header: tab switcher + outcome selector + mid-price + spread ── */}
+      {/* ── Sub-header: outcome selector + mid-price + spread ── */}
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel} flexDirection="row">
-        {/* Book/Trades tab switcher */}
-        <box onMouseDown={handleToggleBookTrades}>
-          <text
-            content={bookTab() === "book" ? " [BOOK] " : " [TRADES] "}
-            fg={theme.primary}
-          />
-        </box>
-        <text content="|" fg={theme.borderSubtle} />
         <Show when={selectedMarket() && selectedMarket()!.outcomes.length > 1}>
           <box onMouseDown={handleTabOutcome}>
             <text
@@ -329,17 +304,6 @@ export function OrderBookPanel() {
         </Show>
       </box>
 
-      {/* ── Section labels ── */}
-      <box height={1} width="100%" flexDirection="row">
-        <box width="50%" flexDirection="row" justifyContent="flex-start" paddingLeft={1}>
-          <text content="─── BIDS ───" fg={theme.success} />
-        </box>
-        <box width={2} />
-        <box width="50%" flexDirection="row">
-          <text content="ASKS ───" fg={theme.error} />
-        </box>
-      </box>
-
       {/* ── Column headers ── */}
       <box height={1} width="100%" flexDirection="row">
         <box width="50%" flexDirection="row" justifyContent="flex-end">
@@ -357,42 +321,8 @@ export function OrderBookPanel() {
         </box>
       </box>
 
-      {/* ── Depth rows or trades or no data message ── */}
+      {/* ── Depth rows ── */}
       <box flexGrow={1} flexDirection="column" overflow="hidden">
-        <Show when={noDataReason()}>
-          <box flexGrow={1} flexDirection="column" justifyContent="center" alignItems="center">
-            <text content="▤" fg={theme.textMuted} height={1} />
-            <text content={noDataReason()!} fg={theme.textMuted} height={1} />
-            <text content="Select a market with ↑/↓" fg={theme.textMuted} height={1} />
-          </box>
-        </Show>
-        <Show when={!noDataReason() && bookTab() === "trades"}>
-          <box flexGrow={1} flexDirection="column">
-            <text content="─── RECENT TRADES ───" fg={theme.borderSubtle} />
-            <box flexDirection="row" width="100%">
-              <text content="TIME   " fg={theme.textMuted} width={8} />
-              <text content="SIDE " fg={theme.textMuted} width={5} />
-              <text content="PRICE " fg={theme.textMuted} width={8} />
-              <text content="SIZE  " fg={theme.textMuted} width={7} />
-              <text content="TOTAL " fg={theme.textMuted} width={10} />
-            </box>
-            <Show when={lastTrade()}>
-              {(trade: LastTrade) => (
-                <box flexDirection="row" width="100%">
-                  <text content={new Date().toLocaleTimeString("en-US", {hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false}).padEnd(8, " ")} fg={theme.textMuted} width={8} />
-                  <text content={trade.side.padEnd(5, " ")} fg={trade.side === "BUY" ? theme.success : theme.error} width={5} />
-                  <text content={`${(trade.price * 100).toFixed(1)}¢`.padStart(8, " ")} fg={theme.text} width={8} />
-                  <text content={formatSize(trade.size).padStart(7, " ")} fg={theme.success} width={7} />
-                  <text content={`$${(trade.price * trade.size).toFixed(2)}`.padStart(10, " ")} fg={theme.text} width={10} />
-                </box>
-              )}
-            </Show>
-            <Show when={!lastTrade()}>
-              <text content="Waiting for trades..." fg={theme.textMuted} />
-            </Show>
-          </box>
-        </Show>
-        <Show when={!noDataReason() && bookTab() === "book"}>
         <For each={Array.from({ length: DISPLAY_LEVELS }, (_, i) => i)}>
           {(rowIdx) => {
             const bid = () => book.bids?.[rowIdx];
@@ -474,13 +404,12 @@ export function OrderBookPanel() {
             );
           }}
         </For>
-        </Show>
       </box>
 
       {/* ── Footer ── */}
       <box height={1} width="100%" backgroundColor={theme.backgroundPanel}>
         <text
-          content=" [ESC] Close  [TAB] Switch outcome  [click] Book/Trades  ● WebSocket streams live deltas "
+          content=" [ESC] Close  [TAB] Switch outcome  ● WebSocket streams live deltas "
           fg={theme.textMuted}
         />
       </box>

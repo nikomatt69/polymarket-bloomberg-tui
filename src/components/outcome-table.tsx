@@ -4,6 +4,18 @@ import { Market } from "../types/market";
 import { formatVolume, formatChange, padLeft } from "../utils/format";
 import { useTheme } from "../context/theme";
 import { OrderBookSummary } from "../api/polymarket";
+import {
+  setOrderFormOpen,
+  setOrderFormSide,
+  setOrderFormTokenId,
+  setOrderFormMarketTitle,
+  setOrderFormOutcomeTitle,
+  setOrderFormCurrentPrice,
+  setOrderFormPriceInput,
+  setOrderFormSharesInput,
+  setOrderFormPostOnly,
+  setOrderFormFocusField,
+} from "../state";
 
 interface OutcomeTableProps {
   market: Market | undefined;
@@ -64,8 +76,7 @@ export function OutcomeTable(props: OutcomeTableProps) {
       >
         {(market: () => Market) => (
           <>
-            {/* ── Section header ─────────────────────────────────────────── */}
-            <text content={`─── OUTCOMES (${market().outcomes.length}) ────────────────────────────────`} fg={theme.borderSubtle} />
+            {/* Note: Header is rendered by parent market-details.tsx */}
 
             {/* ── Probability bars ───────────────────────────────────────── */}
             <For each={market().outcomes}>
@@ -129,11 +140,35 @@ export function OutcomeTable(props: OutcomeTableProps) {
                   padLeft(formatVolume(outcome.volume), 10),
                 ].join(" ");
 
+                // Function to open order form for this outcome
+                const openOrderForm = (side: "BUY" | "SELL") => {
+                  setOrderFormSide(side);
+                  setOrderFormTokenId(outcome.id);
+                  setOrderFormMarketTitle(market().title);
+                  setOrderFormOutcomeTitle(outcome.title);
+                  setOrderFormCurrentPrice(outcome.price);
+                  setOrderFormPriceInput(outcome.price.toFixed(4));
+                  setOrderFormSharesInput("");
+                  setOrderFormPostOnly(false);
+                  setOrderFormFocusField("shares");
+                  setOrderFormOpen(true);
+                };
+
                 return (
-                  <text
-                    content={row}
-                    fg={outcomeColor(idx(), outcome.price, theme)}
-                  />
+                  <box flexDirection="row" width="100%">
+                    <box flexGrow={1}>
+                      <text
+                        content={row}
+                        fg={outcomeColor(idx(), outcome.price, theme)}
+                      />
+                    </box>
+                    <box onMouseDown={() => openOrderForm("BUY")}>
+                      <text content=" [BUY]" fg={theme.success} />
+                    </box>
+                    <box onMouseDown={() => openOrderForm("SELL")}>
+                      <text content=" [SELL]" fg={theme.error} />
+                    </box>
+                  </box>
                 );
               }}
             </For>
