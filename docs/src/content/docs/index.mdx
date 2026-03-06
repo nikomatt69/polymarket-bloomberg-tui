@@ -1,0 +1,188 @@
+---
+title: Polymarket Bloomberg TUI Docs
+description: User and developer documentation for the SolidJS + OpenTUI Polymarket workstation.
+template: splash
+hero:
+  title: Polymarket Bloomberg TUI
+  tagline: A high-speed terminal workspace for market discovery, order execution, portfolio monitoring, and AI-assisted operations.
+  actions:
+    - text: Open User Guide
+      link: /user-guide/
+      icon: right-arrow
+    - text: Developer Docs
+      link: /architecture/overview/
+      variant: secondary
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+This is the canonical documentation for `polymarket-bloomberg-tui`.
+
+<div class="home-status-grid">
+  <div class="home-status-card">
+    <span>Runtime</span>
+    <strong>Bun + Solid + OpenTUI</strong>
+  </div>
+  <div class="home-status-card">
+    <span>Refresh Loop</span>
+    <strong>30s Auto + Manual Trigger</strong>
+  </div>
+  <div class="home-status-card">
+    <span>Core Modes</span>
+    <strong>Trading, Portfolio, Assistant</strong>
+  </div>
+  <div class="home-status-card">
+    <span>Persistence</span>
+    <strong>Local State Under ~/.polymarket-tui</strong>
+  </div>
+</div>
+
+<figure class="home-screenshot-wrap">
+  <img
+    src="/images/home-page-preview.png"
+    alt="Polymarket Bloomberg TUI live workspace preview"
+    class="home-screenshot"
+    loading="lazy"
+  />
+  <figcaption>
+    Live workspace snapshot: multi-panel market monitoring, high-density terminal
+    layout, and fast keyboard-first execution controls.
+  </figcaption>
+</figure>
+
+## Launch In 60 Seconds
+
+```bash
+bun install
+bun run dev
+```
+
+<div class="home-command-row">
+  <code>bun run docs:dev</code>
+  <code>bun run type-check</code>
+  <code>bun run build</code>
+</div>
+
+Use `bun run docs:dev` to view this site locally while editing docs.
+
+## Choose Your Path
+
+<CardGrid>
+  <LinkCard
+    title="I Am Operating The Product"
+    href="/user-guide/"
+    description="Start with workflows, key controls, and execution habits for daily usage."
+  />
+  <LinkCard
+    title="I Am Extending The Codebase"
+    href="/architecture/overview/"
+    description="Start with architecture, state model, API modules, and implementation references."
+  />
+</CardGrid>
+
+## Platform At A Glance
+
+<CardGrid stagger>
+  <Card title="Terminal Workstation" icon="open-book">
+    A keyboard-driven Bloomberg-style interface with realtime market updates,
+    depth snapshots, and rich panel overlays.
+  </Card>
+  <Card title="Trading Flows" icon="information">
+    Built-in order entry, order history, cancellation actions, and portfolio
+    monitoring integrated directly with Polymarket CLOB APIs.
+  </Card>
+  <Card title="Assistant And Automation" icon="star">
+    Streaming AI assistant tools, skills, automation rules, alerts, and session
+    persistence for repeatable high-frequency workflows.
+  </Card>
+  <Card title="Operational Persistence" icon="information">
+    Local state persistence for wallet config, alerts, watchlists, sessions,
+    rules, and user preferences under <code>~/.polymarket-tui</code>.
+  </Card>
+</CardGrid>
+
+## User Guide
+
+<CardGrid>
+  <LinkCard
+    title="User Guide Overview"
+    href="/user-guide/"
+    description="What the product does and where each workflow lives."
+  />
+  <LinkCard
+    title="Workspace Navigation"
+    href="/user-guide/workspace-navigation/"
+    description="Panel layout, global keys, overlays, and fast navigation habits."
+  />
+  <LinkCard
+    title="Trading And Orders"
+    href="/user-guide/trading-and-orders/"
+    description="Buy/sell flow, order form controls, history filters, and cancel actions."
+  />
+  <LinkCard
+    title="Portfolio, Alerts, Watchlist"
+    href="/user-guide/portfolio-alerts-and-watchlist/"
+    description="Track positions, setup alerts, and run watchlist-focused scanning."
+  />
+  <LinkCard
+    title="Chat, Automation, Messages"
+    href="/user-guide/chat-automation-and-messages/"
+    description="Use enterprise chat, automation rules, and communication panels."
+  />
+  <LinkCard
+    title="Settings, Wallet, Auth"
+    href="/user-guide/settings-wallet-auth/"
+    description="Theme/providers, wallet lifecycle, and local authentication controls."
+  />
+</CardGrid>
+
+## Developer Reference
+
+<CardGrid>
+  <LinkCard
+    title="Getting Started"
+    href="/getting-started/"
+    description="Install, run, and validate docs/app builds with Bun."
+  />
+  <LinkCard
+    title="Architecture Overview"
+    href="/architecture/overview/"
+    description="Runtime lifecycle, module boundaries, and rendering composition."
+  />
+  <LinkCard
+    title="State And Keyboard Model"
+    href="/architecture/state-and-keyboard/"
+    description="Global state domains and ordered key interception strategy."
+  />
+  <LinkCard
+    title="API Overview"
+    href="/api/overview/"
+    description="Gamma/CLOB/data/websocket integration and assistant tooling."
+  />
+  <LinkCard
+    title="Keybindings"
+    href="/reference/keybindings/"
+    description="Global and modal keyboard maps from src/app.tsx."
+  />
+  <LinkCard
+    title="Persistence"
+    href="/reference/persistence/"
+    description="Local file map, ownership, and operational notes."
+  />
+</CardGrid>
+
+## Daily Operator Loop
+
+1. Scan markets and focus candidates using categories, search, and watchlist filters.
+2. Open order form with `o` or `s`, validate price/size/type, then execute.
+3. Verify open/fill state in order history and adjust exposure in portfolio panels.
+4. Keep alerts, automation rules, and assistant context aligned with active strategy.
+
+## Implementation Surface
+
+- Runtime and app orchestration: `src/index.tsx`, `src/app.tsx`
+- Shared state and persistence logic: `src/state.ts`
+- API integration layer: `src/api/*`, `src/auth/wallet.ts`
+- TUI composition and overlays: `src/components/*`
+- Side-effect orchestration: `src/hooks/*`
+- Shared domain types and utility modules: `src/types/*`, `src/utils/*`

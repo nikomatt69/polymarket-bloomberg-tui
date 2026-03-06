@@ -1,5 +1,9 @@
 # Quick Start Guide
 
+> Canonical docs are now maintained in `docs/`.
+>
+> Use `bun run docs:dev` and refer to the Starlight site for up-to-date instructions.
+
 ## 60 Second Setup
 
 ```bash

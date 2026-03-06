@@ -17,6 +17,7 @@ import {
   appState,
   getSelectedMarket,
   selectedCategory,
+  showToast,
 } from "../state";
 import { Market, PriceHistory } from "../types/market";
 import { evaluateAlerts } from "./useAlerts";
@@ -113,6 +114,7 @@ export function useMarketsFetch(): void {
         if (cancelled) return;
         const errorMsg = error instanceof Error ? error.message : "Failed to fetch markets";
         setError(errorMsg);
+        showToast(errorMsg, "error");
         console.error("Error fetching markets:", error);
       } finally {
         if (!cancelled) setLoading(false);
@@ -219,6 +221,7 @@ export async function manualRefresh(): Promise<void> {
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "Refresh failed";
     setError(errorMsg);
+    showToast(errorMsg, "error");
     console.error("Error refreshing markets:", error);
   } finally {
     setLoading(false);

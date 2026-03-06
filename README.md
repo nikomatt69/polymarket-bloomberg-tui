@@ -1,5 +1,9 @@
 # Polymarket Bloomberg-Style TUI
 
+> Canonical project docs now live in `docs/` (Astro + Starlight).
+>
+> Run `bun run docs:dev` and open the local docs URL for the maintained architecture/reference guides.
+
 A professional, data-dense terminal application for browsing and monitoring Polymarket prediction markets. Built with OpenTUI, SolidJS, and TypeScript for Bun runtime.
 
 ## Features

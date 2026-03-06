@@ -32,6 +32,7 @@ import {
   setSelectedSubCategory,
 } from "../state";
 import { formatVolume, formatChange, truncateString } from "../utils/format";
+import { Market } from "../types/market";
 import { useTheme } from "../context/theme";
 import { isWatched, watchlistState } from "../hooks/useWatchlist";
 import {
@@ -274,6 +275,8 @@ export function MarketList() {
   const [hasMore, setHasMore] = createSignal(true);
   const [offsets, setOffsets] = createSignal<Record<string, number>>({});
   const [showAllMarkets, setShowAllMarkets] = createSignal(false); // Toggle to show closed markets
+  // Category cache: stores markets per category key to avoid re-fetching
+  const [categoryCache, setCategoryCache] = createSignal<Record<string, Market[]>>({});
 
   // Virtual category filters applied on top of getFilteredMarkets()
   const displayMarkets = createMemo(() => {
@@ -316,7 +319,7 @@ export function MarketList() {
   // Active sub-category
   const activeSubCategory = selectedSubCategory;
 
-  // ── Category switch ────────────────────────────────────────────────────────
+  // ── Category switch with caching ─────────────────────────────────────────────
   createEffect(on([activeCategory, activeSubCategory], ([category, subCat]) => {
     const cat = CATEGORIES.find((c) => c.id === category);
     if (!cat) return;
@@ -327,12 +330,23 @@ export function MarketList() {
       return;
     }
 
+    // Use a key that includes both category and sub-category
+    const fetchKey = subCat ? `${category}:${subCat}` : category;
+
+    // Check cache first
+    const cached = categoryCache()[fetchKey];
+    if (cached && cached.length > 0) {
+      // Use cached data
+      setMarkets(cached);
+      setOffsets((prev) => ({ ...prev, [fetchKey]: cached.length }));
+      setHasMore(!cat.live && cached.length >= PAGE_SIZE);
+      setLocalLoading(false);
+      return;
+    }
+
     let cancelled = false;
     setLocalLoading(true);
     setHasMore(true);
-    
-    // Use a key that includes both category and sub-category
-    const fetchKey = subCat ? `${category}:${subCat}` : category;
     setOffsets((prev) => ({ ...prev, [fetchKey]: 0 }));
 
     void (async () => {
@@ -341,6 +355,8 @@ export function MarketList() {
         const tagSlug = subCat || undefined;
         const markets = await fetchForCategory(cat.apiValue, PAGE_SIZE, 0, tagSlug, showAllMarkets());
         if (cancelled) return;
+        // Cache the results
+        setCategoryCache((prev) => ({ ...prev, [fetchKey]: markets }));
         setMarkets(markets);
         setOffsets((prev) => ({ ...prev, [fetchKey]: markets.length }));
         setHasMore(!cat.live && markets.length >= PAGE_SIZE);
@@ -721,7 +737,7 @@ export function MarketList() {
                   content={
                     loadingMore()
                       ? "  ◌ Loading more markets…"
-                      : `  ─── ${offsets()[activeCategory()] ?? 0} loaded · ↓ for more ───`
+                      : `  ─── ${offsets()[activeSubCategory() ? `${activeCategory()}:${activeSubCategory()}` : activeCategory()] ?? 0} loaded · ↓ for more ───`
                   }
                   fg={theme.textMuted}
                 />

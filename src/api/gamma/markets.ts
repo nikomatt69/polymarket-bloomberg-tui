@@ -64,44 +64,101 @@ function parseJsonArray(raw: string | null): string[] {
  * 2. Falls back to keyword inference from question/slug
  * 3. Returns "general" as last resort
  */
+/**
+ * Resolve category from market data.
+ * Uses official Polymarket categories with proper keyword matching.
+ * Priority: API category field > keyword inference > general fallback
+ */
 function resolveCategory(market: GammaMarket): string {
-  // 1. Try direct category field (normalize trailing space, convert hyphens)
+  // 1. Try direct category field from API (normalize and map to our categories)
   const rawCat = market.category;
   if (rawCat && rawCat.trim()) {
-    return rawCat.trim().toLowerCase().replace(/-/g, "");
+    const cat = rawCat.trim().toLowerCase().replace(/-/g, "");
+    // Map API categories to our internal categories
+    const categoryMap: Record<string, string> = {
+      "sports": "sports",
+      "politics": "politics",
+      "cryptocurrency": "crypto",
+      "crypto": "crypto",
+      "bitcoin": "crypto",
+      "ethereum": "crypto",
+      "business": "business",
+      "economics": "business",
+      "entertainment": "entertainment",
+      "popculture": "entertainment",
+      "pop-culture": "entertainment",
+      "science": "science",
+      "technology": "tech",
+      "tech": "tech",
+      "artificialintelligence": "ai",
+      "ai": "ai",
+      "health": "health",
+      "world": "world",
+      "climate": "climate",
+      "climateandenvironment": "climate",
+      "climate-and-environment": "climate",
+    };
+    if (categoryMap[cat]) return categoryMap[cat];
+    // If category contains certain keywords, map accordingly
+    if (cat.includes("sport")) return "sports";
+    if (cat.includes("polit")) return "politics";
+    if (cat.includes("crypto") || cat.includes("bitcoin") || cat.includes("ethereum")) return "crypto";
+    if (cat.includes("tech") || cat.includes("ai")) return "ai";
+    if (cat.includes("entertain") || cat.includes("pop")) return "entertainment";
+    if (cat.includes("business") || cat.includes("econ")) return "business";
+    if (cat.includes("science")) return "science";
+    if (cat.includes("health")) return "health";
+    if (cat.includes("world") || cat.includes("news")) return "world";
+    if (cat.includes("climate") || cat.includes("environment")) return "climate";
+    return cat;
   }
 
-  // 2. Infer from question and slug keywords
+  // 2. Infer from question and slug keywords using ordered checks
   const text = `${market.question ?? ""} ${market.slug ?? ""}`.toLowerCase();
 
-  // Sports patterns
-  if (/\b(nba|nfl|nhl|mlb|soccer|football|ufc|mma|tennis|world cup|fifa|qualif|championship|season|win the|beat |score |game\b)/.test(text)) {
-    return "sports";
-  }
-  // Politics patterns
-  if (/\b(trump|biden|election|president|congress|senate|republican|democrat|governor|polling|vote|cabinet|ukraine|russia|china |taiwan|policy|law|bill|supreme court)/.test(text)) {
-    return "politics";
-  }
-  // Crypto patterns
-  if (/\b(bitcoin|btc|ethereum|eth|solana|xrp|binance|coinbase|crypto|defi|blockchain|token\b)/.test(text)) {
-    return "crypto";
-  }
-  // Tech patterns
-  if (/\b(ai |openai|gpt|chatgpt|anthropic|claude|google |microsoft|apple |meta |twitter|amazon |tesla|spacex|tech|software|startup|ipo|valuation\b)/.test(text)) {
-    return "tech";
-  }
-  // Entertainment patterns
-  if (/\b(album|music|song|artist|movie|film|netflix|disney|spotify|gta|video game|grammy|oscar|emmy|tony\b)/.test(text)) {
-    return "entertainment";
-  }
-  // Science/Health patterns
-  if (/\b(vaccine|covid|coronavirus|health|medical|disease|fda|cdc|science|research|study|trial\b)/.test(text)) {
-    return "science";
-  }
-  // Business/Economics patterns
-  if (/\b(market|stock|economy|gdp|fed|inflation|unemployment|interest|recession|bank|finance|oil|energy\b)/.test(text)) {
-    return "business";
-  }
+  // CRYPTO - most specific, check first
+  const cryptoKeywords = ["bitcoin", "btc", "ethereum", "eth", "solana", "xrp", "binance", "coinbase", "crypto", "defi", "blockchain", "token", "ordinal", "hashrate", "miner", "halving", "wallet", "exchange", "doge", "shiba", "avax", "polygon", "matic", "ada", "dot", "link", "uni", "sushi", "toncoin", "ton", "arbitrum", "optimism", "celo", "algorand", "near", "aptos", "sui", "nft", "web3", "dao"];
+  if (cryptoKeywords.some(kw => text.includes(kw))) return "crypto";
+
+  // AI - specific tech category
+  const aiKeywords = ["openai", "gpt", "chatgpt", "anthropic", "claude ai", "anthropic", "gemini", "mistral", "llama", "meta ai"];
+  if (aiKeywords.some(kw => text.includes(kw))) return "ai";
+
+  // POLITICS - specific terms, check before sports
+  const politicsKeywords = ["trump", "biden", "election", "president", "congress", "senate", "republican", "democrat", "governor", "polling", "vote", "cabinet", "ukraine", "russia", "putin", "zelensky", "israel", "gaza", "hamas", "iran", "war", "middle east", "nato", "military", "army", "china", "taiwan", "korea", "kim jong", "india", "modi", "brazil", "mexico", "france", "macron", "germany", "policy", "law", "bill", "supreme court", "impeach", "referendum", "parliament", "prime minister", "sanction", "diplomat", "palestine", "taliban", "afghanistan", "border", "immigration", "refugee", "g20", "united nations"];
+  if (politicsKeywords.some(kw => text.includes(kw))) return "politics";
+
+  // SPORTS - check before general tech/business
+  const sportsKeywords = ["nba", "nfl", "nhl", "mlb", "soccer", "football", "ufc", "mma", "tennis", "world cup", "fifa", "championship", "playoff", "finals", "draft", "super bowl", "mvp", "lakers", "warriors", "celtics", "heat", "bucks", "clippers", "nets", "suns", "mavs", "jazz", "hornets", "pistons", "magic", "pacers", "wizards", "hawks", "kings", "blazers", "pelicans", "thunder", "bulls", "cavaliers", "knicks", "76ers", "mavericks", "raptors", "liverpool", "manchester", "arsenal", "chelsea", "barcelona", "real madrid", "bayern", "juventus", "psg", "champions league", "premier league", "olympics", "golf", "pga", "cricket", "rugby", "boxing", "wwe", "aew", "wrestling", "matchup", "player prop", "game prop", "score", "winner", "champion", "tournament", "medal", "olympic", "draft"];
+  if (sportsKeywords.some(kw => text.includes(kw))) return "sports";
+
+  // TECH - after AI and crypto
+  const techKeywords = ["google", "microsoft", "apple", "meta", "facebook", "twitter", "tesla", "spacex", "nvidia", "amd", "intel", "amazon", "aws", "azure", "cloud", "cybersecurity", "hack", "breach", "chip", "semiconductor", "processor", "gpu", "cpu", "quantum", "robot", "drone", "satellite", "starlink", "instagram", "youtube", "tiktok", "snapchat", "robotaxi"];
+  if (techKeywords.some(kw => text.includes(kw))) return "tech";
+
+  // ENTERTAINMENT
+  const entertainmentKeywords = ["album", "music", "song", "artist", "movie", "film", "netflix", "disney", "spotify", "gta", "video game", "grammy", "oscar", "emmy", "tony", "celebrity", "actor", "actress", "tv show", "series", "episode", "premiere", "finale", "box office", "concert", "tour", "festival", "coachella", "award", "winner", "nominated", "script", "animation", "anime", "manga", "comic", "marvel", "dc", "star wars", "harry potter", "podcast", "streaming", "billboard", "chart", "jimmy kimmel", "stephen colbert", "john oliver"];
+  if (entertainmentKeywords.some(kw => text.includes(kw))) return "entertainment";
+
+  // SCIENCE
+  const scienceKeywords = ["space", "nasa", "mars", "moon", "asteroid", "climate", "weather", "earthquake", "volcano", "climate change", "global warming", "carbon", "emission", "solar", "wind", "renewable", "temperature", "forecast", "hurricane", "typhoon", "tornado", "storm", "flood", "drought", "wildfire", "arctic", "antarctic", "glacier", "science", "research", "study", "trial", "fda", "cdc"];
+  if (scienceKeywords.some(kw => text.includes(kw))) return "science";
+
+  // BUSINESS - only if nothing else matched (generic terms)
+  const businessKeywords = ["market", "stock", "economy", "gdp", "fed", "inflation", "unemployment", "interest", "recession", "bank", "finance", "oil", "energy", "jobs", "earnings", "quarter", "revenue", "profit", "gas", "opec", "fed rate", "cpi", "ppi", "sp500", "nasdaq", "dow jones", "wall street", "nyse", "trading", "bull", "bear", "market crash", "bubble", "ipo", "dividend", "buyback", "merger", "acquisition", "layoff", "housing", "real estate", "forex", "currency", "gold", "silver", "commodity"];
+  if (businessKeywords.some(kw => text.includes(kw))) return "business";
+
+  // HEALTH
+  const healthKeywords = ["health", "medical", "hospital", "doctor", "nurse", "clinic", "pharmacy", "drug", "medicine", "treatment", "therapy", "surgery", "diagnosis", "cancer", "diabetes", "heart", "stroke", "alzheimer", "parkinson", "mental health", "depression", "anxiety", "obesity", "diet", "exercise", "fitness", "nutrition", "patient", "recovery", "cure", "infection", "virus", "bacteria", "quarantine", "ventilator", "icu", "covid", "coronavirus", "pandemic", "vaccine"];
+  if (healthKeywords.some(kw => text.includes(kw))) return "health";
+
+  // WORLD - international news
+  const worldKeywords = ["world", "international", "global", "europe", "asia", "africa", "america", "australia", "continent", "summit", "conference", "world war", "civil war", "revolution", "coup", "protest", "demonstration", "riot", "unrest", "dictator", "regime", "human rights", "freedom", "democracy", "monarchy", "king", "queen", "prince", "royal", "festival", "holiday", "disaster", "accident", "fire", "explosion", "rescue", "investigation"];
+  if (worldKeywords.some(kw => text.includes(kw))) return "world";
+
+  // CLIMATE
+  const climateKeywords = ["climate change", "global warming", "carbon emission", "co2", "renewable energy", "solar power", "wind power", "green energy", "net zero", "carbon neutral", "paris agreement", "climate summit", "emission reduction", "greenhouse gas"];
+  if (climateKeywords.some(kw => text.includes(kw))) return "climate";
 
   return "general";
 }
@@ -261,19 +318,6 @@ export async function getMarketDetails(marketId: string): Promise<Market | null>
     return null;
   }
 }
-
-// Keywords for filtering markets by category
-const CATEGORY_KEYWORDS: Record<string, string[]> = {
-  Sports: ["nba", "nfl", "nhl", "mlb", "ncaa", "soccer", "football", "basketball", "baseball", "hockey", "ufc", "mma", "tennis", "golf", "boxing", "cricket", "rugby", "world cup", "olympics", "espn", "wwe", "nba", "falcons", "mavericks", "lakers", "warriors", "player prop", "game prop", "matchup", "season"],
-  Politics: ["trump", "biden", "election", "president", "congress", "senate", "house", "republican", "democrat", "poll", "governor", "mayor", "parliament", "prime minister", "court", "supreme court", "impeach", "vote", "referendum", "policy"],
-  Crypto: ["bitcoin", "btc", "ethereum", "eth", "solana", "crypto", "blockchain", "ether", "binance", "coinbase", "defi", "nft", "token", "ordinal", " ETF", "hashrate", "miner", "halving", "wallet", "exchange"],
-  Business: ["fed", "interest rate", "inflation", "gdp", "unemployment", "stock market", "sp500", "dow", "nasdaq", "apple", "google", "microsoft", "amazon", "tesla", "earnings", "revenue", "profit", "quarterly", "fed rate", "jobs", "economy"],
-  Entertainment: ["oscar", "grammy", "emmy", "tony", "movie", "film", "music", "concert", "celebrity", "actor", "actress", "tv show", "netflix", "hbo", "streaming", "box office", "album", "song", "chart", "billboard"],
-  Science: ["space", "nasa", "mars", "moon", "asteroid", "telescope", "climate", "weather", "earthquake", "volcano", "scientist", "research", "study", "discovery", "breakthrough"],
-  AI: ["ai", "artificial intelligence", "openai", "chatgpt", "gpt", "claude", "gemini", "llm", "machine learning", "model", "neural", "anthropic", "google deepmind", "microsoft ai", "autonomous", "robot"],
-  NFTs: ["nft", "bored ape", "pudgy", "cryptopunk", "opensea", "blur", "floor price", "collection", "mint", "dao", "web3"],
-  Coronavirus: ["covid", "coronavirus", "pandemic", "vaccine", "omicron", "variant", "cases", "deaths", "hospital", "mask", "lockdown"],
-};
 
 // Category to tag slug mapping for Polymarket categories
 const CATEGORY_TAG_SLUGS: Record<string, string> = {

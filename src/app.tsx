@@ -163,6 +163,7 @@ import {
   setSearchPanelCategory,
   searchPanelResultIdx,
   setSearchPanelResultIdx,
+  searchPanelApiResults,
   initializeFilters,
   authModalOpen,
   setAuthModalOpen,
@@ -1385,30 +1386,42 @@ function AppContent() {
     // Search panel intercept
     if (searchPanelOpen()) {
       const PANEL_CAT_IDS = ["all", "sports", "politics", "crypto", "business", "ai", "tech", "science", "entertainment"];
+
+      // Use API results if available, otherwise fall back to local filtered markets
+      const apiResults = searchPanelApiResults();
+      const useApiResults = apiResults.length > 0;
+      const currentResults = useApiResults
+        ? apiResults
+        : (() => {
+            const filtered = getFilteredMarkets();
+            const cat = searchPanelCategory();
+            const catMatch = PANEL_CAT_IDS.slice(1).find(c => c === cat) ? cat : "";
+            return catMatch === "" ? filtered : filtered.filter(m => (m.category ?? "").toLowerCase().includes(catMatch));
+          })();
+      const maxIdx = Math.max(0, currentResults.length - 1);
+
       if (e.name === "escape") {
         setSearchPanelOpen(false);
       } else if (e.name === "return") {
-        const market = getFilteredMarkets().find((_, i) => {
-          // find the result at searchPanelResultIdx in filtered+sorted list
-          return false; // handled below via selectMarket
-        });
-        // Simpler: just close and the selected market is whatever navigateToIndex set
         const idx = searchPanelResultIdx();
-        const filtered = getFilteredMarkets();
-        const cat = searchPanelCategory();
-        const catMatch = PANEL_CAT_IDS.slice(1).find(c => c === cat) ? cat : "";
-        const subset = catMatch === "" ? filtered : filtered.filter(m => (m.category ?? "").toLowerCase().includes(catMatch));
-        const market2 = subset[idx];
-        if (market2) {
-          selectMarket(market2.id);
-          const listIdx = filtered.findIndex(m => m.id === market2.id);
-          if (listIdx >= 0) navigateToIndex(listIdx);
+        const market = currentResults[idx];
+        if (market) {
+          // Check if market is in local state
+          const allFiltered = getFilteredMarkets();
+          const listIdx = allFiltered.findIndex(m => m.id === market.id);
+          if (listIdx >= 0) {
+            selectMarket(market.id);
+            navigateToIndex(listIdx);
+          } else {
+            // Market not in local list - just select by ID (will fetch details on view)
+            selectMarket(market.id);
+          }
         }
         setSearchPanelOpen(false);
       } else if (e.name === "up") {
         setSearchPanelResultIdx((i) => Math.max(0, i - 1));
       } else if (e.name === "down") {
-        setSearchPanelResultIdx((i) => i + 1);
+        setSearchPanelResultIdx((i) => Math.min(i + 1, maxIdx));
       } else if (e.name === "tab" && !e.shift) {
         const cur = PANEL_CAT_IDS.indexOf(searchPanelCategory());
         setSearchPanelCategory(PANEL_CAT_IDS[(cur + 1) % PANEL_CAT_IDS.length] ?? "all");

@@ -1,5 +1,9 @@
 # Polymarket Bloomberg-Style TUI - Project Overview
 
+> Canonical project documentation is now hosted in `docs/` (Astro + Starlight).
+>
+> Use `bun run docs:dev` and reference that site as the source of truth.
+
 ## What Was Built
 
 A production-ready **terminal user interface (TUI) application** for monitoring Polymarket prediction markets in real-time, inspired by Bloomberg terminals. The application provides an interactive, keyboard-driven dashboard with live market data, price charts, and sophisticated filtering/sorting capabilities.

@@ -1,5 +1,9 @@
 # Development Guide
 
+> Canonical architecture and module documentation is maintained in `docs/`.
+>
+> Use `bun run docs:dev` and prefer the Starlight pages over this legacy document.
+
 ## Project Structure Summary
 
 ```

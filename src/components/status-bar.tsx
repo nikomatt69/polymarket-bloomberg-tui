@@ -3,7 +3,7 @@
  */
 
 import { createMemo, Show } from "solid-js";
-import { appState, highlightedIndex, getFilteredMarkets, wsConnectionStatus, unreadMessagesCount, unreadGlobalCount, realtimeConnected } from "../state";
+import { appState, highlightedIndex, getFilteredMarkets, wsConnectionStatus, unreadMessagesCount, unreadGlobalCount, realtimeConnected, setError } from "../state";
 import { useTheme } from "../context/theme";
 import { walletState } from "../state";
 import { watchlistState } from "../hooks/useWatchlist";
@@ -61,7 +61,14 @@ export function StatusBar() {
 
   return (
     <box flexDirection="row" width="100%" paddingLeft={1} paddingRight={1}>
-      {/* Refresh state */}
+      {/* Refresh state with error display */}
+      <Show when={appState.error}>
+        <box onMouseDown={() => setError(null)}>
+          <text content="✗ ERR" fg={theme.error} />
+        </box>
+        <text content={` ${(appState.error ?? "").slice(0, 30)}`} fg={theme.error} />
+        {sep()}
+      </Show>
       <text
         content={appState.loading ? "⟳ REFRESH" : "● READY"}
         fg={appState.loading ? theme.warning : theme.success}

@@ -453,6 +453,7 @@ export const [searchInputFocused, setSearchInputFocused] = createSignal(false);
 export const [searchPanelOpen, setSearchPanelOpen] = createSignal(false);
 export const [searchPanelCategory, setSearchPanelCategory] = createSignal("all");
 export const [searchPanelResultIdx, setSearchPanelResultIdx] = createSignal(0);
+export const [searchPanelApiResults, setSearchPanelApiResults] = createSignal<Market[]>([]);
 
 function serializeProvider(provider: AIProviderConfig): AIProviderConfig {
   return {

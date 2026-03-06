@@ -17,7 +17,10 @@
     "type-check": "tsc --noEmit",
     "mcp": "bun run src/mcp/server.ts",
     "mcp:http": "bun run src/mcp/server.ts --port 3000",
-    "telegram": "bun run src/telegram/bot.ts"
+    "telegram": "bun run src/telegram/bot.ts",
+    "docs:dev": "astro dev --root docs",
+    "docs:build": "astro build --root docs",
+    "docs:preview": "astro preview --root docs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.0",
@@ -35,8 +38,10 @@
     "viem": "^2.46.1"
   },
   "devDependencies": {
-    "typescript": "^5.4.5",
-    "@types/bun": "latest"
+    "@astrojs/starlight": "^0.37.6",
+    "@types/bun": "latest",
+    "astro": "^5.18.0",
+    "typescript": "^5.4.5"
   },
   "engine": {
     "bun": ">=1.0.0"

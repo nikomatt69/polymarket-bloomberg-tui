@@ -21,6 +21,8 @@ import {
   setSearchPanelResultIdx,
   setSearchPanelOpen,
   setMarkets,
+  searchPanelApiResults,
+  setSearchPanelApiResults,
 } from "../state";
 import { formatVolume } from "../utils/format";
 import { isWatched } from "../hooks/useWatchlist";
@@ -83,7 +85,6 @@ function formatExpiry(resolutionDate: Date | undefined): { text: string; level: 
 export function SearchPanel() {
   const { theme } = useTheme();
   const [sort, setSort] = createSignal<SortKey>("volume");
-  const [apiResults, setApiResults] = createSignal<Market[]>([]);
   const [searching, setSearching] = createSignal(false);
 
   // Debounced search - call Polymarket API when user types
@@ -100,7 +101,7 @@ export function SearchPanel() {
 
     // If no query, use local markets
     if (!query || query.trim().length === 0) {
-      setApiResults([]);
+      setSearchPanelApiResults([]);
       setSearching(false);
       return;
     }
@@ -111,10 +112,10 @@ export function SearchPanel() {
       try {
         // Call Polymarket's live API search
         const results = await searchMarketsByQuery(query.trim(), 50, 0);
-        setApiResults(results);
+        setSearchPanelApiResults(results);
       } catch (error) {
         console.error("API search error:", error);
-        setApiResults([]);
+        setSearchPanelApiResults([]);
       } finally {
         setSearching(false);
       }
@@ -123,7 +124,7 @@ export function SearchPanel() {
 
   const results = createMemo(() => {
     // If we have API results (user typed a query), use those
-    const api = apiResults();
+    const api = searchPanelApiResults();
     if (api.length > 0) {
       const s = sort();
       let sorted = [...api];
@@ -232,7 +233,7 @@ export function SearchPanel() {
           <text content="⟳ " fg={theme.warning} />
         </Show>
         <text content={`${results().length} results `} fg={theme.primaryMuted} />
-        <Show when={apiResults().length > 0}>
+        <Show when={searchPanelApiResults().length > 0}>
           <text content="(API) " fg={theme.accent} />
         </Show>
         <box onMouseDown={() => setSearchPanelOpen(false)}>
