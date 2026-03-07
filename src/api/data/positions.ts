@@ -8,6 +8,38 @@ import { Position, PortfolioSummary } from "../../types/positions";
 const DATA_API_BASE = "https://data-api.polymarket.com";
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_PAGE_LIMIT = 500;
+const CACHE_TTL_MS = 60_000; // 60 seconds
+
+interface CacheEntry {
+  data: Position[];
+  timestamp: number;
+}
+
+const positionsCache = new Map<string, CacheEntry>();
+
+export function getCachedPositions(address: string): Position[] | null {
+  const entry = positionsCache.get(address.toLowerCase());
+  if (!entry) return null;
+
+  const now = Date.now();
+  if (now - entry.timestamp > CACHE_TTL_MS) {
+    positionsCache.delete(address.toLowerCase());
+    return null;
+  }
+
+  return entry.data;
+}
+
+export function setCachedPositions(address: string, positions: Position[]): void {
+  positionsCache.set(address.toLowerCase(), {
+    data: positions,
+    timestamp: Date.now(),
+  });
+}
+
+export function invalidatePositionsCache(): void {
+  positionsCache.clear();
+}
 
 interface FetchPositionsOptions {
   sizeThreshold?: number;
@@ -103,6 +135,14 @@ export async function fetchPositions(
   address: string,
   options: FetchPositionsOptions = {}
 ): Promise<Position[]> {
+  // Check cache first (only for default fetch without options)
+  if (!options.sizeThreshold && !options.sortBy && !options.offset) {
+    const cached = getCachedPositions(address);
+    if (cached) {
+      return cached;
+    }
+  }
+
   const requestedTotal = Math.max(1, options.limit ?? 100);
   const maxPages = Math.max(1, options.maxPages ?? 10);
   const pageLimit = Math.min(MAX_PAGE_LIMIT, requestedTotal);
@@ -128,7 +168,14 @@ export async function fetchPositions(
     offset += pageRows.length;
   }
 
-  return rows.slice(0, requestedTotal).map(mapPosition);
+  const positions = rows.slice(0, requestedTotal).map(mapPosition);
+
+  // Cache the result (only for default fetch)
+  if (!options.sizeThreshold && !options.sortBy && !options.offset) {
+    setCachedPositions(address, positions);
+  }
+
+  return positions;
 }
 
 export function calculatePortfolioSummary(positions: Position[]): PortfolioSummary {

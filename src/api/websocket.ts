@@ -3,7 +3,7 @@
  * Wires createClobWebSocket / createUserWebSocket from ws.ts into app state
  */
 
-import { setConnectionStatus, addMarketUpdate } from "../state";
+import { addMarketUpdate, setConnectionStatus, setUserWsConnected } from "../state";
 import {
   createClobWebSocket,
   createUserWebSocket,
@@ -15,6 +15,7 @@ import {
 // ── Singleton CLOB market WS ───────────────────────────────────────────────
 
 let clobWs: ReturnType<typeof createClobWebSocket> | null = null;
+let clobWsStarted = false;
 
 export function initializeWebSocket(): void {
   if (clobWs) return; // already initialized
@@ -42,23 +43,26 @@ export function initializeWebSocket(): void {
       });
     }
   });
-
-  clobWs.connect();
 }
 
 export function subscribe(tokenIds: string[]): void {
   if (!clobWs) initializeWebSocket();
+  if (!clobWsStarted) {
+    clobWs!.connect();
+    clobWsStarted = true;
+  }
   clobWs!.subscribe(tokenIds);
 }
 
-export function unsubscribe(_tokenIds: string[]): void {
-  // CLOB WS doesn't support individual unsubscribe — simply stop tracking
-  // Re-subscribe with the remaining set via subscribe()
+export function unsubscribe(tokenIds: string[]): void {
+  if (!clobWs) return;
+  clobWs.unsubscribe(tokenIds);
 }
 
 export function disconnectWebSocket(): void {
   clobWs?.destroy();
   clobWs = null;
+  clobWsStarted = false;
   setConnectionStatus("disconnected");
 }
 
@@ -76,6 +80,10 @@ export function initializeUserWebSocket(creds: UserWsCredentials, conditionIds: 
 
   userWs = createUserWebSocket(creds, conditionIds);
 
+  userWs.onStatus((status) => {
+    setUserWsConnected(status === "connected");
+  });
+
   userWs.onMessage((msg) => {
     userMessageHandlers.forEach((fn) => fn(msg));
   });
@@ -92,6 +100,7 @@ export function disconnectUserWebSocket(): void {
   userWs?.destroy();
   userWs = null;
   userMessageHandlers.clear();
+  setUserWsConnected(false);
 }
 
 export function getWebSocketClient() {

@@ -1318,6 +1318,7 @@ export const [userWsConnected, setUserWsConnected] = createSignal(false);
 
 // Live sports scores from Sports WS: gameId → score data
 export const [sportsScores, setSportsScores] = createSignal<Record<string, {
+  slug?: string;
   homeTeam: string;
   awayTeam: string;
   homeScore: number;
@@ -1327,6 +1328,7 @@ export const [sportsScores, setSportsScores] = createSignal<Record<string, {
 }>>({});
 
 export function setSportsScore(gameId: string, score: {
+  slug?: string;
   homeTeam: string;
   awayTeam: string;
   homeScore: number;
@@ -1334,7 +1336,13 @@ export function setSportsScore(gameId: string, score: {
   period: string;
   status: string;
 }): void {
-  setSportsScores((prev) => ({ ...prev, [gameId]: score }));
+  setSportsScores((prev) => {
+    const next = { ...prev, [gameId]: score };
+    if (score.slug) {
+      next[score.slug] = score;
+    }
+    return next;
+  });
 }
 
 // Category filter for market list

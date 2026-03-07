@@ -1,158 +1,56 @@
 /**
- * Polymarket API client for fetching market data
- * Uses Gamma API for markets and CLOB API for price history and trading
+ * Backward-compatible Polymarket API facade.
+ * Canonical implementations live under src/api/gamma and src/api/clob.
  */
 
-import { Market, Outcome, PriceHistory, PricePoint, Event, Series, Tag, Category, Timeframe } from "../types/market";
+import type {
+  Category,
+  Event,
+  Market,
+  PriceHistory,
+  Series,
+  Tag,
+  Timeframe,
+} from "../types/market";
 import {
-  GAMMA_BASE_URL,
-  CLOB_BASE_URL,
-  CLOB_INTERVAL_BY_TIMEFRAME,
-  CLOB_BATCH_MARKET_DATA_LIMIT,
-  buildClobTokenBatchRequest,
-  buildGammaEventsQuery,
-  buildGammaMarketsQuery,
-  buildQueryString,
-  chunkArray,
-  uniqueNonEmpty,
-} from "./queries";
+  clearPriceHistoryCache,
+  getBatchLastTradeSnapshots,
+  getBatchMidpoints,
+  getBatchPrices,
+  getCurrentPrice as getCanonicalCurrentPrice,
+  getLastTradeSnapshot,
+  getMarketDepth as getCanonicalMarketDepth,
+  getMarketQuotes as getCanonicalMarketQuotes,
+  getMidpointPrice as getCanonicalMidpointPrice,
+  getOrderBookSummaries as getCanonicalOrderBookSummaries,
+  getOrderBookSummary as getCanonicalOrderBookSummary,
+  getPriceHistory as getCanonicalPriceHistory,
+} from "./clob/prices";
+import { CLOB_INTERVAL_BY_TIMEFRAME } from "./queries";
+import type {
+  LastTradeSnapshot,
+  MarketDepth,
+  MarketQuote,
+  OrderBookSummary,
+} from "./clob/prices";
+import { getSpread as getCanonicalSpread, getSpreadsMap } from "./clob/misc";
+import {
+  getAllMarkets as getAllGammaMarkets,
+  getLiveSportsMarkets as getLiveSportsGammaMarkets,
+  getMarketDetails as getGammaMarketDetails,
+  getMarkets as getGammaMarkets,
+  getMarketsByCategory as getGammaMarketsByCategory,
+  getTrendingMarkets as getGammaTrendingMarkets,
+  searchMarkets as searchGammaMarkets,
+} from "./gamma/markets";
+import { getActiveEvents as getGammaActiveEvents } from "./gamma/events";
+import { getCategories as getGammaCategories } from "./gamma/categories";
+import { getSeries as getGammaSeries, getMarketsBySeries as getGammaMarketsBySeries } from "./gamma/series";
+import { getTags as getGammaTags, getMarketsByTag as getGammaMarketsByTag } from "./gamma/tags";
 
-const GAMMA_API_BASE = GAMMA_BASE_URL;
-const CLOB_API_BASE = CLOB_BASE_URL;
-const REQUEST_TIMEOUT_MS = 10_000;
-const MAX_RETRIES = 1;
+const CLOB_API_BASE = "https://clob.polymarket.com";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface GammaMarket {
-  id: string;
-  question: string | null;
-  conditionId: string;
-  slug: string | null;
-  endDate: string | null;
-  category: string | null;
-  liquidity: string | null;
-  description: string | null;
-  outcomes: string | null;
-  outcomePrices: string | null;
-  volume: string | null;
-  active: boolean | null;
-  closed: boolean | null;
-  volumeNum: number | null;
-  liquidityNum: number | null;
-  volume24hr: number | null;
-  oneDayPriceChange: number | null;
-  clobTokenIds: string | null;
-  groupItemTitle?: string | null;
-}
-
-interface GammaEvent {
-  id: string;
-  title: string;
-  slug: string;
-  description?: string;
-  startDate?: string;
-  endDate?: string;
-  seriesId?: string;
-  seriesTitle?: string;
-  markets?: GammaMarket[];
-  tags?: string[];
-  active?: boolean;
-}
-
-interface GammaSeries {
-  id: string;
-  slug: string;
-  title: string;
-  description?: string;
-  imageUrl?: string;
-  category?: string;
-}
-
-interface GammaTag {
-  id: string;
-  slug: string;
-  name: string;
-  category?: string;
-}
-
-interface ClobPriceHistoryResponse {
-  history?: Array<{ t: number; p: number | string }>;
-}
-
-interface ClobSinglePriceResponse {
-  price?: string | number;
-}
-
-interface ClobMarketPriceResponse {
-  price?: string | number;
-  side?: "BUY" | "SELL" | "";
-}
-
-interface ClobBookLevel {
-  price: string;
-  size: string;
-}
-
-interface ClobBookResponse {
-  market?: string;
-  asset_id?: string;
-  timestamp?: string;
-  hash?: string;
-  bids?: ClobBookLevel[];
-  asks?: ClobBookLevel[];
-  min_order_size?: string;
-  tick_size?: string;
-  neg_risk?: boolean;
-  last_trade_price?: string;
-}
-
-interface ClobSpreadResponse {
-  spread?: string | number;
-}
-
-interface GammaSearchResponse {
-  markets?: GammaMarket[];
-}
-
-export interface OrderBookSummary {
-  marketId: string;
-  tokenId: string;
-  bestBid: number | null;
-  bestAsk: number | null;
-  midpoint: number | null;
-  spread: number | null;
-  spreadBps: number | null;
-  bidDepth: number;
-  askDepth: number;
-  minOrderSize: number | null;
-  tickSize: number | null;
-  updatedAt: number | null;
-  negRisk: boolean;
-  lastTradePrice: number | null;
-  lastTradeSide: "BUY" | "SELL" | null;
-  hash?: string;
-}
-
-export interface MarketQuote {
-  tokenId: string;
-  outcome: string;
-  price: number;
-  bid: number;
-  ask: number;
-  spread: number;
-  volume24h: number;
-  liquidity: number;
-}
-
-export interface MarketDepth {
-  bids: Array<{ price: number; size: number; total: number }>;
-  asks: Array<{ price: number; size: number; total: number }>;
-  spread: number;
-  midPrice: number;
-}
+export type { OrderBookSummary, MarketQuote, MarketDepth, LastTradeSnapshot };
 
 export interface TradeInfo {
   orderId: string;
@@ -177,9 +75,28 @@ export interface PositionInfo {
   percentPnl: number;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper Functions
-// ─────────────────────────────────────────────────────────────────────────────
+export interface TokenInfo {
+  assetId: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  color: string;
+  icon?: string;
+}
+
+export interface MarketStatus {
+  marketId: string;
+  status: "open" | "closed" | "resolved" | "pending";
+  resolvedOutcome?: string;
+  resolutionDate?: string;
+}
+
+export interface GlobalMetrics {
+  totalVolume24h: number;
+  totalMarkets: number;
+  activeMarkets: number;
+  topCategories: Array<{ category: string; volume: number }>;
+}
 
 function parseNumeric(value: unknown, fallback: number = 0): number {
   if (typeof value === "number") {
@@ -192,314 +109,57 @@ function parseNumeric(value: unknown, fallback: number = 0): number {
   return fallback;
 }
 
-function normalizeProbability(value: unknown, fallback: number = 0.5): number {
+function normalizeProbability(value: unknown, fallback: number = 0): number {
   const parsed = parseNumeric(value, fallback);
-  const normalized = parsed > 1 ? parsed / 100 : parsed;
-  if (!Number.isFinite(normalized)) return fallback;
-  return Math.min(1, Math.max(0, normalized));
+  if (!Number.isFinite(parsed)) return fallback;
+  return parsed > 1 ? parsed / 100 : parsed;
 }
 
-function toTimestampMs(value: string | number | undefined): number | null {
-  if (value === undefined) return null;
-  const parsed = parseNumeric(value, Number.NaN);
-  if (!Number.isFinite(parsed)) return null;
-  return parsed < 1_000_000_000_000 ? Math.round(parsed * 1000) : Math.round(parsed);
-}
-
-function toIsoDate(input: Date | string): string {
-  const date = input instanceof Date ? input : new Date(input);
-  return date.toISOString();
-}
-
-async function fetchJson<T>(url: string, init?: RequestInit, retries: number = MAX_RETRIES): Promise<T> {
-  let attempt = 0;
-  let lastError: unknown;
-
-  while (attempt <= retries) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(url, {
-        ...init,
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      return (await response.json()) as T;
-    } catch (error) {
-      lastError = error;
-      if (attempt === retries) {
-        throw error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
-      attempt += 1;
-    } finally {
-      clearTimeout(timer);
+function dedupeMarkets(markets: Market[]): Market[] {
+  const deduped = new Map<string, Market>();
+  for (const market of markets) {
+    if (!deduped.has(market.id)) {
+      deduped.set(market.id, market);
     }
   }
-
-  throw lastError instanceof Error ? lastError : new Error("Failed to fetch JSON response");
+  return Array.from(deduped.values());
 }
 
-function parseJsonArray(raw: string | null): string[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map(String) : [];
-  } catch {
-    return [];
-  }
-}
-
-/** Slug mapping for category → Gamma tag slug (matches CLOB tag filter `tag=slug`) */
-const CATEGORY_SLUG_MAP: Record<string, string> = {
-  Sports: "sports",
-  Politics: "politics",
-  Crypto: "cryptocurrency",
-  Business: "economics",
-  Entertainment: "pop-culture",
-  Science: "science",
-  AI: "artificial-intelligence",
-  Tech: "technology",
-  World: "world",
-  Health: "health",
-  Climate: "climate-and-environment",
-};
-
-/**
- * Resolve category from market data.
- * Gamma API `category` field is often null for new markets.
- * This function:
- * 1. Uses `category` field when present (normalizes whitespace/hyphens)
- * 2. Falls back to keyword inference from question/slug
- * 3. Returns "general" as last resort
- */
-function resolveCategoryFromMarket(market: GammaMarket): string {
-  // 1. Try direct category field from API (normalize and map to our categories)
-  const rawCat = market.category;
-  if (rawCat && rawCat.trim()) {
-    const cat = rawCat.trim().toLowerCase().replace(/-/g, "");
-    // Map API categories to our internal categories
-    const categoryMap: Record<string, string> = {
-      "sports": "sports",
-      "politics": "politics",
-      "cryptocurrency": "crypto",
-      "crypto": "crypto",
-      "bitcoin": "crypto",
-      "ethereum": "crypto",
-      "business": "business",
-      "economics": "business",
-      "entertainment": "entertainment",
-      "popculture": "entertainment",
-      "pop-culture": "entertainment",
-      "science": "science",
-      "technology": "tech",
-      "tech": "tech",
-      "artificialintelligence": "ai",
-      "ai": "ai",
-      "health": "health",
-      "world": "world",
-      "climate": "climate",
-      "climateandenvironment": "climate",
-      "climate-and-environment": "climate",
-    };
-    if (categoryMap[cat]) return categoryMap[cat];
-    // If category contains certain keywords, map accordingly
-    if (cat.includes("sport")) return "sports";
-    if (cat.includes("polit")) return "politics";
-    if (cat.includes("crypto") || cat.includes("bitcoin") || cat.includes("ethereum")) return "crypto";
-    if (cat.includes("tech") || cat.includes("ai")) return "ai";
-    if (cat.includes("entertain") || cat.includes("pop")) return "entertainment";
-    if (cat.includes("business") || cat.includes("econ")) return "business";
-    if (cat.includes("science")) return "science";
-    if (cat.includes("health")) return "health";
-    if (cat.includes("world") || cat.includes("news")) return "world";
-    if (cat.includes("climate") || cat.includes("environment")) return "climate";
-    return cat;
+function toUnixSeconds(value: Date | string | number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "number") {
+    return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
   }
 
-  // 2. Infer from question and slug keywords using ordered checks
-  const text = `${market.question ?? ""} ${market.slug ?? ""}`.toLowerCase();
-
-  // CRYPTO - most specific, check first
-  const cryptoKeywords = ["bitcoin", "btc", "ethereum", "eth", "solana", "xrp", "binance", "coinbase", "crypto", "defi", "blockchain", "token", "ordinal", "hashrate", "miner", "halving", "wallet", "exchange", "doge", "shiba", "avax", "polygon", "matic", "ada", "dot", "link", "uni", "sushi", "toncoin", "ton", "arbitrum", "optimism", "celo", "algorand", "near", "aptos", "sui", "nft", "web3", "dao"];
-  if (cryptoKeywords.some(kw => text.includes(kw))) return "crypto";
-
-  // AI - specific tech category
-  const aiKeywords = ["openai", "gpt", "chatgpt", "anthropic", "claude ai", "anthropic", "gemini", "mistral", "llama", "meta ai"];
-  if (aiKeywords.some(kw => text.includes(kw))) return "ai";
-
-  // POLITICS - specific terms, check before sports
-  const politicsKeywords = ["trump", "biden", "election", "president", "congress", "senate", "republican", "democrat", "governor", "polling", "vote", "cabinet", "ukraine", "russia", "putin", "zelensky", "israel", "gaza", "hamas", "iran", "war", "middle east", "nato", "military", "army", "china", "taiwan", "korea", "kim jong", "india", "modi", "brazil", "mexico", "france", "macron", "germany", "policy", "law", "bill", "supreme court", "impeach", "referendum", "parliament", "prime minister", "sanction", "diplomat", "palestine", "taliban", "afghanistan", "border", "immigration", "refugee", "g20", "united nations"];
-  if (politicsKeywords.some(kw => text.includes(kw))) return "politics";
-
-  // SPORTS - check before general tech/business
-  const sportsKeywords = ["nba", "nfl", "nhl", "mlb", "soccer", "football", "ufc", "mma", "tennis", "world cup", "fifa", "championship", "playoff", "finals", "draft", "super bowl", "mvp", "lakers", "warriors", "celtics", "heat", "bucks", "clippers", "nets", "suns", "mavs", "jazz", "hornets", "pistons", "magic", "pacers", "wizards", "hawks", "kings", "blazers", "pelicans", "thunder", "bulls", "cavaliers", "knicks", "76ers", "mavericks", "raptors", "liverpool", "manchester", "arsenal", "chelsea", "barcelona", "real madrid", "bayern", "juventus", "psg", "champions league", "premier league", "olympics", "golf", "pga", "cricket", "rugby", "boxing", "wwe", "aew", "wrestling", "matchup", "player prop", "game prop", "score", "winner", "champion", "tournament", "medal", "olympic", "draft"];
-  if (sportsKeywords.some(kw => text.includes(kw))) return "sports";
-
-  // TECH - after AI and crypto
-  const techKeywords = ["google", "microsoft", "apple", "meta", "facebook", "twitter", "tesla", "spacex", "nvidia", "amd", "intel", "amazon", "aws", "azure", "cloud", "cybersecurity", "hack", "breach", "chip", "semiconductor", "processor", "gpu", "cpu", "quantum", "robot", "drone", "satellite", "starlink", "instagram", "youtube", "tiktok", "snapchat", "robotaxi"];
-  if (techKeywords.some(kw => text.includes(kw))) return "tech";
-
-  // ENTERTAINMENT
-  const entertainmentKeywords = ["album", "music", "song", "artist", "movie", "film", "netflix", "disney", "spotify", "gta", "video game", "grammy", "oscar", "emmy", "tony", "celebrity", "actor", "actress", "tv show", "series", "episode", "premiere", "finale", "box office", "concert", "tour", "festival", "coachella", "award", "winner", "nominated", "script", "animation", "anime", "manga", "comic", "marvel", "dc", "star wars", "harry potter", "podcast", "streaming", "billboard", "chart", "jimmy kimmel", "stephen colbert", "john oliver"];
-  if (entertainmentKeywords.some(kw => text.includes(kw))) return "entertainment";
-
-  // SCIENCE
-  const scienceKeywords = ["space", "nasa", "mars", "moon", "asteroid", "climate", "weather", "earthquake", "volcano", "climate change", "global warming", "carbon", "emission", "solar", "wind", "renewable", "temperature", "forecast", "hurricane", "typhoon", "tornado", "storm", "flood", "drought", "wildfire", "arctic", "antarctic", "glacier", "science", "research", "study", "trial", "fda", "cdc"];
-  if (scienceKeywords.some(kw => text.includes(kw))) return "science";
-
-  // BUSINESS - only if nothing else matched (generic terms)
-  const businessKeywords = ["market", "stock", "economy", "gdp", "fed", "inflation", "unemployment", "interest", "recession", "bank", "finance", "oil", "energy", "jobs", "earnings", "quarter", "revenue", "profit", "gas", "opec", "cpi", "ppi", "sp500", "nasdaq", "dow jones", "wall street", "nyse", "trading", "bull", "bear", "market crash", "bubble", "ipo", "dividend", "buyback", "merger", "acquisition", "layoff", "housing", "real estate", "forex", "currency", "gold", "silver", "commodity"];
-  if (businessKeywords.some(kw => text.includes(kw))) return "business";
-
-  // HEALTH
-  const healthKeywords = ["health", "medical", "hospital", "doctor", "nurse", "clinic", "pharmacy", "drug", "medicine", "treatment", "therapy", "surgery", "diagnosis", "cancer", "diabetes", "heart", "stroke", "alzheimer", "parkinson", "mental health", "depression", "anxiety", "obesity", "diet", "exercise", "fitness", "nutrition", "patient", "recovery", "cure", "infection", "virus", "bacteria", "quarantine", "ventilator", "icu", "covid", "coronavirus", "pandemic", "vaccine"];
-  if (healthKeywords.some(kw => text.includes(kw))) return "health";
-
-  // WORLD - international news
-  const worldKeywords = ["world", "international", "global", "europe", "asia", "africa", "america", "australia", "continent", "summit", "conference", "world war", "civil war", "revolution", "coup", "protest", "demonstration", "riot", "unrest", "dictator", "regime", "human rights", "freedom", "democracy", "monarchy", "king", "queen", "prince", "royal", "festival", "holiday", "disaster", "accident", "fire", "explosion", "rescue", "investigation"];
-  if (worldKeywords.some(kw => text.includes(kw))) return "world";
-
-  // CLIMATE
-  const climateKeywords = ["climate change", "global warming", "carbon emission", "co2", "renewable energy", "solar power", "wind power", "green energy", "net zero", "carbon neutral", "paris agreement", "climate summit", "emission reduction", "greenhouse gas"];
-  if (climateKeywords.some(kw => text.includes(kw))) return "climate";
-
-  return "general";
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : undefined;
 }
 
-function parseGammaMarket(market: GammaMarket): Market {
-  const outcomes = parseJsonArray(market.outcomes);
-  const outcomePrices = parseJsonArray(market.outcomePrices).map((value) => normalizeProbability(value, 0.5));
-  const clobTokenIds = parseJsonArray(market.clobTokenIds);
-
-  const normalizedOutcomes = outcomes.length > 0 ? outcomes : ["Yes", "No"];
-
-  const outcomeList: Outcome[] = normalizedOutcomes.map((title: string, i: number) => ({
-    id: clobTokenIds[i] || `outcome_${i}`,
-    title,
-    price: normalizeProbability(outcomePrices[i], 0.5),
-    volume24h: 0,
-    volume: 0,
-    liquidity: 0,
-    change24h: 0,
-  }));
-
-  return {
-    id: market.id,
-    title: market.question || "Unknown Market",
-    description: market.description || "",
-    outcomes: outcomeList,
-    volume24h: parseNumeric(market.volume24hr, 0),
-    volume: parseNumeric(market.volume, 0),
-    liquidity: parseNumeric(market.liquidity, parseNumeric(market.liquidityNum, 0)),
-    change24h: parseNumeric(market.oneDayPriceChange, 0),
-    openInterest: 0,
-    resolutionDate: market.endDate ? new Date(market.endDate) : undefined,
-    totalTrades: 0,
-    category: resolveCategoryFromMarket(market),
-    closed: market.closed || false,
-    resolved: false,
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Market Data API
-// ─────────────────────────────────────────────────────────────────────────────
-
-async function fetchGammaMarkets(params: Parameters<typeof buildGammaMarketsQuery>[0]): Promise<Market[]> {
-  const query = buildGammaMarketsQuery(params);
-  const data = await fetchJson<GammaMarket[]>(`${GAMMA_API_BASE}/markets?${query}`);
-  if (!Array.isArray(data)) {
-    return [];
-  }
-
-  return data
-    .map((item) => parseGammaMarket(item))
-    .filter((market) => market.outcomes.length > 0);
-}
-
-async function enrichMarketsWithOrderBook(markets: Market[]): Promise<Market[]> {
-  if (markets.length === 0) return markets;
-
-  const tokenIds = uniqueNonEmpty(
-    markets.flatMap((market) => market.outcomes.map((outcome) => outcome.id)).filter((id) => !id.startsWith("outcome_")),
-  );
-
-  if (tokenIds.length === 0) return markets;
-
-  const books = await getOrderBookSummaries(tokenIds);
-  return markets.map((market) => ({
-    ...market,
-    outcomes: market.outcomes.map((outcome) => {
-      const book = books[outcome.id];
-      const referencePrice = book?.midpoint ?? book?.lastTradePrice ?? outcome.price;
-
-      return {
-        ...outcome,
-        price: normalizeProbability(referencePrice, outcome.price),
-      };
-    }),
-  }));
+export function clearMarketCache(): void {
+  clearPriceHistoryCache();
 }
 
 export async function getMarkets(limit: number = 50, offset: number = 0): Promise<Market[]> {
-  const baseMarkets = await fetchGammaMarkets({
-    limit,
-    offset,
-    active: true,
-    closed: false,
-    order: "volumeNum",
-    ascending: false,
-  });
-
-  return enrichMarketsWithOrderBook(baseMarkets);
+  try {
+    return await getGammaMarkets(limit, offset);
+  } catch (error) {
+    console.error("Failed to fetch markets:", error);
+    return [];
+  }
 }
 
-/**
- * Get ALL markets including both active and closed.
- * Use this when you need comprehensive market data from Polymarket.
- */
 export async function getAllMarkets(limit: number = 100, offset: number = 0): Promise<Market[]> {
-  const baseMarkets = await fetchGammaMarkets({
-    limit,
-    offset,
-    active: true,
-    closed: true, // Include both active and closed
-    order: "volumeNum",
-    ascending: false,
-  });
-
-  return enrichMarketsWithOrderBook(baseMarkets);
+  try {
+    return await getAllGammaMarkets(limit, offset);
+  } catch (error) {
+    console.error("Failed to fetch all markets:", error);
+    return [];
+  }
 }
 
 export async function getMarketDetails(marketId: string): Promise<Market | null> {
   try {
-    const safeId = encodeURIComponent(marketId);
-    const direct = await fetchJson<GammaMarket | GammaMarket[]>(`${GAMMA_API_BASE}/markets/${safeId}`);
-    const candidate = Array.isArray(direct) ? direct[0] : direct;
-
-    if (candidate && typeof candidate === "object") {
-      const enriched = await enrichMarketsWithOrderBook([parseGammaMarket(candidate)]);
-      return enriched[0] ?? null;
-    }
-  } catch {
-    // fallback path below
-  }
-
-  try {
-    const query = buildGammaMarketsQuery({ id: marketId, limit: 1, offset: 0 });
-    const data = await fetchJson<GammaMarket[]>(`${GAMMA_API_BASE}/markets?${query}`);
-    if (!Array.isArray(data) || data.length === 0) {
-      return null;
-    }
-
-    const enriched = await enrichMarketsWithOrderBook([parseGammaMarket(data[0])]);
-    return enriched[0] ?? null;
+    return await getGammaMarketDetails(marketId);
   } catch (error) {
     console.error("Failed to fetch market details:", error);
     return null;
@@ -507,204 +167,101 @@ export async function getMarketDetails(marketId: string): Promise<Market | null>
 }
 
 export async function getMarketsByCategory(category: string, limit: number = 50, offset: number = 0): Promise<Market[]> {
-  // Gamma API doesn't support category filtering — we fetch and filter client-side
-  // using the same keyword matching as resolveCategoryFromMarket()
-  const catSlug = CATEGORY_SLUG_MAP[category] ?? category.toLowerCase();
-
-  // Build keyword patterns for this category (same as inference logic)
-  const categoryKeywords: Record<string, string[]> = {
-    sports: ["nba", "nfl", "nhl", "mlb", "soccer", "football", "ufc", "mma", "tennis", "world cup", "fifa", "qualif", "championship", "season", "win the", "beat", "score", "game"],
-    politics: ["trump", "biden", "election", "president", "congress", "senate", "republican", "democrat", "governor", "polling", "vote", "cabinet", "ukraine", "russia", "china", "taiwan", "policy", "law", "bill", "supreme court"],
-    crypto: ["bitcoin", "btc", "ethereum", "eth", "solana", "xrp", "binance", "coinbase", "crypto", "defi", "blockchain", "token"],
-    tech: ["ai ", "openai", "gpt", "chatgpt", "anthropic", "claude", "google ", "microsoft", "apple ", "meta ", "twitter", "amazon ", "tesla", "spacex", "tech", "software", "startup", "ipo", "valuation"],
-    entertainment: ["album", "music", "song", "artist", "movie", "film", "netflix", "disney", "spotify", "gta", "video game", "grammy", "oscar", "emmy", "tony"],
-    science: ["vaccine", "covid", "coronavirus", "health", "medical", "disease", "fda", "cdc", "science", "research", "study", "trial"],
-    business: ["market", "stock", "economy", "gdp", "fed", "inflation", "unemployment", "interest", "recession", "bank", "finance", "oil", "energy"],
-  };
-
-  const keywords = categoryKeywords[catSlug] ?? [catSlug];
-
   try {
-    // Fetch more than needed since we'll filter client-side
-    const baseMarkets = await fetchGammaMarkets({
-      limit: Math.max(limit * 4, 200),
-      offset,
-      active: true,
-      closed: false,
-      order: "volumeNum",
-      ascending: false,
-    });
-
-    // Client-side filter by keyword match in title or inferred category
-    const filtered = baseMarkets.filter((m) => {
-      // First check if market's resolved category matches
-      if (m.category === catSlug) return true;
-
-      // Then check keywords in title
-      const titleLower = m.title.toLowerCase();
-      return keywords.some((kw) => titleLower.includes(kw));
-    });
-
-    return enrichMarketsWithOrderBook(filtered.slice(0, limit));
+    return await getGammaMarketsByCategory(category, limit, offset);
   } catch (error) {
     console.error("Failed to fetch markets by category:", error);
     return [];
   }
 }
 
-/**
- * Get ALL markets for a category including both active and closed.
- * Use this when you need comprehensive category data.
- */
 export async function getAllMarketsByCategory(category: string, limit: number = 100, offset: number = 0): Promise<Market[]> {
-  const catSlug = CATEGORY_SLUG_MAP[category] ?? category.toLowerCase();
+  const allMarkets: Market[] = [];
+  let currentOffset = offset;
+  let previousBatchKey = "";
 
-  const categoryKeywords: Record<string, string[]> = {
-    sports: ["nba", "nfl", "nhl", "mlb", "soccer", "football", "ufc", "mma", "tennis", "world cup", "fifa", "qualif", "championship", "season", "win the", "beat", "score", "game"],
-    politics: ["trump", "biden", "election", "president", "congress", "senate", "republican", "democrat", "governor", "polling", "vote", "cabinet", "ukraine", "russia", "china", "taiwan", "policy", "law", "bill", "supreme court"],
-    crypto: ["bitcoin", "btc", "ethereum", "eth", "solana", "xrp", "binance", "coinbase", "crypto", "defi", "blockchain", "token"],
-    tech: ["ai ", "openai", "gpt", "chatgpt", "anthropic", "claude", "google ", "microsoft", "apple ", "meta ", "twitter", "amazon ", "tesla", "spacex", "tech", "software", "startup", "ipo", "valuation"],
-    entertainment: ["album", "music", "song", "artist", "movie", "film", "netflix", "disney", "spotify", "gta", "video game", "grammy", "oscar", "emmy", "tony"],
-    science: ["vaccine", "covid", "coronavirus", "health", "medical", "disease", "fda", "cdc", "science", "research", "study", "trial"],
-    business: ["market", "stock", "economy", "gdp", "fed", "inflation", "unemployment", "interest", "recession", "bank", "finance", "oil", "energy"],
-  };
+  while (true) {
+    const batch = await getMarketsByCategory(category, limit, currentOffset);
+    if (batch.length === 0) break;
 
-  const keywords = categoryKeywords[catSlug] ?? [catSlug];
+    const batchKey = batch.map((market) => market.id).join(",");
+    if (batchKey === previousBatchKey) break;
 
+    allMarkets.push(...batch);
+    previousBatchKey = batchKey;
+
+    if (batch.length < limit) break;
+    currentOffset += limit;
+  }
+
+  return dedupeMarkets(allMarkets);
+}
+
+export async function searchMarkets(query: string): Promise<Market[]> {
   try {
-    // Fetch more than needed since we'll filter client-side - include BOTH active and closed
-    const baseMarkets = await fetchGammaMarkets({
-      limit: Math.max(limit * 4, 200),
-      offset,
-      active: true,
-      closed: true, // Include both active and closed
-      order: "volumeNum",
-      ascending: false,
-    });
-
-    // Client-side filter by keyword match in title or inferred category
-    const filtered = baseMarkets.filter((m) => {
-      if (m.category === catSlug) return true;
-      const titleLower = m.title.toLowerCase();
-      return keywords.some((kw) => titleLower.includes(kw));
-    });
-
-    return enrichMarketsWithOrderBook(filtered.slice(0, limit));
+    return await searchGammaMarkets(query);
   } catch (error) {
-    console.error("Failed to fetch all markets by category:", error);
+    console.error("Failed to search markets:", error);
     return [];
   }
 }
 
-export async function searchMarkets(query: string): Promise<Market[]> {
-  const trimmed = query.trim();
-  if (!trimmed) return [];
-
-  const params = buildQueryString({
-    q: trimmed,
-    markets: true,
-    events: false,
-    tags: false,
-    profiles: false,
-    limit: 50,
-    offset: 0,
-  });
-
-  for (const endpoint of ["public-search", "search"]) {
-    try {
-      const payload = await fetchJson<GammaSearchResponse>(`${GAMMA_API_BASE}/${endpoint}?${params}`, undefined, 0);
-      const markets = Array.isArray(payload.markets)
-        ? payload.markets.map((market) => parseGammaMarket(market)).filter((market) => market.outcomes.length > 0)
-        : [];
-      if (markets.length > 0) {
-        return enrichMarketsWithOrderBook(markets);
-      }
-    } catch {
-      // try next endpoint
-    }
-  }
-
-  const fallback = await getMarkets(100);
-  const queryLower = trimmed.toLowerCase();
-  return fallback.filter(
-    (market) =>
-      market.title.toLowerCase().includes(queryLower)
-      || (market.description && market.description.toLowerCase().includes(queryLower)),
-  );
-}
-
 export async function getTrendingMarkets(limit: number = 20): Promise<Market[]> {
   try {
-    const markets = await fetchGammaMarkets({
-      limit,
-      offset: 0,
-      active: true,
-      closed: false,
-      order: "competitive",
-      ascending: false,
-    });
-    return enrichMarketsWithOrderBook(markets);
-  } catch {
-    return getMarkets(limit);
+    return await getGammaTrendingMarkets(limit, 0);
+  } catch (error) {
+    console.error("Failed to fetch trending markets:", error);
+    return [];
   }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Price History API
-// ─────────────────────────────────────────────────────────────────────────────
 
 export async function getPriceHistory(
   marketId: string,
   timeframe: Timeframe = "1d",
-  tokenIdOverride?: string,
-  start?: Date | string,
-  end?: Date | string,
+  tokenIdOrStart?: string | number | Date,
+  startOrEnd?: Date | string | number,
+  endTs?: Date | string | number,
 ): Promise<PriceHistory | null> {
   try {
-    let tokenId = tokenIdOverride;
-    if (!tokenId) {
-      const marketDetails = await getMarketDetails(marketId);
-      if (!marketDetails || marketDetails.outcomes.length === 0) {
-        return null;
-      }
-      tokenId = marketDetails.outcomes[0]?.id;
+    const tokenIdOverride = typeof tokenIdOrStart === "string"
+      && (
+        startOrEnd !== undefined
+        || endTs !== undefined
+        || Number.isNaN(Date.parse(tokenIdOrStart))
+        || tokenIdOrStart.startsWith("0x")
+        || tokenIdOrStart.startsWith("outcome_")
+      )
+      ? tokenIdOrStart
+      : undefined;
+
+    const startTs = tokenIdOverride ? toUnixSeconds(startOrEnd) : toUnixSeconds(tokenIdOrStart as Date | string | number | undefined);
+    const resolvedEndTs = tokenIdOverride ? toUnixSeconds(endTs) : toUnixSeconds(startOrEnd);
+
+    if (!tokenIdOverride) {
+      return await getCanonicalPriceHistory(marketId, timeframe, startTs, resolvedEndTs);
     }
 
-    if (!tokenId) {
-      return null;
-    }
+    const params = new URLSearchParams();
+    params.set("market", tokenIdOverride);
+    params.set("interval", CLOB_INTERVAL_BY_TIMEFRAME[timeframe]);
+    if (startTs !== undefined) params.set("startTs", String(startTs));
+    if (resolvedEndTs !== undefined) params.set("endTs", String(resolvedEndTs));
 
-    const params = buildQueryString({
-      market: tokenId,
-      interval: CLOB_INTERVAL_BY_TIMEFRAME[timeframe],
-      startTs: start ? Math.floor(new Date(toIsoDate(start)).getTime() / 1000) : undefined,
-      endTs: end ? Math.floor(new Date(toIsoDate(end)).getTime() / 1000) : undefined,
-    });
+    const response = await fetch(`${CLOB_API_BASE}/prices-history?${params.toString()}`);
+    if (!response.ok) return null;
 
-    const data = await fetchJson<ClobPriceHistoryResponse>(`${CLOB_API_BASE}/prices-history?${params}`);
-
-    if (!data.history || !Array.isArray(data.history)) {
-      return null;
-    }
-
-    const pricePoints: PricePoint[] = data.history.map((point) => ({
-      timestamp: point.t * 1000,
-      price: (() => {
-        const raw = parseNumeric(point.p, 0);
-        return raw > 1 ? raw / 100 : raw;
-      })(),
-      outcomeId: tokenId,
-    }));
-
-    if (pricePoints.length === 0) {
-      return null;
-    }
+    const data = (await response.json()) as { history?: Array<{ t: number; p: number | string }> };
+    if (!Array.isArray(data.history) || data.history.length === 0) return null;
 
     return {
       marketId,
-      outcomeId: tokenId,
-      data: pricePoints,
+      outcomeId: tokenIdOverride,
       timeframe,
+      data: data.history.map((point) => ({
+        timestamp: point.t * 1000,
+        price: normalizeProbability(point.p, 0),
+        outcomeId: tokenIdOverride,
+      })),
     };
   } catch (error) {
     console.error("Failed to fetch price history:", error);
@@ -712,424 +269,108 @@ export async function getPriceHistory(
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Order Book API
-// ─────────────────────────────────────────────────────────────────────────────
-
 export async function getOrderBookSummary(tokenId: string): Promise<OrderBookSummary | null> {
   try {
-    const params = buildQueryString({ token_id: tokenId });
-    const data = await fetchJson<ClobBookResponse>(`${CLOB_API_BASE}/book?${params}`);
-    const bids = Array.isArray(data?.bids) ? data.bids : [];
-    const asks = Array.isArray(data?.asks) ? data.asks : [];
-
-    const bestBid = bids.length > 0 ? normalizeProbability(bids[0].price, 0) : null;
-    const bestAsk = asks.length > 0 ? normalizeProbability(asks[0].price, 0) : null;
-    const midpoint =
-      bestBid !== null && bestAsk !== null
-        ? (bestBid + bestAsk) / 2
-        : bestBid !== null
-          ? bestBid
-          : bestAsk;
-    const spread = bestBid !== null && bestAsk !== null ? Math.max(0, bestAsk - bestBid) : null;
-    const spreadBps =
-      midpoint !== null && midpoint > 0 && spread !== null
-        ? (spread / midpoint) * 10_000
-        : null;
-    const bidDepth = bids.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
-    const askDepth = asks.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
-    const lastTradePrice = data.last_trade_price ? normalizeProbability(data.last_trade_price, midpoint ?? 0.5) : null;
-
-    return {
-      marketId: data.market ?? "",
-      tokenId: data.asset_id ?? tokenId,
-      bestBid,
-      bestAsk,
-      midpoint,
-      spread,
-      spreadBps,
-      bidDepth,
-      askDepth,
-      minOrderSize: data.min_order_size ? parseNumeric(data.min_order_size, 0) : null,
-      tickSize: data.tick_size ? parseNumeric(data.tick_size, 0) : null,
-      updatedAt: toTimestampMs(data.timestamp),
-      negRisk: data.neg_risk === true,
-      lastTradePrice,
-      lastTradeSide: null,
-      hash: data.hash,
-    };
+    return await getCanonicalOrderBookSummary(tokenId);
   } catch {
     return null;
   }
 }
 
 export async function getOrderBookSummaries(tokenIds: string[]): Promise<Record<string, OrderBookSummary>> {
-  const unique = uniqueNonEmpty(tokenIds);
-  if (unique.length === 0) return {};
-
-  const result: Record<string, OrderBookSummary> = {};
-
-  for (const batch of chunkArray(unique, CLOB_BATCH_MARKET_DATA_LIMIT)) {
-    try {
-      const payload = JSON.stringify(buildClobTokenBatchRequest(batch));
-      const books = await fetchJson<ClobBookResponse[]>(
-        `${CLOB_API_BASE}/books`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payload,
-        },
-      );
-
-      if (!Array.isArray(books)) continue;
-
-      for (const book of books) {
-        const tokenId = book.asset_id;
-        if (!tokenId) continue;
-
-        const bids = Array.isArray(book.bids) ? book.bids : [];
-        const asks = Array.isArray(book.asks) ? book.asks : [];
-        const bestBid = bids.length > 0 ? normalizeProbability(bids[0].price, 0) : null;
-        const bestAsk = asks.length > 0 ? normalizeProbability(asks[0].price, 0) : null;
-        const midpoint =
-          bestBid !== null && bestAsk !== null
-            ? (bestBid + bestAsk) / 2
-            : bestBid !== null
-              ? bestBid
-              : bestAsk;
-        const spread = bestBid !== null && bestAsk !== null ? Math.max(0, bestAsk - bestBid) : null;
-        const spreadBps =
-          midpoint !== null && midpoint > 0 && spread !== null
-            ? (spread / midpoint) * 10_000
-            : null;
-
-        result[tokenId] = {
-          marketId: book.market ?? "",
-          tokenId,
-          bestBid,
-          bestAsk,
-          midpoint,
-          spread,
-          spreadBps,
-          bidDepth: bids.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0),
-          askDepth: asks.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0),
-          minOrderSize: book.min_order_size ? parseNumeric(book.min_order_size, 0) : null,
-          tickSize: book.tick_size ? parseNumeric(book.tick_size, 0) : null,
-          updatedAt: toTimestampMs(book.timestamp),
-          negRisk: book.neg_risk === true,
-          lastTradePrice: book.last_trade_price ? normalizeProbability(book.last_trade_price, midpoint ?? 0.5) : null,
-          lastTradeSide: null,
-          hash: book.hash,
-        };
-      }
-    } catch {
-      const fallbackEntries = await Promise.all(
-        batch.map(async (id) => [id, await getOrderBookSummary(id)] as const),
-      );
-
-      for (const [id, summary] of fallbackEntries) {
-        if (summary) {
-          result[id] = summary;
-        }
-      }
-    }
+  try {
+    return await getCanonicalOrderBookSummaries(tokenIds);
+  } catch {
+    return {};
   }
-
-  return result;
 }
 
 export async function getCurrentPrice(tokenId: string, side: "BUY" | "SELL" = "BUY"): Promise<number | null> {
   try {
-    const params = buildQueryString({ token_id: tokenId, side });
-    const data = await fetchJson<ClobSinglePriceResponse>(`${CLOB_API_BASE}/price?${params}`);
-    return data.price !== undefined ? normalizeProbability(data.price, 0.5) : null;
+    return await getCanonicalCurrentPrice(tokenId, side);
   } catch {
     return null;
   }
 }
 
 export async function getBatchMarketPrices(
-  requests: Array<{ tokenId: string; side: "BUY" | "SELL" }>,
+  entries: Array<{ tokenId: string; side: "BUY" | "SELL" }>,
 ): Promise<Record<string, number>> {
-  const filtered = requests.filter((request) => request.tokenId.trim().length > 0);
-  if (filtered.length === 0) return {};
-
-  const result: Record<string, number> = {};
-
-  for (const batch of chunkArray(filtered, CLOB_BATCH_MARKET_DATA_LIMIT)) {
-    try {
-      const payload = JSON.stringify(
-        batch.map((entry) => ({ token_id: entry.tokenId, side: entry.side })),
-      );
-      const response = await fetchJson<Array<{ token_id: string; price: string | number }>>(
-        `${CLOB_API_BASE}/prices`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payload,
-        },
-      );
-
-      if (!Array.isArray(response)) continue;
-      for (const entry of response) {
-        if (!entry.token_id || entry.price === undefined) continue;
-        result[entry.token_id] = normalizeProbability(entry.price, 0.5);
-      }
-    } catch {
-      // Keep partial successes
-    }
+  try {
+    return await getBatchPrices(entries);
+  } catch {
+    return {};
   }
-
-  return result;
 }
 
 export async function getMidpointPrice(tokenId: string): Promise<number | null> {
   try {
-    const params = buildQueryString({ token_id: tokenId });
-    const data = await fetchJson<Record<string, string | number>>(`${CLOB_API_BASE}/midpoint?${params}`);
-    const raw = data.mid ?? data.midpoint;
-    return raw !== undefined ? normalizeProbability(raw, 0.5) : null;
+    return await getCanonicalMidpointPrice(tokenId);
   } catch {
     return null;
   }
 }
 
 export async function getMidpointPrices(tokenIds: string[]): Promise<Record<string, number>> {
-  const unique = uniqueNonEmpty(tokenIds);
-  if (unique.length === 0) return {};
-
-  const result: Record<string, number> = {};
-
-  for (const batch of chunkArray(unique, CLOB_BATCH_MARKET_DATA_LIMIT)) {
-    try {
-      const payload = JSON.stringify(buildClobTokenBatchRequest(batch));
-      const data = await fetchJson<Record<string, string | number>>(
-        `${CLOB_API_BASE}/midpoints`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payload,
-        },
-      );
-
-      for (const [tokenId, value] of Object.entries(data ?? {})) {
-        result[tokenId] = normalizeProbability(value, 0.5);
-      }
-    } catch {
-      // keep partial successes
-    }
+  try {
+    return await getBatchMidpoints(tokenIds);
+  } catch {
+    return {};
   }
-
-  return result;
-}
-
-export interface LastTradeSnapshot {
-  price: number;
-  side: "BUY" | "SELL" | null;
 }
 
 export async function getLastTradePrice(tokenId: string): Promise<LastTradeSnapshot | null> {
   try {
-    const params = buildQueryString({ token_id: tokenId });
-    const data = await fetchJson<ClobMarketPriceResponse>(`${CLOB_API_BASE}/last-trade-price?${params}`);
-    if (data.price === undefined) return null;
-
-    const side = data.side === "BUY" || data.side === "SELL" ? data.side : null;
-    return {
-      price: normalizeProbability(data.price, 0.5),
-      side,
-    };
+    return await getLastTradeSnapshot(tokenId);
   } catch {
     return null;
   }
 }
 
 export async function getLastTradePrices(tokenIds: string[]): Promise<Record<string, LastTradeSnapshot>> {
-  const unique = uniqueNonEmpty(tokenIds);
-  if (unique.length === 0) return {};
-
-  const result: Record<string, LastTradeSnapshot> = {};
-
-  for (const batch of chunkArray(unique, CLOB_BATCH_MARKET_DATA_LIMIT)) {
-    try {
-      const payload = JSON.stringify(buildClobTokenBatchRequest(batch));
-      const data = await fetchJson<Array<{ token_id: string; price: string | number; side?: "BUY" | "SELL" | "" }>>(
-        `${CLOB_API_BASE}/last-trades-prices`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payload,
-        },
-      );
-
-      if (!Array.isArray(data)) continue;
-      for (const item of data) {
-        if (!item.token_id || item.price === undefined) continue;
-        result[item.token_id] = {
-          price: normalizeProbability(item.price, 0.5),
-          side: item.side === "BUY" || item.side === "SELL" ? item.side : null,
-        };
-      }
-    } catch {
-      // keep partial successes
-    }
+  try {
+    return await getBatchLastTradeSnapshots(tokenIds);
+  } catch {
+    return {};
   }
-
-  return result;
 }
 
 export async function getSpread(tokenId: string): Promise<number | null> {
   try {
-    const params = buildQueryString({ token_id: tokenId });
-    const data = await fetchJson<ClobSpreadResponse>(`${CLOB_API_BASE}/spread?${params}`);
-    if (data.spread === undefined) return null;
-    return normalizeProbability(data.spread, 0);
+    const response = await getCanonicalSpread(tokenId);
+    return response ? normalizeProbability(response.spread, 0) : null;
   } catch {
     return null;
   }
 }
 
 export async function getSpreads(tokenIds: string[]): Promise<Record<string, number>> {
-  const unique = uniqueNonEmpty(tokenIds);
-  if (unique.length === 0) return {};
-
-  const result: Record<string, number> = {};
-
-  for (const batch of chunkArray(unique, CLOB_BATCH_MARKET_DATA_LIMIT)) {
-    try {
-      const payload = JSON.stringify(buildClobTokenBatchRequest(batch));
-      const data = await fetchJson<Array<{ token_id: string; spread: string | number }>>(
-        `${CLOB_API_BASE}/spreads`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: payload,
-        },
-      );
-
-      if (!Array.isArray(data)) continue;
-      for (const item of data) {
-        if (!item.token_id || item.spread === undefined) continue;
-        result[item.token_id] = normalizeProbability(item.spread, 0);
-      }
-    } catch {
-      // keep partial successes
-    }
+  try {
+    return await getSpreadsMap(tokenIds);
+  } catch {
+    return {};
   }
-
-  return result;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Market Quotes API
-// ─────────────────────────────────────────────────────────────────────────────
 
 export async function getMarketQuotes(marketId: string): Promise<MarketQuote[]> {
-  const market = await getMarketDetails(marketId);
-  if (!market) return [];
-
-  const tokenIds = uniqueNonEmpty(market.outcomes.map((outcome) => outcome.id));
-  const [books, lastTrades] = await Promise.all([
-    getOrderBookSummaries(tokenIds),
-    getLastTradePrices(tokenIds),
-  ]);
-
-  return market.outcomes.map((outcome) => {
-    const book = books[outcome.id];
-    const trade = lastTrades[outcome.id];
-    const quotePrice = trade?.price ?? book?.midpoint ?? book?.lastTradePrice ?? outcome.price;
-
-    return {
-      tokenId: outcome.id,
-      outcome: outcome.title,
-      price: normalizeProbability(quotePrice, outcome.price),
-      bid: book?.bestBid ?? outcome.price,
-      ask: book?.bestAsk ?? outcome.price,
-      spread: book?.spread ?? 0,
-      volume24h: market.volume24h,
-      liquidity: market.liquidity,
-    };
-  });
+  try {
+    return await getCanonicalMarketQuotes(marketId);
+  } catch {
+    return [];
+  }
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Market Depth API
-// ─────────────────────────────────────────────────────────────────────────────
 
 export async function getMarketDepth(tokenId: string, levels: number = 10): Promise<MarketDepth | null> {
   try {
-    const response = await fetch(`${CLOB_API_BASE}/book?token_id=${tokenId}`);
-    if (!response.ok) return null;
-
-    const json = await response.json();
-    if (!json) return null;
-
-    const data = json as ClobBookResponse;
-    const bids = Array.isArray(data?.bids) ? data.bids : [];
-    const asks = Array.isArray(data?.asks) ? data.asks : [];
-
-    let bidTotal = 0;
-    const bidLevels = bids.slice(0, levels).map((level) => {
-      const size = parseNumeric(level.size, 0);
-      bidTotal += size;
-      return { price: normalizeProbability(level.price, 0), size, total: bidTotal };
-    });
-
-    let askTotal = 0;
-    const askLevels = asks.slice(0, levels).map((level) => {
-      const size = parseNumeric(level.size, 0);
-      askTotal += size;
-      return { price: normalizeProbability(level.price, 0), size, total: askTotal };
-    });
-
-    const bestBid = bidLevels[0]?.price ?? 0;
-    const bestAsk = askLevels[0]?.price ?? 0;
-    const spread = bestAsk - bestBid;
-    const midPrice = (bestBid + bestAsk) / 2;
-
-    return {
-      bids: bidLevels,
-      asks: askLevels,
-      spread,
-      midPrice,
-    };
+    return await getCanonicalMarketDepth(tokenId, levels);
   } catch {
     return null;
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Events & Series API
-// ─────────────────────────────────────────────────────────────────────────────
-
 export async function getActiveEvents(limit: number = 50): Promise<Event[]> {
   try {
-    const response = await fetch(
-      `${GAMMA_API_BASE}/events?limit=${limit}&active=true`
-    );
-
-    if (!response.ok) {
-      throw new Error(`Gamma API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data.map((item: GammaEvent) => ({
-      id: item.id,
-      title: item.title,
-      description: item.description,
-      slug: item.slug,
-      startDate: item.startDate,
-      endDate: item.endDate,
-      seriesId: item.seriesId,
-      seriesName: item.seriesTitle,
-      markets: (item.markets || []).map((m) => parseGammaMarket(m)).filter((market) => market.outcomes.length > 0),
-      tags: item.tags,
-      status: item.endDate && new Date(item.endDate) < new Date() ? "resolved" : (item.active ? "live" : "upcoming"),
-    }));
+    return await getGammaActiveEvents(limit, 0);
   } catch (error) {
     console.error("Failed to fetch active events:", error);
     return [];
@@ -1138,22 +379,7 @@ export async function getActiveEvents(limit: number = 50): Promise<Event[]> {
 
 export async function getMarketsBySeries(seriesSlug: string, limit: number = 50): Promise<Market[]> {
   try {
-    const response = await fetch(
-      `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&series=${encodeURIComponent(seriesSlug)}&order=volumeNum&ascending=false`
-    );
-
-    if (!response.ok) {
-      return [];
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data
-      .map((item) => parseGammaMarket(item as GammaMarket))
-      .filter((market) => market.outcomes.length > 0);
+    return await getGammaMarketsBySeries(seriesSlug, limit);
   } catch (error) {
     console.error("Failed to fetch markets by series:", error);
     return [];
@@ -1162,22 +388,7 @@ export async function getMarketsBySeries(seriesSlug: string, limit: number = 50)
 
 export async function getMarketsByTag(tagSlug: string, limit: number = 50): Promise<Market[]> {
   try {
-    const response = await fetch(
-      `${GAMMA_API_BASE}/markets?limit=${limit}&closed=false&tag=${encodeURIComponent(tagSlug)}&order=volumeNum&ascending=false`
-    );
-
-    if (!response.ok) {
-      return [];
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data
-      .map((item) => parseGammaMarket(item as GammaMarket))
-      .filter((market) => market.outcomes.length > 0);
+    return await getGammaMarketsByTag(tagSlug, limit, 0);
   } catch (error) {
     console.error("Failed to fetch markets by tag:", error);
     return [];
@@ -1186,25 +397,7 @@ export async function getMarketsByTag(tagSlug: string, limit: number = 50): Prom
 
 export async function getSeries(): Promise<Series[]> {
   try {
-    const response = await fetch(`${GAMMA_API_BASE}/series`);
-
-    if (!response.ok) {
-      throw new Error(`Gamma API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data.map((item: GammaSeries) => ({
-      id: item.id,
-      slug: item.slug,
-      name: item.title,
-      description: item.description,
-      imageUrl: item.imageUrl,
-      category: item.category,
-    }));
+    return await getGammaSeries();
   } catch (error) {
     console.error("Failed to fetch series:", error);
     return [];
@@ -1213,23 +406,7 @@ export async function getSeries(): Promise<Series[]> {
 
 export async function getTags(): Promise<Tag[]> {
   try {
-    const response = await fetch(`${GAMMA_API_BASE}/tags`);
-
-    if (!response.ok) {
-      throw new Error(`Gamma API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data.map((item: GammaTag) => ({
-      id: item.id,
-      slug: item.slug,
-      name: item.name,
-      category: item.category,
-    }));
+    return await getGammaTags();
   } catch (error) {
     console.error("Failed to fetch tags:", error);
     return [];
@@ -1238,83 +415,20 @@ export async function getTags(): Promise<Tag[]> {
 
 export async function getCategories(): Promise<Category[]> {
   try {
-    const response = await fetch(`${GAMMA_API_BASE}/categories`);
-
-    if (!response.ok) {
-      throw new Error(`Gamma API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data.map((item: { id?: string; category?: string; slug?: string; count?: number }) => ({
-      id: item.id || item.category || item.slug || "",
-      slug: item.category || item.slug || "",
-      name: item.category || item.slug || "",
-      marketsCount: item.count || 0,
-    }));
+    return await getGammaCategories();
   } catch (error) {
     console.error("Failed to fetch categories:", error);
     return [];
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sports Markets API
-// ─────────────────────────────────────────────────────────────────────────────
-
 export async function getLiveSportsMarkets(): Promise<Market[]> {
   try {
-    const query = buildGammaMarketsQuery({
-      limit: 200,
-      offset: 0,
-      active: true,
-      closed: false,
-      category: "Sports",
-      order: "volumeNum",
-      ascending: false,
-    });
-    const data = await fetchJson<GammaMarket[]>(`${GAMMA_API_BASE}/markets?${query}`);
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    const sportsKeywords = [
-      "nba", "nfl", "nhl", "mlb", "ncaa", "soccer", "football",
-      "basketball", "baseball", "hockey", "ufc", "mma", "tennis",
-      "golf", "boxing", "cricket", "rugby", "world cup", "olympics"
-    ];
-
-    const sportsMarkets = data
-      .map((item) => parseGammaMarket(item as GammaMarket))
-      .filter((market) => {
-        if (market.outcomes.length === 0) return false;
-        const titleLower = market.title.toLowerCase();
-        const categoryLower = (market.category || "").toLowerCase();
-        return sportsKeywords.some((kw) => titleLower.includes(kw) || categoryLower.includes(kw));
-      })
-      .slice(0, 50);
-
-    return enrichMarketsWithOrderBook(sportsMarkets);
+    return await getLiveSportsGammaMarkets();
   } catch (error) {
     console.error("Failed to fetch live sports markets:", error);
     return [];
   }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Token Info API
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface TokenInfo {
-  assetId: string;
-  symbol: string;
-  name: string;
-  decimals: number;
-  color: string;
-  icon?: string;
 }
 
 export async function getTokenInfo(tokenId: string): Promise<TokenInfo | null> {
@@ -1337,85 +451,52 @@ export async function getTokenInfo(tokenId: string): Promise<TokenInfo | null> {
 }
 
 export async function getMultipleTokenInfo(tokenIds: string[]): Promise<Record<string, TokenInfo>> {
-  const unique = Array.from(new Set(tokenIds.filter(Boolean)));
   const results: Record<string, TokenInfo> = {};
 
   await Promise.all(
-    unique.map(async (tokenId) => {
+    Array.from(new Set(tokenIds.filter(Boolean))).map(async (tokenId) => {
       const info = await getTokenInfo(tokenId);
       if (info) {
         results[tokenId] = info;
       }
-    })
+    }),
   );
 
   return results;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Market Status API
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface MarketStatus {
-  marketId: string;
-  status: "open" | "closed" | "resolved" | "pending";
-  resolvedOutcome?: string;
-  resolutionDate?: string;
-}
-
 export async function getMarketStatus(marketId: string): Promise<MarketStatus | null> {
-  try {
-    const query = buildGammaMarketsQuery({ id: marketId, limit: 1, offset: 0 });
-    const data = await fetchJson<Array<Record<string, unknown>>>(`${GAMMA_API_BASE}/markets?${query}`);
-    if (!Array.isArray(data) || data.length === 0) return null;
+  const market = await getMarketDetails(marketId);
+  if (!market) return null;
 
-    const market = data[0] as Record<string, unknown>;
-    const isResolved = market.resolved === true;
-    const isClosed = market.closed === true;
+  const status = market.resolved ? "resolved" : market.closed ? "closed" : market.outcomes.length > 0 ? "open" : "pending";
 
-    return {
-      marketId,
-      status: isResolved ? "resolved" : isClosed ? "closed" : "open",
-      resolvedOutcome: typeof market.resolvedOutcome === "string" ? market.resolvedOutcome : undefined,
-      resolutionDate: typeof market.endDate === "string" ? market.endDate : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Global Metrics API
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface GlobalMetrics {
-  totalVolume24h: number;
-  totalMarkets: number;
-  activeMarkets: number;
-  topCategories: Array<{ category: string; volume: number }>;
+  return {
+    marketId,
+    status,
+    resolutionDate: market.resolutionDate?.toISOString(),
+  };
 }
 
 export async function getGlobalMetrics(): Promise<GlobalMetrics> {
   try {
-    const markets = await getMarkets(200);
-
-    const totalVolume24h = markets.reduce((sum, m) => sum + m.volume24h, 0);
+    const markets = await getAllMarkets(200);
+    const totalVolume24h = markets.reduce((sum, market) => sum + market.volume24h, 0);
     const categoryVolume = new Map<string, number>();
+
     for (const market of markets) {
       const key = (market.category ?? "general").trim() || "general";
       categoryVolume.set(key, (categoryVolume.get(key) ?? 0) + market.volume24h);
     }
 
-    const topCategories = Array.from(categoryVolume.entries())
-      .map(([category, volume]) => ({ category, volume }))
-      .sort((a, b) => b.volume - a.volume)
-      .slice(0, 5);
-
     return {
       totalVolume24h,
       totalMarkets: markets.length,
-      activeMarkets: markets.filter((m) => !m.closed).length,
-      topCategories,
+      activeMarkets: markets.filter((market) => !market.closed).length,
+      topCategories: Array.from(categoryVolume.entries())
+        .map(([category, volume]) => ({ category, volume }))
+        .sort((a, b) => b.volume - a.volume)
+        .slice(0, 5),
     };
   } catch {
     return {

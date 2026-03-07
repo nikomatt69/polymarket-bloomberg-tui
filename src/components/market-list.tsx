@@ -598,9 +598,12 @@ export function MarketList() {
                 const sportsScore = () => {
                   if (!isSports) return null;
                   const scores = sportsScores();
+                  if (market.slug && scores[market.slug]) {
+                    return scores[market.slug];
+                  }
                   // Match by any token id or market id
                   const key = Object.keys(scores).find(k =>
-                    k === market.id || market.outcomes.some(o => o.id === k)
+                    k === market.id || market.outcomes.some(o => o.id === k) || scores[k]?.slug === market.slug
                   );
                   return key ? scores[key] : null;
                 };

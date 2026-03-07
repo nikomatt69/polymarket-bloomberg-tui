@@ -144,7 +144,6 @@ export async function initializeWallet(): Promise<void> {
   };
   if (latestCreds.apiKey) {
     initializeUserWebSocket(latestCreds, []);
-    setUserWsConnected(true);
   }
 }
 
@@ -214,7 +213,6 @@ export async function connectWallet(privateKey: string): Promise<void> {
   };
   if (connectedCreds.apiKey) {
     initializeUserWebSocket(connectedCreds, []);
-    setUserWsConnected(true);
   }
 }
 

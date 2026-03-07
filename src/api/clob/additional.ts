@@ -3,6 +3,8 @@
  * Base: https://clob.polymarket.com
  */
 
+import { buildQueryString, buildClobTradesQuery, buildClobOrderBookQuery } from "../queries";
+
 const CLOB_API_BASE = "https://clob.polymarket.com";
 
 function parseNumeric(value: unknown, fallback: number = 0): number {
@@ -41,16 +43,9 @@ export async function getFills(
   before?: string
 ): Promise<Fill[]> {
   try {
-    const params = new URLSearchParams({
-      address,
-      limit: String(limit),
-    });
+    const query = buildClobTradesQuery({ address, limit, before });
 
-    if (before) {
-      params.set("before", before);
-    }
-
-    const response = await fetch(`${CLOB_API_BASE}/fills?${params}`);
+    const response = await fetch(`${CLOB_API_BASE}/fills?${query}`);
 
     if (!response.ok) {
       return [];
@@ -144,9 +139,13 @@ export async function getCandles(
   limit: number = 100
 ): Promise<Candle[]> {
   try {
-    const response = await fetch(
-      `${CLOB_API_BASE}/candles?token_id=${tokenId}&interval=${interval}&limit=${limit}`
-    );
+    const query = buildQueryString({
+      token_id: tokenId,
+      interval,
+      limit,
+    });
+
+    const response = await fetch(`${CLOB_API_BASE}/candles?${query}`);
 
     if (!response.ok) {
       return [];
@@ -274,9 +273,9 @@ export async function getAggregatedOrderBook(
   depth: number = 10
 ): Promise<AggregatedBook | null> {
   try {
-    const response = await fetch(
-      `${CLOB_API_BASE}/book/aggregated?token_id=${tokenId}&depth=${depth}`
-    );
+    const query = buildClobOrderBookQuery({ asset_id: tokenId, depth });
+
+    const response = await fetch(`${CLOB_API_BASE}/book/aggregated?${query}`);
 
     if (!response.ok) {
       return null;
@@ -317,7 +316,9 @@ export interface ApiKey {
 
 export async function getApiKeys(address: string): Promise<ApiKey[]> {
   try {
-    const response = await fetch(`${CLOB_API_BASE}/api-keys?address=${address}`);
+    const query = buildQueryString({ address });
+
+    const response = await fetch(`${CLOB_API_BASE}/api-keys?${query}`);
 
     if (!response.ok) {
       return [];
@@ -469,16 +470,13 @@ export async function getTransactions(
   type?: string
 ): Promise<Transaction[]> {
   try {
-    const params = new URLSearchParams({
+    const query = buildQueryString({
       address,
-      limit: String(limit),
+      limit,
+      ...(type ? { type } : {}),
     });
 
-    if (type) {
-      params.set("type", type);
-    }
-
-    const response = await fetch(`${CLOB_API_BASE}/transactions?${params}`);
+    const response = await fetch(`${CLOB_API_BASE}/transactions?${query}`);
 
     if (!response.ok) {
       return [];

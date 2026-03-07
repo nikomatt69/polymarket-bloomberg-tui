@@ -17,6 +17,7 @@ import {
   getOrderScoring,
   getOrderScoringUpdatedAt,
 } from "../hooks/useOrders";
+import { walletState } from "../state";
 import {
   orderHistorySelectedIdx,
   setOrderHistorySelectedIdx,
@@ -297,7 +298,14 @@ export function OrderHistory() {
 
         <Show
           when={openOrders().length > 0}
-          fallback={<text content="No open orders" fg={theme.textMuted} />}
+          fallback={
+            <Show
+              when={walletState.connected}
+              fallback={<text content="⚠ Connect wallet to see orders [W]" fg={theme.warning} />}
+            >
+              <text content="No open orders" fg={theme.textMuted} />
+            </Show>
+          }
         >
           {/* Column headers */}
           <box flexDirection="row" width="100%">
@@ -368,7 +376,14 @@ export function OrderHistory() {
 
         <Show
           when={tradeHistory().length > 0}
-          fallback={<text content="No trades yet" fg={theme.textMuted} />}
+          fallback={
+            <Show
+              when={walletState.connected}
+              fallback={<text content="⚠ Connect wallet to see trades [W]" fg={theme.warning} />}
+            >
+              <text content="No trades yet" fg={theme.textMuted} />
+            </Show>
+          }
         >
           <box flexDirection="row" width="100%">
             <text content="TIME         " fg={theme.textMuted} width={14} />

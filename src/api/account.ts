@@ -2,9 +2,9 @@ import { Position, PortfolioSummary } from "../types/positions";
 import { PlacedOrder } from "../types/orders";
 import { fetchPositions } from "./positions";
 import { fetchTradeHistory, fetchOpenOrders } from "./orders";
-import { 
-  calculateTradeStats, 
-  calculatePortfolioSummary, 
+import {
+  calculateTradeStats,
+  calculatePortfolioSummary,
   calculateAssetAllocation,
   calculateMonthlyStats,
   TradeStats,
@@ -12,6 +12,38 @@ import {
   MonthlyStats
 } from "../utils/analytics";
 import { walletState } from "../state";
+import { homedir } from "os";
+import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+
+const ACCOUNT_CACHE_FILE = join(homedir(), ".polymarket-tui", "account-cache.json");
+
+function ensureAccountCacheDir(): void {
+  const dir = join(homedir(), ".polymarket-tui");
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+}
+
+function loadCachedAccountOverview(): AccountOverview | null {
+  try {
+    ensureAccountCacheDir();
+    if (!existsSync(ACCOUNT_CACHE_FILE)) return null;
+    const content = readFileSync(ACCOUNT_CACHE_FILE, "utf-8");
+    return JSON.parse(content) as AccountOverview;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedAccountOverview(overview: AccountOverview): void {
+  try {
+    ensureAccountCacheDir();
+    writeFileSync(ACCOUNT_CACHE_FILE, JSON.stringify(overview, null, 2));
+  } catch (e) {
+    console.error("Failed to cache account overview:", e);
+  }
+}
 
 export interface AccountOverview {
   portfolioSummary: PortfolioSummary;
@@ -32,8 +64,10 @@ export interface AccountMetrics {
 }
 
 export async function fetchAccountOverview(): Promise<AccountOverview | null> {
+  // Try to return cached data first if wallet not connected
   if (!walletState.connected || !walletState.address) {
-    return null;
+    const cached = loadCachedAccountOverview();
+    return cached;
   }
 
   try {
@@ -49,7 +83,7 @@ export async function fetchAccountOverview(): Promise<AccountOverview | null> {
     const assetAllocation = calculateAssetAllocation(positions);
     const monthlyStats = calculateMonthlyStats(tradeHistory);
 
-    return {
+    const overview: AccountOverview = {
       portfolioSummary,
       tradeStats,
       assetAllocation,
@@ -57,9 +91,16 @@ export async function fetchAccountOverview(): Promise<AccountOverview | null> {
       openOrdersCount: openOrders.length,
       lastUpdated: Date.now(),
     };
+
+    // Cache the result
+    saveCachedAccountOverview(overview);
+
+    return overview;
   } catch (error) {
     console.error("Failed to fetch account overview:", error);
-    return null;
+    // Try to return cached data on error
+    const cached = loadCachedAccountOverview();
+    return cached;
   }
 }
 

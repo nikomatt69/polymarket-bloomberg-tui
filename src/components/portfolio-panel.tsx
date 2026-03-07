@@ -135,7 +135,7 @@ export function PortfolioPanel() {
     setPortfolioTab(t);
   };
 
-  const summary = () => calculatePortfolioSummary(positionsState.positions);
+  const summary = createMemo(() => calculatePortfolioSummary(positionsState.positions));
 
   const accountStats = createMemo(() =>
     calcAccountStats(positionsState.positions)

@@ -4,6 +4,7 @@
  */
 
 const CLOB_API_BASE = "https://clob.polymarket.com";
+const CLOB_BATCH_MARKET_DATA_LIMIT = 500;
 
 function parseNumeric(value: unknown, fallback: number = 0): number {
   if (typeof value === "number") {
@@ -28,6 +29,15 @@ export interface SpreadResponse {
   spread_bps: string;
 }
 
+function chunkArray<T>(values: T[], chunkSize: number): T[][] {
+  const chunks: T[][] = [];
+  const size = Math.max(1, Math.floor(chunkSize));
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
 export async function getSpread(tokenId: string): Promise<SpreadResponse | null> {
   try {
     const response = await fetch(`${CLOB_API_BASE}/spread?token_id=${tokenId}`);
@@ -47,22 +57,50 @@ export async function getSpreads(tokenIds: string[]): Promise<SpreadResponse[]> 
   if (tokenIds.length === 0) return [];
 
   try {
-    const response = await fetch(`${CLOB_API_BASE}/spreads`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ params: tokenIds.map((token_id) => ({ token_id })) }),
-    });
-
-    if (!response.ok) {
-      return [];
-    }
-
-    const data = (await response.json()) as SpreadResponse[];
-    return Array.isArray(data) ? data : [];
+    const spreads = await getSpreadsMap(tokenIds);
+    return Object.entries(spreads).map(([asset_id, spread]) => ({
+      asset_id,
+      bid: "",
+      ask: "",
+      spread: String(spread),
+      spread_bps: "",
+    }));
   } catch {
     return [];
+  }
+}
+
+export async function getSpreadsMap(tokenIds: string[]): Promise<Record<string, number>> {
+  if (tokenIds.length === 0) return {};
+
+  try {
+    const result: Record<string, number> = {};
+
+    for (const batch of chunkArray(tokenIds, CLOB_BATCH_MARKET_DATA_LIMIT)) {
+      const response = await fetch(`${CLOB_API_BASE}/spreads`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(batch.map((token_id) => ({ token_id }))),
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const data = (await response.json()) as Record<string, string>;
+      for (const [tokenId, spread] of Object.entries(data)) {
+        const numericSpread = parseNumeric(spread, Number.NaN);
+        if (Number.isFinite(numericSpread)) {
+          result[tokenId] = numericSpread > 1 ? numericSpread / 100 : numericSpread;
+        }
+      }
+    }
+
+    return result;
+  } catch {
+    return {};
   }
 }
 

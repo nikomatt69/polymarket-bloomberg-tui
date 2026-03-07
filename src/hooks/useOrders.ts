@@ -19,8 +19,48 @@ import { startHeartbeat, stopHeartbeat } from "../api/clob/trading";
 import { Order } from "../types/orders";
 import { OrderStatus } from "../types/orders";
 import { homedir } from "os";
-import { mkdirSync, writeFileSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
+
+// ─── Order History Persistence ─────────────────────────────────────────────────
+
+const ORDERS_CONFIG_DIR = join(homedir(), ".polymarket-tui");
+const ORDERS_FILE = join(ORDERS_CONFIG_DIR, "orders.json");
+
+function ensureOrdersDir(): void {
+  if (!existsSync(ORDERS_CONFIG_DIR)) {
+    mkdirSync(ORDERS_CONFIG_DIR, { recursive: true });
+  }
+}
+
+function loadPersistedOrders(): { openOrders: PlacedOrder[]; tradeHistory: PlacedOrder[] } {
+  try {
+    ensureOrdersDir();
+    if (existsSync(ORDERS_FILE)) {
+      const data = readFileSync(ORDERS_FILE, "utf-8");
+      const parsed = JSON.parse(data);
+      return {
+        openOrders: parsed.openOrders || [],
+        tradeHistory: parsed.tradeHistory || [],
+      };
+    }
+  } catch (e) {
+    console.error("Failed to load persisted orders:", e);
+  }
+  return { openOrders: [], tradeHistory: [] };
+}
+
+function savePersistedOrders(openOrders: PlacedOrder[], tradeHistory: PlacedOrder[]): void {
+  try {
+    ensureOrdersDir();
+    writeFileSync(ORDERS_FILE, JSON.stringify({ openOrders, tradeHistory }, null, 2));
+  } catch (e) {
+    console.error("Failed to save orders:", e);
+  }
+}
+
+// Load persisted orders on startup
+const persistedOrders = loadPersistedOrders();
 
 export type OrderHistoryStatusFilter = "ALL" | OrderStatus;
 export type OrderHistoryWindowFilter = "ALL" | "24H" | "7D" | "30D";
@@ -52,9 +92,10 @@ interface OrdersState {
   scoringLastError: string | null;
 }
 
+// Initialize state with persisted data
 export const [ordersState, setOrdersState] = createStore<OrdersState>({
-  openOrders: [],
-  tradeHistory: [],
+  openOrders: persistedOrders.openOrders,
+  tradeHistory: persistedOrders.tradeHistory,
   placing: false,
   cancelling: null,
   error: null,
@@ -355,6 +396,8 @@ export async function submitOrder(order: Order): Promise<PlacedOrder | null> {
     const result = await placeOrder(order);
     // Optimistically prepend to open orders immediately
     setOrdersState("openOrders", (prev) => [result, ...prev]);
+    // Persist locally
+    savePersistedOrders(ordersState.openOrders, ordersState.tradeHistory);
     // Then fetch authoritative state from exchange (async, non-blocking)
     void refreshOrders();
     return result;
@@ -496,6 +539,9 @@ export async function refreshOrders(): Promise<void> {
     setOrdersState("openOrders", open);
     setOrdersState("tradeHistory", history);
     setOrdersState("lastFetch", new Date());
+
+    // Persist to local storage
+    savePersistedOrders(open, history);
 
     const liveOrderIds = new Set(open.map((order) => order.orderId));
     setOrdersState("cancelReasonsByOrderId", (prev) => {

@@ -8,6 +8,7 @@ import {
   getMarketDetails,
   getPriceHistory,
   getMarketsByCategory,
+  clearMarketCache,
 } from "../api/polymarket";
 import { Timeframe } from "../types/market";
 import {
@@ -25,6 +26,8 @@ import { MarketScanner } from "../automation/scanner";
 import { loadRules, checkAllRules, executeAction } from "../automation/rules";
 import { setAutomationRules, setScannerAlerts } from "../state";
 import { initializeWebSocket, subscribe } from "../api/websocket";
+import { walletState } from "../state";
+import { fetchUserPositions, invalidateAndRefreshPositions } from "./usePositions";
 
 const marketScanner = new MarketScanner();
 const priceMap = new Map<string, number>();
@@ -74,14 +77,13 @@ async function runAutomationCycle(markets: Market[]): Promise<void> {
 }
 
 /**
- * Subscribe to token IDs of all visible markets via CLOB WS
+ * Subscribe to token IDs of selected market only (for order book/details)
  */
-function subscribeToMarketTokens(markets: Market[]): void {
+function subscribeToMarketTokens(market: Market | undefined): void {
+  if (!market) return;
   const tokenIds: string[] = [];
-  for (const m of markets) {
-    for (const o of m.outcomes) {
-      if (o.id && !o.id.startsWith("outcome_")) tokenIds.push(o.id);
-    }
+  for (const o of market.outcomes) {
+    if (o.id && !o.id.startsWith("outcome_")) tokenIds.push(o.id);
   }
   if (tokenIds.length > 0) subscribe(tokenIds);
 }
@@ -108,7 +110,7 @@ export function useMarketsFetch(): void {
         setMarkets(markets);
         evaluateAlerts(markets);
         void runAutomationCycle(markets);
-        subscribeToMarketTokens(markets);
+        subscribeToMarketTokens(getSelectedMarket());
         setError(null);
       } catch (error) {
         if (cancelled) return;
@@ -192,7 +194,12 @@ export function useRefreshInterval(intervalMs: number = 30000): void {
         setMarkets(markets);
         evaluateAlerts(markets);
         void runAutomationCycle(markets);
-        subscribeToMarketTokens(markets);
+        subscribeToMarketTokens(getSelectedMarket());
+
+        // Also refresh positions if wallet is connected
+        if (walletState.connected && walletState.address) {
+          void fetchUserPositions();
+        }
       } catch (error) {
         console.error("Error refreshing markets:", error);
       }
@@ -206,6 +213,8 @@ export function useRefreshInterval(intervalMs: number = 30000): void {
  * Manual refresh trigger
  */
 export async function manualRefresh(): Promise<void> {
+  // Clear cache on manual refresh to force fresh fetch
+  clearMarketCache();
   setLoading(true);
   try {
     const category = selectedCategory();
@@ -216,8 +225,13 @@ export async function manualRefresh(): Promise<void> {
     setMarkets(markets);
     evaluateAlerts(markets);
     void runAutomationCycle(markets);
-    subscribeToMarketTokens(markets);
+    subscribeToMarketTokens(getSelectedMarket());
     setError(null);
+
+    // Also invalidate positions cache and refresh positions
+    if (walletState.connected && walletState.address) {
+      invalidateAndRefreshPositions();
+    }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "Refresh failed";
     setError(errorMsg);

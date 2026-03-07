@@ -48,42 +48,42 @@ export default defineConfig({
   --sl-nav-height: 3.8rem;
   --sl-font: "Space Grotesk";
   --sl-font-mono: "JetBrains Mono";
-  --sl-color-black: hsl(224, 38%, 5%);
-  --sl-color-gray-6: hsl(223, 28%, 9%);
-  --sl-color-gray-5: hsl(221, 21%, 14%);
-  --sl-color-gray-4: hsl(219, 16%, 32%);
-  --sl-color-gray-3: hsl(214, 16%, 60%);
-  --sl-color-gray-2: hsl(208, 22%, 84%);
-  --sl-color-gray-1: hsl(205, 34%, 95%);
-  --sl-color-bg: hsl(224, 38%, 5%);
-  --sl-color-bg-nav: hsla(223, 31%, 8%, 0.92);
-  --sl-color-bg-sidebar: hsl(223, 31%, 7%);
-  --sl-color-bg-inline-code: hsl(221, 23%, 13%);
-  --sl-color-hairline: hsl(219, 20%, 17%);
-  --sl-color-hairline-light: hsl(216, 18%, 24%);
-  --sl-color-accent-low: hsl(213, 86%, 18%);
-  --sl-color-accent: hsl(201, 100%, 61%);
-  --sl-color-accent-high: hsl(194, 100%, 88%);
-  --sl-color-text: hsl(208, 24%, 85%);
-  --sl-color-text-accent: hsl(196, 100%, 82%);
-  --sl-color-text-invert: hsl(224, 38%, 5%);
-  --sl-color-bg-accent: hsl(201, 100%, 61%);
-  --sl-color-backdrop-overlay: hsla(224, 36%, 5%, 0.78);
-  --sl-shadow-sm: 0 1px 2px hsla(205, 100%, 50%, 0.08), 0 2px 12px hsla(205, 100%, 50%, 0.1);
-  --sl-shadow-md: 0 8px 24px hsla(205, 100%, 45%, 0.12);
-  --sl-shadow-lg: 0 14px 46px hsla(205, 100%, 45%, 0.16);
-  --sl-color-orange-low: hsl(213, 78%, 19%);
-  --sl-color-orange: hsl(201, 100%, 62%);
-  --sl-color-orange-high: hsl(193, 100%, 86%);
-  --sl-color-green-low: hsl(198, 78%, 17%);
-  --sl-color-green: hsl(192, 100%, 58%);
-  --sl-color-green-high: hsl(186, 100%, 84%);
-  --sl-color-red-low: hsl(222, 74%, 18%);
-  --sl-color-red: hsl(214, 100%, 68%);
-  --sl-color-red-high: hsl(208, 100%, 88%);
-  --sl-color-blue-low: hsl(214, 82%, 20%);
-  --sl-color-blue: hsl(207, 100%, 59%);
-  --sl-color-blue-high: hsl(200, 100%, 86%);
+  --sl-color-black: hsl(0, 0%, 3%);
+  --sl-color-gray-6: hsl(0, 0%, 5%);
+  --sl-color-gray-5: hsl(0, 0%, 9%);
+  --sl-color-gray-4: hsl(0, 0%, 24%);
+  --sl-color-gray-3: hsl(0, 0%, 52%);
+  --sl-color-gray-2: hsl(0, 0%, 84%);
+  --sl-color-gray-1: hsl(0, 0%, 96%);
+  --sl-color-bg: hsl(0, 0%, 3%);
+  --sl-color-bg-nav: hsla(0, 0%, 4%, 0.94);
+  --sl-color-bg-sidebar: hsl(0, 0%, 4%);
+  --sl-color-bg-inline-code: hsl(0, 0%, 8%);
+  --sl-color-hairline: hsl(0, 0%, 13%);
+  --sl-color-hairline-light: hsl(0, 0%, 20%);
+  --sl-color-accent-low: hsl(197, 100%, 12%);
+  --sl-color-accent: hsl(197, 100%, 56%);
+  --sl-color-accent-high: hsl(194, 100%, 86%);
+  --sl-color-text: hsl(0, 0%, 86%);
+  --sl-color-text-accent: hsl(197, 100%, 74%);
+  --sl-color-text-invert: hsl(0, 0%, 3%);
+  --sl-color-bg-accent: hsl(197, 100%, 56%);
+  --sl-color-backdrop-overlay: hsla(0, 0%, 2%, 0.82);
+  --sl-shadow-sm: 0 1px 2px hsla(197, 100%, 52%, 0.08), 0 2px 12px hsla(197, 100%, 52%, 0.1);
+  --sl-shadow-md: 0 8px 24px hsla(197, 100%, 52%, 0.12);
+  --sl-shadow-lg: 0 14px 46px hsla(197, 100%, 52%, 0.16);
+  --sl-color-orange-low: hsl(197, 100%, 12%);
+  --sl-color-orange: hsl(197, 100%, 56%);
+  --sl-color-orange-high: hsl(194, 100%, 86%);
+  --sl-color-green-low: hsl(197, 100%, 12%);
+  --sl-color-green: hsl(197, 100%, 56%);
+  --sl-color-green-high: hsl(194, 100%, 86%);
+  --sl-color-red-low: hsl(197, 100%, 12%);
+  --sl-color-red: hsl(197, 100%, 56%);
+  --sl-color-red-high: hsl(194, 100%, 86%);
+  --sl-color-blue-low: hsl(197, 100%, 12%);
+  --sl-color-blue: hsl(197, 100%, 56%);
+  --sl-color-blue-high: hsl(194, 100%, 86%);
 }
 
 :root[data-theme='light'] {
@@ -139,8 +139,8 @@ body {
 
 html[data-theme='dark'] body {
   background:
-    radial-gradient(1200px 420px at 18% -20%, hsla(201, 100%, 56%, 0.18), transparent 62%),
-    radial-gradient(800px 320px at 82% -10%, hsla(214, 100%, 60%, 0.14), transparent 64%),
+    radial-gradient(1150px 360px at 14% -18%, hsla(197, 100%, 56%, 0.14), transparent 66%),
+    radial-gradient(720px 260px at 86% -14%, hsla(197, 100%, 56%, 0.08), transparent 68%),
     var(--sl-color-bg);
 }
 
@@ -159,7 +159,7 @@ html[data-theme='light'] body {
 
 .sidebar-pane {
   background:
-    linear-gradient(180deg, color-mix(in hsl, var(--sl-color-accent-low) 24%, transparent), transparent 20%),
+    linear-gradient(180deg, color-mix(in hsl, var(--sl-color-accent-low) 14%, transparent), transparent 24%),
     var(--sl-color-bg-sidebar);
 }
 

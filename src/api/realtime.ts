@@ -79,8 +79,8 @@ export class PolymarketRealtimeClient {
       }
     };
 
-    ws.onerror = () => {
-      // onclose will fire next and handle reconnect
+    ws.onerror = (error) => {
+      console.error("[RTDS] WebSocket error:", error);
     };
 
     ws.onclose = () => {
@@ -160,12 +160,20 @@ export class PolymarketRealtimeClient {
 
 export interface SportResult {
   gameId: string;
+  slug: string;
+  leagueAbbreviation: string;
   homeTeam: string;
   awayTeam: string;
   homeScore: number;
   awayScore: number;
+  score: string;
   period: string;
   status: string;
+  elapsed?: string;
+  live?: boolean;
+  ended?: boolean;
+  finishedTimestamp?: string;
+  turn?: string;
 }
 
 type SportsMessageHandler = (result: SportResult) => void;
@@ -175,15 +183,13 @@ type SportsStatusHandler = (status: RealtimeStatus) => void;
  * Creates an auto-reconnecting Sports WebSocket.
  * URL: wss://sports-api.polymarket.com/ws
  * Heartbeat: server sends "ping", client responds "pong"
- * Subscribe: {type:"market", assets_ids:[...tokenIds]}
- * Messages: event_type="sport_result"
+ * No subscription message is required.
  */
 export function createSportsWebSocket() {
   let ws: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectCount = 0;
   let destroyed = false;
-  let currentTokenIds: string[] = [];
 
   const messageHandlers = new Set<SportsMessageHandler>();
   const statusHandlers = new Set<SportsStatusHandler>();
@@ -192,10 +198,17 @@ export function createSportsWebSocket() {
     statusHandlers.forEach((fn) => fn(status));
   }
 
-  function sendSubscribe(tokenIds: string[]) {
-    if (ws?.readyState === WebSocket.OPEN && tokenIds.length > 0) {
-      ws.send(JSON.stringify({ type: "market", assets_ids: tokenIds }));
+  function parseScore(score: string): { homeScore: number; awayScore: number } {
+    const primarySegment = score.split("|")[0] ?? score;
+    const match = primarySegment.match(/(\d+)\s*-\s*(\d+)/);
+    if (!match) {
+      return { homeScore: 0, awayScore: 0 };
     }
+
+    return {
+      homeScore: Number.parseInt(match[1], 10),
+      awayScore: Number.parseInt(match[2], 10),
+    };
   }
 
   function handleRawMessage(raw: unknown) {
@@ -203,16 +216,30 @@ export function createSportsWebSocket() {
     for (const item of entries) {
       if (!item || typeof item !== "object") continue;
       const r = item as Record<string, unknown>;
-      const eventType = r.event_type as string | undefined;
-      if (eventType === "sport_result") {
+      const eventType = typeof r.event_type === "string" ? r.event_type : undefined;
+      if (eventType === undefined || eventType === "sport_result") {
+        const score = String(r.score ?? "");
+        const parsedScore = parseScore(score);
         const result: SportResult = {
           gameId: String(r.game_id ?? r.gameId ?? ""),
+          slug: String(r.slug ?? ""),
+          leagueAbbreviation: String(r.league_abbreviation ?? r.leagueAbbreviation ?? ""),
           homeTeam: String(r.home_team ?? r.homeTeam ?? ""),
           awayTeam: String(r.away_team ?? r.awayTeam ?? ""),
-          homeScore: Number(r.home_score ?? r.homeScore ?? 0),
-          awayScore: Number(r.away_score ?? r.awayScore ?? 0),
+          homeScore: Number(r.home_score ?? r.homeScore ?? parsedScore.homeScore),
+          awayScore: Number(r.away_score ?? r.awayScore ?? parsedScore.awayScore),
+          score,
           period: String(r.period ?? ""),
           status: String(r.status ?? ""),
+          elapsed: typeof r.elapsed === "string" ? r.elapsed : undefined,
+          live: typeof r.live === "boolean" ? r.live : undefined,
+          ended: typeof r.ended === "boolean" ? r.ended : undefined,
+          finishedTimestamp: typeof r.finished_timestamp === "string"
+            ? r.finished_timestamp
+            : typeof r.finishedTimestamp === "string"
+              ? r.finishedTimestamp
+              : undefined,
+          turn: typeof r.turn === "string" ? r.turn : undefined,
         };
         messageHandlers.forEach((fn) => fn(result));
       }
@@ -221,15 +248,13 @@ export function createSportsWebSocket() {
 
   function connect() {
     if (destroyed) return;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     emitStatus("connecting");
     ws = new WebSocket(SPORTS_WS_URL);
 
     ws.onopen = () => {
       reconnectCount = 0;
       emitStatus("connected");
-      if (currentTokenIds.length > 0) {
-        sendSubscribe(currentTokenIds);
-      }
     };
 
     ws.onmessage = (event) => {
@@ -249,10 +274,13 @@ export function createSportsWebSocket() {
       }
     };
 
-    ws.onerror = () => {};
+    ws.onerror = (error) => {
+      console.error("[Sports WS] WebSocket error:", error);
+    };
 
     ws.onclose = () => {
       if (destroyed) return;
+      ws = null;
       emitStatus("disconnected");
       const delay = Math.min(1_000 * Math.pow(2, reconnectCount), 30_000);
       reconnectCount += 1;
@@ -262,9 +290,8 @@ export function createSportsWebSocket() {
 
   return {
     connect() { connect(); },
-    subscribe(tokenIds: string[]) {
-      currentTokenIds = Array.from(new Set(tokenIds.filter(Boolean)));
-      sendSubscribe(currentTokenIds);
+    subscribe(_tokenIds: string[]) {
+      // No-op: sports socket streams all active games without a subscribe message.
     },
     onMessage(handler: SportsMessageHandler): () => void {
       messageHandlers.add(handler);

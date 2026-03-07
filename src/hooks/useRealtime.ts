@@ -12,7 +12,6 @@ export function useRealtimeData(): void {
   let rtdsClient: PolymarketRealtimeClient | null = null;
   let sportsWs: ReturnType<typeof createSportsWebSocket> | null = null;
   let lastSubscribedSlug = "";
-  let lastSportsTokenIds: string[] = [];
 
   function subscribeToMarketActivity(slug: string): void {
     if (!slug || slug === lastSubscribedSlug) return;
@@ -21,29 +20,22 @@ export function useRealtimeData(): void {
     rtdsClient?.subscribe("activity", "trades", { event_slug: slug });
   }
 
-  function subscribeToSportsMarket(tokenIds: string[]): void {
-    const sorted = [...tokenIds].sort().join(",");
-    const lastSorted = [...lastSportsTokenIds].sort().join(",");
-    if (sorted === lastSorted) return;
-    lastSportsTokenIds = tokenIds;
-
-    if (tokenIds.length > 0) {
-      if (!sportsWs) {
-        sportsWs = createSportsWebSocket();
-        sportsWs.onStatus((status) => setSportsWsConnected(status === "connected"));
-        sportsWs.onMessage((result) => {
-          setSportsScore(result.gameId, {
-            homeTeam: result.homeTeam,
-            awayTeam: result.awayTeam,
-            homeScore: result.homeScore,
-            awayScore: result.awayScore,
-            period: result.period,
-            status: result.status,
-          });
+  function ensureSportsSocket(): void {
+    if (!sportsWs) {
+      sportsWs = createSportsWebSocket();
+      sportsWs.onStatus((status) => setSportsWsConnected(status === "connected"));
+      sportsWs.onMessage((result) => {
+        setSportsScore(result.gameId, {
+          slug: result.slug,
+          homeTeam: result.homeTeam,
+          awayTeam: result.awayTeam,
+          homeScore: result.homeScore,
+          awayScore: result.awayScore,
+          period: result.period,
+          status: result.status,
         });
-        sportsWs.connect();
-      }
-      sportsWs.subscribe(tokenIds);
+      });
+      sportsWs.connect();
     }
   }
 
@@ -96,10 +88,7 @@ export function useRealtimeData(): void {
       (market?.title ?? "").toLowerCase().match(/\b(nba|nfl|nhl|mlb|soccer|football|basketball|cricket|rugby|ufc|tennis|golf)\b/) !== null;
 
     if (isSportsMarket && market) {
-      const tokenIds = market.outcomes
-        .map((o) => o.id)
-        .filter((id) => id && !id.startsWith("outcome_"));
-      subscribeToSportsMarket(tokenIds);
+      ensureSportsSocket();
     }
   });
 

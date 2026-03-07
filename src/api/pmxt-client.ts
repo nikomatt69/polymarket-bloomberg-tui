@@ -10,6 +10,21 @@
 import { Polymarket } from "pmxtjs";
 import type { ExecutionPriceResult, OrderBook, PriceCandle, Trade, UnifiedMarket } from "pmxtjs";
 
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number = DEFAULT_TIMEOUT_MS): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ms);
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      controller.signal.addEventListener("abort", () => {
+        reject(new Error(`Request timed out after ${ms}ms`));
+      });
+    }),
+  ]).finally(() => clearTimeout(timeout));
+}
+
 export interface PmxtOrderBookSummary {
   marketId: string;
   tokenId: string;
@@ -107,7 +122,7 @@ export async function fetchOrderBookViaPmxt(
 ): Promise<PmxtOrderBookSummary | null> {
   try {
     const client = getPolymarketPublicClient(options);
-    const book: OrderBook = await client.fetchOrderBook(tokenId);
+    const book: OrderBook = await withTimeout(client.fetchOrderBook(tokenId));
     return mapOrderBookToSummary(marketId, tokenId, book);
   } catch (err) {
     console.warn("pmxtjs fetchOrderBook failed:", err);
@@ -123,9 +138,9 @@ export async function fetchMarketViaPmxt(
     const client = getPolymarketPublicClient(options);
 
     try {
-      return await client.fetchMarket({ marketId });
+      return await withTimeout(client.fetchMarket({ marketId }));
     } catch {
-      return await client.fetchMarket({ id: marketId });
+      return await withTimeout(client.fetchMarket({ id: marketId }));
     }
   } catch (err) {
     console.warn("pmxtjs fetchMarket failed:", err);
@@ -139,7 +154,7 @@ export async function fetchMarketsViaPmxt(
 ): Promise<UnifiedMarket[]> {
   try {
     const client = getPolymarketPublicClient(options);
-    return await client.fetchMarkets(params);
+    return await withTimeout(client.fetchMarkets(params));
   } catch (err) {
     console.warn("pmxtjs fetchMarkets failed:", err);
     return [];
@@ -154,7 +169,7 @@ export async function fetchCandlesViaPmxt(
 ): Promise<PriceCandle[]> {
   try {
     const client = getPolymarketPublicClient(options);
-    return await client.fetchOHLCV(tokenId, { resolution, limit });
+    return await withTimeout(client.fetchOHLCV(tokenId, { resolution, limit }));
   } catch (err) {
     console.warn("pmxtjs fetchOHLCV failed:", err);
     return [];
@@ -169,7 +184,7 @@ export async function fetchTradesViaPmxt(
 ): Promise<Trade[]> {
   try {
     const client = getPolymarketPublicClient(options);
-    return await client.fetchTrades(tokenId, { resolution, limit });
+    return await withTimeout(client.fetchTrades(tokenId, { resolution, limit }));
   } catch (err) {
     console.warn("pmxtjs fetchTrades failed:", err);
     return [];
@@ -184,7 +199,7 @@ export async function getExecutionPriceViaPmxt(
 ): Promise<ExecutionPriceResult | null> {
   try {
     const client = getPolymarketPublicClient(options);
-    const book = await client.fetchOrderBook(tokenId);
+    const book = await withTimeout(client.fetchOrderBook(tokenId));
     return await client.getExecutionPriceDetailed(book, side === "BUY" ? "buy" : "sell", amount);
   } catch (err) {
     console.warn("pmxtjs getExecutionPrice failed:", err);

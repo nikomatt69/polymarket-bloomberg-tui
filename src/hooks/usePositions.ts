@@ -4,8 +4,42 @@
 
 import { createStore, produce } from "solid-js/store";
 import { Position, PositionAnalytics, SectorAllocation } from "../types/positions";
-import { fetchPositions, calculatePortfolioSummary as calcSummary } from "../api/positions";
+import { fetchPositions, calculatePortfolioSummary as calcSummary, invalidatePositionsCache } from "../api/data/positions";
 import { walletState } from "../state";
+import { homedir } from "os";
+import { join } from "path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+
+const POSITIONS_FILE = join(homedir(), ".polymarket-tui", "positions.json");
+
+function ensurePositionsDir(): void {
+  const dir = join(homedir(), ".polymarket-tui");
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+}
+
+function loadPersistedPositions(): Position[] {
+  try {
+    ensurePositionsDir();
+    if (!existsSync(POSITIONS_FILE)) return [];
+    const content = readFileSync(POSITIONS_FILE, "utf-8");
+    const data = JSON.parse(content);
+    if (Array.isArray(data)) return data as Position[];
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function savePersistedPositions(positions: Position[]): void {
+  try {
+    ensurePositionsDir();
+    writeFileSync(POSITIONS_FILE, JSON.stringify(positions, null, 2));
+  } catch (e) {
+    console.error("Failed to persist positions:", e);
+  }
+}
 
 export type PositionTag = "long" | "short" | "neutral";
 
@@ -18,7 +52,7 @@ interface PositionsState {
 }
 
 export const [positionsState, setPositionsState] = createStore<PositionsState>({
-  positions: [],
+  positions: loadPersistedPositions(),
   positionsAnalytics: {
     totalValue: 0,
     totalCashPnl: 0,
@@ -159,7 +193,10 @@ export async function fetchUserPositions(): Promise<void> {
   try {
     const positions = await fetchPositions(lookupAddress);
     const analytics = calculatePositionsAnalytics(positions);
-    
+
+    // Persist positions to disk
+    savePersistedPositions(positions);
+
     setPositionsState(produce((state) => {
       state.positions = positions;
       state.positionsAnalytics = analytics;
@@ -173,3 +210,8 @@ export async function fetchUserPositions(): Promise<void> {
 }
 
 export const refreshPositions = fetchUserPositions;
+
+export function invalidateAndRefreshPositions(): void {
+  invalidatePositionsCache();
+  void fetchUserPositions();
+}

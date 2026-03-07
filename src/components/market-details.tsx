@@ -270,8 +270,11 @@ export function MarketDetails() {
     const market = selectedMarket();
     if (!market || !isSportsMarket()) return null;
     const scores = sportsScores();
+    if (market.slug && scores[market.slug]) {
+      return scores[market.slug];
+    }
     const key = Object.keys(scores).find(k =>
-      k === market.id || market.outcomes.some(o => o.id === k)
+      k === market.id || market.outcomes.some(o => o.id === k) || scores[k]?.slug === market.slug
     );
     return key ? scores[key] : null;
   });

@@ -1,4 +1,4 @@
-import { createPublicClient, http, formatUnits, getCreate2Address, encodePacked, encodeAbiParameters, keccak256 } from "viem";
+import { createPublicClient, http, formatUnits, getAddress, getCreate2Address, encodePacked, encodeAbiParameters, keccak256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { polygon } from "viem/chains";
 import { createHmac } from "crypto";
@@ -41,6 +41,9 @@ const POLYGON_RPCS  = [
 ];
 const CLOB_AUTH_MESSAGE = "This message attests that I control the given wallet";
 const DEFAULT_TIMEOUT = 15000;
+const SERVER_TIME_CACHE_TTL_MS = 30_000;
+
+let serverTimeCache: { value: number; fetchedAt: number } | null = null;
 
 // Custom error classes for better error handling
 export class WalletError extends Error {
@@ -85,6 +88,7 @@ export interface WalletConfig {
   apiSecret?: string;
   apiPassphrase?: string;
   funderAddress?: string; // Polymarket proxy wallet (maker for CLOB orders)
+  authNonce?: number;
 }
 
 export interface WalletState {
@@ -165,6 +169,43 @@ export function persistApiCredentialsForFunder(funderAddress: string, creds: Api
     [funderSecretKey]: creds.apiSecret,
     [funderPassphraseKey]: creds.apiPassphrase,
   } as unknown as WalletConfig);
+}
+
+function getFunderNonceKey(funderAddress: string): string {
+  return `funderAuthNonce_${funderAddress.toLowerCase()}`;
+}
+
+export function loadAuthNonce(funderAddress?: string): number {
+  const config = loadWalletConfig();
+  if (!config) return 0;
+
+  if (funderAddress) {
+    const rawValue = (config as unknown as Record<string, unknown>)[getFunderNonceKey(funderAddress)];
+    return typeof rawValue === "number" && Number.isInteger(rawValue) && rawValue >= 0 ? rawValue : 0;
+  }
+
+  return typeof config.authNonce === "number" && Number.isInteger(config.authNonce) && config.authNonce >= 0
+    ? config.authNonce
+    : 0;
+}
+
+export function persistAuthNonce(nonce: number, funderAddress?: string): void {
+  const config = loadWalletConfig();
+  if (!config) return;
+
+  const normalizedNonce = Number.isInteger(nonce) && nonce >= 0 ? nonce : 0;
+  if (funderAddress) {
+    saveWalletConfig({
+      ...config,
+      [getFunderNonceKey(funderAddress)]: normalizedNonce,
+    } as unknown as WalletConfig);
+    return;
+  }
+
+  saveWalletConfig({
+    ...config,
+    authNonce: normalizedNonce,
+  });
 }
 
 export function loadApiCredentialsForFunder(funderAddress: string): ApiCredentials | null {
@@ -310,7 +351,7 @@ export async function getClobAuthHeaders(
   timestamp?: number,
 ): Promise<Record<string, string>> {
   const account = privateKeyToAccount(privateKey);
-  const ts = timestamp ?? Math.floor(Date.now() / 1000);
+  const ts = timestamp ?? await getClobServerTimestamp();
 
   const signature = await account.signTypedData({
     domain: {
@@ -364,11 +405,12 @@ export function buildClobL2Signature(
 export async function getClobL2Headers(
   privateKey: `0x${string}`,
   creds: ApiCredentials,
-  args: { method: string; requestPath: string; body?: string },
+  args: { method: string; requestPath: string; body?: string; address?: string },
   timestamp?: number,
 ): Promise<Record<string, string>> {
   const account = privateKeyToAccount(privateKey);
-  const ts = timestamp ?? Math.floor(Date.now() / 1000);
+  const ts = timestamp ?? await getClobServerTimestamp();
+  const address = args.address ? getAddress(args.address) : account.address;
 
   const signature = buildClobL2Signature(
     creds.apiSecret,
@@ -379,12 +421,47 @@ export async function getClobL2Headers(
   );
 
   return {
-    POLY_ADDRESS: account.address,
+    POLY_ADDRESS: address,
     POLY_SIGNATURE: signature,
     POLY_TIMESTAMP: String(ts),
     POLY_API_KEY: creds.apiKey,
     POLY_PASSPHRASE: creds.apiPassphrase,
   };
+}
+
+export async function getClobServerTimestamp(forceRefresh: boolean = false): Promise<number> {
+  const now = Date.now();
+  if (!forceRefresh && serverTimeCache && now - serverTimeCache.fetchedAt < SERVER_TIME_CACHE_TTL_MS) {
+    return serverTimeCache.value;
+  }
+
+  try {
+    const response = await fetchWithTimeout(`${CLOB_API_BASE}/time`, {
+      headers: { Accept: "application/json" },
+    });
+
+    if (!response.ok) {
+      throw new NetworkError(`Failed to fetch CLOB server time: HTTP ${response.status}`, response.status);
+    }
+
+    const payload = await response.json();
+    const value = typeof payload === "number" ? payload : Number.parseInt(String(payload), 10);
+    if (!Number.isFinite(value)) {
+      throw new WalletError("Invalid CLOB server time response");
+    }
+
+    const normalizedValue = Math.floor(value);
+    serverTimeCache = { value: normalizedValue, fetchedAt: now };
+    return normalizedValue;
+  } catch (error) {
+    if (serverTimeCache) {
+      return serverTimeCache.value;
+    }
+    if (error instanceof WalletError || error instanceof NetworkError || error instanceof ConnectionTimeoutError) {
+      throw error;
+    }
+    throw new NetworkError("Failed to synchronize with CLOB server time");
+  }
 }
 
 const ERC20_BALANCE_ABI = [
@@ -466,7 +543,8 @@ export async function fetchOrCreateApiCredentials(privateKey: `0x${string}`): Pr
   if (stored) return stored;
 
   try {
-    const l1Headers = await getClobAuthHeaders(privateKey, 0);
+    const nonce = loadAuthNonce();
+    const l1Headers = await getClobAuthHeaders(privateKey, nonce);
 
     const deriveResponse = await fetchWithTimeout(`${CLOB_API_BASE}/auth/derive-api-key`, {
       method: "GET",
@@ -480,6 +558,7 @@ export async function fetchOrCreateApiCredentials(privateKey: `0x${string}`): Pr
       const derivedPayload = await deriveResponse.json();
       const derived = parseApiCredentials(derivedPayload);
       if (derived) {
+        persistAuthNonce(nonce);
         persistApiCredentials(derived);
         return derived;
       }
@@ -507,6 +586,7 @@ export async function fetchOrCreateApiCredentials(privateKey: `0x${string}`): Pr
       throw new WalletError("Invalid API credentials response from server");
     }
 
+    persistAuthNonce(nonce);
     persistApiCredentials(created);
     return created;
   } catch (err) {

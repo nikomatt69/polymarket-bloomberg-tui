@@ -15,13 +15,16 @@ export {
   getBatchPrices,
   getBatchMidpoints,
   getLastTradePrice,
+  getLastTradeSnapshot,
   getBatchLastTradePrices,
+  getBatchLastTradeSnapshots,
 } from "./prices";
 
 export type {
   OrderBookSummary,
   MarketQuote,
   MarketDepth,
+  LastTradeSnapshot,
 } from "./prices";
 
 // Trading
@@ -41,6 +44,7 @@ export {
 export {
   getSpread,
   getSpreads,
+  getSpreadsMap,
   getFeeRates,
   getTickSize,
   getMultipleOrderBooks,

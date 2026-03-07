@@ -4,6 +4,13 @@
  */
 
 import { PriceHistory, PricePoint, Timeframe } from "../../types/market";
+import {
+  CLOB_BATCH_MARKET_DATA_LIMIT,
+  CLOB_INTERVAL_BY_TIMEFRAME,
+  buildClobMarketPriceBatchRequest,
+  buildClobTokenBatchRequest,
+  chunkArray,
+} from "../queries";
 
 const CLOB_API_BASE = "https://clob.polymarket.com";
 
@@ -63,11 +70,36 @@ interface ClobBookResponse {
   market?: string;
   asset_id?: string;
   timestamp?: string;
+  hash?: string;
   bids?: ClobBookLevel[];
   asks?: ClobBookLevel[];
   min_order_size?: string;
   tick_size?: string;
   neg_risk?: boolean;
+  last_trade_price?: string;
+}
+
+interface ClobSinglePriceResponse {
+  price?: string | number;
+}
+
+interface ClobPriceMapResponse {
+  [tokenId: string]: Record<string, string | number> | undefined;
+}
+
+interface ClobMidpointMapResponse {
+  [tokenId: string]: string | number | undefined;
+}
+
+interface ClobLastTradeResponse {
+  price?: string | number;
+  side?: "BUY" | "SELL" | "";
+}
+
+interface ClobBatchLastTradeResponseItem {
+  token_id: string;
+  price: string | number;
+  side?: "BUY" | "SELL" | "";
 }
 
 export interface OrderBookSummary {
@@ -83,6 +115,14 @@ export interface OrderBookSummary {
   minOrderSize: number | null;
   tickSize: number | null;
   updatedAt: number | null;
+  negRisk: boolean;
+  lastTradePrice: number | null;
+  hash?: string;
+}
+
+export interface LastTradeSnapshot {
+  price: number;
+  side: "BUY" | "SELL" | null;
 }
 
 export interface MarketQuote {
@@ -114,6 +154,65 @@ function parseNumeric(value: unknown, fallback: number = 0): number {
   return fallback;
 }
 
+function normalizeProbability(value: unknown, fallback: number = 0): number {
+  const parsed = parseNumeric(value, fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return parsed > 1 ? parsed / 100 : parsed;
+}
+
+function normalizeSide(value: unknown): "BUY" | "SELL" | null {
+  return value === "BUY" || value === "SELL" ? value : null;
+}
+
+function toTimestampMs(value: string | number | undefined): number | null {
+  if (value === undefined) return null;
+
+  if (typeof value === "string" && /\D/.test(value)) {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const parsed = parseNumeric(value, Number.NaN);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed < 1_000_000_000_000 ? Math.round(parsed * 1000) : Math.round(parsed);
+}
+
+function buildOrderBookSummary(book: ClobBookResponse, fallbackTokenId: string): OrderBookSummary | null {
+  const tokenId = book.asset_id ?? fallbackTokenId;
+  if (!tokenId) return null;
+
+  const bids = Array.isArray(book.bids) ? book.bids : [];
+  const asks = Array.isArray(book.asks) ? book.asks : [];
+  const bestBid = bids.length > 0 ? normalizeProbability(bids[0].price, 0) : null;
+  const bestAsk = asks.length > 0 ? normalizeProbability(asks[0].price, 0) : null;
+  const midpoint =
+    bestBid !== null && bestAsk !== null
+      ? (bestBid + bestAsk) / 2
+      : bestBid !== null
+        ? bestBid
+        : bestAsk;
+  const spread = bestBid !== null && bestAsk !== null ? Math.max(0, bestAsk - bestBid) : null;
+  const spreadBps = midpoint !== null && midpoint > 0 && spread !== null ? (spread / midpoint) * 10_000 : null;
+
+  return {
+    marketId: book.market ?? "",
+    tokenId,
+    bestBid,
+    bestAsk,
+    midpoint,
+    spread,
+    spreadBps,
+    bidDepth: bids.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0),
+    askDepth: asks.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0),
+    minOrderSize: book.min_order_size ? parseNumeric(book.min_order_size, 0) : null,
+    tickSize: book.tick_size ? normalizeProbability(book.tick_size, 0) : null,
+    updatedAt: toTimestampMs(book.timestamp),
+    negRisk: book.neg_risk === true,
+    lastTradePrice: book.last_trade_price ? normalizeProbability(book.last_trade_price, 0) : null,
+    hash: book.hash,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Price History API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -138,19 +237,9 @@ export async function getPriceHistory(
       return null;
     }
 
-    const intervalMap: Record<Timeframe, string> = {
-      "1h": "5m",
-      "4h": "15m",
-      "1d": "1h",
-      "5d": "6h",
-      "1w": "1d",
-      "1M": "1d",
-      "all": "max",
-    };
-
     const priceHistoryParams = new URLSearchParams();
     priceHistoryParams.set("market", tokenId);
-    priceHistoryParams.set("interval", intervalMap[timeframe]);
+    priceHistoryParams.set("interval", CLOB_INTERVAL_BY_TIMEFRAME[timeframe]);
     if (startTs !== undefined) priceHistoryParams.set("startTs", String(startTs));
     if (endTs !== undefined) priceHistoryParams.set("endTs", String(endTs));
 
@@ -171,9 +260,8 @@ export async function getPriceHistory(
     const pricePoints: PricePoint[] = data.history.map((point) => ({
       timestamp: point.t * 1000,
       price: (() => {
-        const raw = parseNumeric(point.p, 0);
-        return raw > 1 ? raw / 100 : raw;
-      })(),
+         return normalizeProbability(point.p, 0);
+       })(),
       outcomeId: tokenId,
     }));
 
@@ -203,39 +291,7 @@ export async function getOrderBookSummary(tokenId: string): Promise<OrderBookSum
     if (!response.ok) return null;
 
     const data = (await response.json()) as ClobBookResponse;
-    const bids = Array.isArray(data.bids) ? data.bids : [];
-    const asks = Array.isArray(data.asks) ? data.asks : [];
-
-    const bestBid = bids.length > 0 ? parseNumeric(bids[0].price, 0) : null;
-    const bestAsk = asks.length > 0 ? parseNumeric(asks[0].price, 0) : null;
-    const midpoint =
-      bestBid !== null && bestAsk !== null
-        ? (bestBid + bestAsk) / 2
-        : bestBid !== null
-          ? bestBid
-          : bestAsk;
-    const spread = bestBid !== null && bestAsk !== null ? Math.max(0, bestAsk - bestBid) : null;
-    const spreadBps =
-      midpoint !== null && midpoint > 0 && spread !== null
-        ? (spread / midpoint) * 10_000
-        : null;
-    const bidDepth = bids.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
-    const askDepth = asks.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
-
-    return {
-      marketId: data.market ?? "",
-      tokenId: data.asset_id ?? tokenId,
-      bestBid,
-      bestAsk,
-      midpoint,
-      spread,
-      spreadBps,
-      bidDepth,
-      askDepth,
-      minOrderSize: data.min_order_size ? parseNumeric(data.min_order_size, 0) : null,
-      tickSize: data.tick_size ? parseNumeric(data.tick_size, 0) : null,
-      updatedAt: data.timestamp ? new Date(data.timestamp).getTime() : null,
-    };
+    return buildOrderBookSummary(data, tokenId);
   } catch {
     return null;
   }
@@ -246,13 +302,10 @@ export async function getOrderBookSummaries(tokenIds: string[]): Promise<Record<
   if (unique.length === 0) return {};
 
   try {
-    // Use batch POST /books endpoint (max 500 tokens per call)
-    const BATCH_SIZE = 500;
     const result: Record<string, OrderBookSummary> = {};
 
-    for (let i = 0; i < unique.length; i += BATCH_SIZE) {
-      const batch = unique.slice(i, i + BATCH_SIZE);
-      const body = JSON.stringify(batch.map((token_id) => ({ token_id })));
+    for (const batch of chunkArray(unique, CLOB_BATCH_MARKET_DATA_LIMIT)) {
+      const body = JSON.stringify(buildClobTokenBatchRequest(batch));
       const response = await fetch(`${CLOB_API_BASE}/books`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -275,39 +328,10 @@ export async function getOrderBookSummaries(tokenIds: string[]): Promise<Record<
 
       for (const bookData of books) {
         const book = bookData as ClobBookResponse;
-        const tokenId = book.asset_id ?? "";
-        if (!tokenId) continue;
-
-        const bids = Array.isArray(book.bids) ? book.bids : [];
-        const asks = Array.isArray(book.asks) ? book.asks : [];
-        const bestBid = bids.length > 0 ? parseNumeric(bids[0].price, 0) : null;
-        const bestAsk = asks.length > 0 ? parseNumeric(asks[0].price, 0) : null;
-        const midpoint =
-          bestBid !== null && bestAsk !== null
-            ? (bestBid + bestAsk) / 2
-            : bestBid !== null ? bestBid : bestAsk;
-        const spread = bestBid !== null && bestAsk !== null ? Math.max(0, bestAsk - bestBid) : null;
-        const spreadBps =
-          midpoint !== null && midpoint > 0 && spread !== null
-            ? (spread / midpoint) * 10_000
-            : null;
-        const bidDepth = bids.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
-        const askDepth = asks.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
-
-        result[tokenId] = {
-          marketId: book.market ?? "",
-          tokenId,
-          bestBid,
-          bestAsk,
-          midpoint,
-          spread,
-          spreadBps,
-          bidDepth,
-          askDepth,
-          minOrderSize: book.min_order_size ? parseNumeric(book.min_order_size, 0) : null,
-          tickSize: book.tick_size ? parseNumeric(book.tick_size, 0) : null,
-          updatedAt: book.timestamp ? new Date(book.timestamp).getTime() : null,
-        };
+        const summary = buildOrderBookSummary(book, book.asset_id ?? "");
+        if (summary) {
+          result[summary.tokenId] = summary;
+        }
       }
     }
 
@@ -325,23 +349,37 @@ export async function getOrderBookSummaries(tokenIds: string[]): Promise<Record<
   }
 }
 
-export async function getBatchPrices(tokenIds: string[]): Promise<Record<string, number>> {
-  if (tokenIds.length === 0) return {};
+export async function getBatchPrices(
+  entriesOrTokenIds: string[] | Array<{ tokenId: string; side: "BUY" | "SELL" }>,
+  defaultSide: "BUY" | "SELL" = "BUY",
+): Promise<Record<string, number>> {
+  if (entriesOrTokenIds.length === 0) return {};
   try {
-    const body = JSON.stringify(tokenIds.map((token_id) => ({ token_id })));
-    const response = await fetch(`${CLOB_API_BASE}/prices`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
-    if (!response.ok) return {};
-    const data = (await response.json()) as Array<{ token_id: string; price: string }>;
-    if (!Array.isArray(data)) return {};
     const result: Record<string, number> = {};
-    for (const item of data) {
-      const price = parseNumeric(item.price, 0);
-      result[item.token_id] = price > 1 ? price / 100 : price;
+
+    const entries = typeof entriesOrTokenIds[0] === "string"
+      ? (entriesOrTokenIds as string[]).map((tokenId) => ({ tokenId, side: defaultSide }))
+      : (entriesOrTokenIds as Array<{ tokenId: string; side: "BUY" | "SELL" }>).filter((entry) => entry.tokenId.trim().length > 0);
+
+    for (const batch of chunkArray(entries, CLOB_BATCH_MARKET_DATA_LIMIT)) {
+      const body = JSON.stringify(buildClobMarketPriceBatchRequest(batch));
+      const response = await fetch(`${CLOB_API_BASE}/prices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      if (!response.ok) continue;
+
+      const data = (await response.json()) as ClobPriceMapResponse;
+      for (const entry of batch) {
+        const tokenPrices = data[entry.tokenId];
+        if (!tokenPrices || typeof tokenPrices !== "object") continue;
+        const rawPrice = tokenPrices[entry.side] ?? tokenPrices[defaultSide];
+        if (rawPrice === undefined) continue;
+        result[entry.tokenId] = normalizeProbability(rawPrice, 0);
+      }
     }
+
     return result;
   } catch {
     return {};
@@ -351,55 +389,87 @@ export async function getBatchPrices(tokenIds: string[]): Promise<Record<string,
 export async function getBatchMidpoints(tokenIds: string[]): Promise<Record<string, number>> {
   if (tokenIds.length === 0) return {};
   try {
-    const body = JSON.stringify(tokenIds.map((token_id) => ({ token_id })));
-    const response = await fetch(`${CLOB_API_BASE}/midpoints`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
-    if (!response.ok) return {};
-    const data = (await response.json()) as Array<{ token_id: string; mid: string }>;
-    if (!Array.isArray(data)) return {};
     const result: Record<string, number> = {};
-    for (const item of data) {
-      const mid = parseNumeric(item.mid, 0);
-      result[item.token_id] = mid > 1 ? mid / 100 : mid;
+
+    for (const batch of chunkArray(tokenIds, CLOB_BATCH_MARKET_DATA_LIMIT)) {
+      const response = await fetch(`${CLOB_API_BASE}/midpoints`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildClobTokenBatchRequest(batch)),
+      });
+      if (!response.ok) continue;
+
+      const data = (await response.json()) as ClobMidpointMapResponse;
+      for (const tokenId of batch) {
+        const rawMidpoint = data[tokenId];
+        if (rawMidpoint === undefined) continue;
+        result[tokenId] = normalizeProbability(rawMidpoint, 0);
+      }
     }
+
     return result;
   } catch {
     return {};
   }
 }
 
-export async function getLastTradePrice(tokenId: string): Promise<number | null> {
+export async function getLastTradeSnapshot(tokenId: string): Promise<LastTradeSnapshot | null> {
   try {
     const response = await fetch(`${CLOB_API_BASE}/last-trade-price?token_id=${tokenId}`);
     if (!response.ok) return null;
-    const data = (await response.json()) as { price?: number | string } | null;
-    if (!data?.price) return null;
-    const price = parseNumeric(data.price, 0);
-    return price > 1 ? price / 100 : price;
+
+    const data = (await response.json()) as ClobLastTradeResponse | null;
+    return {
+      price: normalizeProbability(data?.price, 0.5),
+      side: normalizeSide(data?.side),
+    };
   } catch {
     return null;
   }
 }
 
-export async function getBatchLastTradePrices(tokenIds: string[]): Promise<Record<string, number>> {
+export async function getLastTradePrice(tokenId: string): Promise<number | null> {
+  const snapshot = await getLastTradeSnapshot(tokenId);
+  return snapshot?.price ?? null;
+}
+
+export async function getBatchLastTradeSnapshots(tokenIds: string[]): Promise<Record<string, LastTradeSnapshot>> {
   if (tokenIds.length === 0) return {};
+
   try {
-    const body = JSON.stringify(tokenIds.map((token_id) => ({ token_id })));
-    const response = await fetch(`${CLOB_API_BASE}/last-trade-prices`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
-    if (!response.ok) return {};
-    const data = (await response.json()) as Array<{ token_id: string; price: string }>;
-    if (!Array.isArray(data)) return {};
+    const result: Record<string, LastTradeSnapshot> = {};
+
+    for (const batch of chunkArray(tokenIds, CLOB_BATCH_MARKET_DATA_LIMIT)) {
+      const response = await fetch(`${CLOB_API_BASE}/last-trades-prices`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildClobTokenBatchRequest(batch)),
+      });
+      if (!response.ok) continue;
+
+      const data = (await response.json()) as ClobBatchLastTradeResponseItem[];
+      if (!Array.isArray(data)) continue;
+
+      for (const item of data) {
+        result[item.token_id] = {
+          price: normalizeProbability(item.price, 0.5),
+          side: normalizeSide(item.side),
+        };
+      }
+    }
+
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+export async function getBatchLastTradePrices(tokenIds: string[]): Promise<Record<string, number>> {
+  try {
+    const snapshots = await getBatchLastTradeSnapshots(tokenIds);
     const result: Record<string, number> = {};
-    for (const item of data) {
-      const price = parseNumeric(item.price, 0);
-      result[item.token_id] = price > 1 ? price / 100 : price;
+    for (const [tokenId, snapshot] of Object.entries(snapshots)) {
+      result[tokenId] = snapshot.price;
     }
     return result;
   } catch {
@@ -484,16 +554,15 @@ export async function getMarketDepth(tokenId: string, levels: number = 10): Prom
 // Current Price API
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function getCurrentPrice(tokenId: string): Promise<number | null> {
+export async function getCurrentPrice(tokenId: string, side: "BUY" | "SELL" = "BUY"): Promise<number | null> {
   try {
-    const response = await fetch(`${CLOB_API_BASE}/price?token_id=${tokenId}`);
+    const response = await fetch(`${CLOB_API_BASE}/price?token_id=${tokenId}&side=${side}`);
     if (!response.ok) return null;
 
-    const data = (await response.json()) as { price?: number | string } | null;
+    const data = (await response.json()) as ClobSinglePriceResponse | null;
     if (!data?.price) return null;
 
-    const price = parseNumeric(data.price, 0);
-    return price > 1 ? price / 100 : price;
+    return normalizeProbability(data.price, 0);
   } catch {
     return null;
   }
@@ -507,8 +576,7 @@ export async function getMidpointPrice(tokenId: string): Promise<number | null> 
     const data = (await response.json()) as { midpoint?: number | string } | null;
     if (!data?.midpoint) return null;
 
-    const price = parseNumeric(data.midpoint, 0);
-    return price > 1 ? price / 100 : price;
+    return normalizeProbability(data.midpoint, 0);
   } catch {
     return null;
   }

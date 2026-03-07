@@ -5,6 +5,46 @@
 
 const BRIDGE_API_BASE = "https://bridge-api.polymarket.com";
 
+// Cache for static bridge data
+const CACHE_TTL_MS = 300_000; // 5 minutes
+
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+const bridgeAssetsCache: CacheEntry<BridgeAsset[]> | null = null;
+const bridgeStatusCache: CacheEntry<BridgeStatusResponse> | null = null;
+
+function getCachedData<T>(entry: CacheEntry<T> | null): T | null {
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
+  return entry.data;
+}
+
+let _bridgeAssetsCache: CacheEntry<BridgeAsset[]> | null = null;
+let _bridgeStatusCache: CacheEntry<BridgeStatusResponse> | null = null;
+
+function getBridgeAssetsCached(): BridgeAsset[] | null {
+  if (!_bridgeAssetsCache) return null;
+  if (Date.now() - _bridgeAssetsCache.timestamp > CACHE_TTL_MS) return null;
+  return _bridgeAssetsCache.data;
+}
+
+function setBridgeAssetsCached(data: BridgeAsset[]): void {
+  _bridgeAssetsCache = { data, timestamp: Date.now() };
+}
+
+function getBridgeStatusCached(): BridgeStatusResponse | null {
+  if (!_bridgeStatusCache) return null;
+  if (Date.now() - _bridgeStatusCache.timestamp > CACHE_TTL_MS) return null;
+  return _bridgeStatusCache.data;
+}
+
+function setBridgeStatusCached(data: BridgeStatusResponse): void {
+  _bridgeStatusCache = { data, timestamp: Date.now() };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Deposit Addresses API
 // ─────────────────────────────────────────────────────────────────────────────
@@ -169,6 +209,10 @@ export interface BridgeAsset {
 }
 
 export async function getBridgeAssets(): Promise<BridgeAsset[]> {
+  // Check cache first
+  const cached = getBridgeAssetsCached();
+  if (cached) return cached;
+
   try {
     const response = await fetch(`${BRIDGE_API_BASE}/bridge/assets`);
 
@@ -181,7 +225,9 @@ export async function getBridgeAssets(): Promise<BridgeAsset[]> {
       return [];
     }
 
-    return data as BridgeAsset[];
+    const assets = data as BridgeAsset[];
+    setBridgeAssetsCached(assets);
+    return assets;
   } catch (error) {
     console.error("Failed to get bridge assets:", error);
     return [];
@@ -205,6 +251,10 @@ export interface BridgeStatusResponse {
 }
 
 export async function getBridgeStatus(): Promise<BridgeStatusResponse | null> {
+  // Check cache first
+  const cached = getBridgeStatusCached();
+  if (cached) return cached;
+
   try {
     const response = await fetch(`${BRIDGE_API_BASE}/bridge/status`);
 
@@ -213,6 +263,7 @@ export async function getBridgeStatus(): Promise<BridgeStatusResponse | null> {
     }
 
     const data = (await response.json()) as BridgeStatusResponse;
+    setBridgeStatusCached(data);
     return data;
   } catch (error) {
     console.error("Failed to get bridge status:", error);

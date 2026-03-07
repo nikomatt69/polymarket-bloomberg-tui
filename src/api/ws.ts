@@ -56,6 +56,10 @@ export interface WsBestBidAsk {
 export interface WsNewMarket {
   type: "new_market";
   conditionId: string;
+  marketId: string;
+  slug?: string;
+  question?: string;
+  assetIds?: string[];
   timestamp: string;
 }
 
@@ -63,6 +67,8 @@ export interface WsMarketResolved {
   type: "market_resolved";
   conditionId: string;
   resolution: string;
+  winningAssetId?: string;
+  marketId: string;
   timestamp: string;
 }
 
@@ -100,8 +106,8 @@ type UserMessageHandler = (msg: WsUserMessage) => void;
 type StatusHandler = (status: WsStatus) => void;
 
 const CLOB_WS_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market";
-const MAX_RECONNECT_DELAY_MS = 50_000;
-const HEARTBEAT_INTERVAL_MS = 40_000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
+const HEARTBEAT_INTERVAL_MS = 10_000;
 
 /**
  * Creates an auto-reconnecting WebSocket manager for CLOB market data.
@@ -221,8 +227,8 @@ export function createClobWebSocket() {
         const msg: WsTickSizeChange = {
           type: "tick_size_change",
           assetId: String((item as Record<string, unknown>).asset_id ?? ""),
-          newSize: parseNumber((item as Record<string, unknown>).new_size),
-          oldSize: parseNumber((item as Record<string, unknown>).old_size),
+          newSize: parseNumber((item as Record<string, unknown>).new_tick_size),
+          oldSize: parseNumber((item as Record<string, unknown>).old_tick_size),
           timestamp: String((item as Record<string, unknown>).timestamp ?? ""),
         };
         messageHandlers.forEach((fn) => fn(msg));
@@ -230,23 +236,37 @@ export function createClobWebSocket() {
         const msg: WsBestBidAsk = {
           type: "best_bid_ask",
           assetId: String((item as Record<string, unknown>).asset_id ?? ""),
-          bid: parseNumber((item as Record<string, unknown>).bid),
-          ask: parseNumber((item as Record<string, unknown>).ask),
+          bid: parseNumber((item as Record<string, unknown>).best_bid),
+          ask: parseNumber((item as Record<string, unknown>).best_ask),
           timestamp: String((item as Record<string, unknown>).timestamp ?? ""),
         };
         messageHandlers.forEach((fn) => fn(msg));
       } else if (eventType === "new_market") {
         const msg: WsNewMarket = {
           type: "new_market",
-          conditionId: String((item as Record<string, unknown>).condition_id ?? ""),
+          conditionId: String((item as Record<string, unknown>).market ?? ""),
+          marketId: String((item as Record<string, unknown>).id ?? ""),
+          slug: typeof (item as Record<string, unknown>).slug === "string"
+            ? (item as Record<string, unknown>).slug as string
+            : undefined,
+          question: typeof (item as Record<string, unknown>).question === "string"
+            ? (item as Record<string, unknown>).question as string
+            : undefined,
+          assetIds: Array.isArray((item as Record<string, unknown>).assets_ids)
+            ? ((item as Record<string, unknown>).assets_ids as unknown[]).map(String)
+            : undefined,
           timestamp: String((item as Record<string, unknown>).timestamp ?? ""),
         };
         messageHandlers.forEach((fn) => fn(msg));
       } else if (eventType === "market_resolved") {
         const msg: WsMarketResolved = {
           type: "market_resolved",
-          conditionId: String((item as Record<string, unknown>).condition_id ?? ""),
-          resolution: String((item as Record<string, unknown>).resolution ?? ""),
+          conditionId: String((item as Record<string, unknown>).market ?? ""),
+          marketId: String((item as Record<string, unknown>).id ?? ""),
+          resolution: String((item as Record<string, unknown>).winning_outcome ?? ""),
+          winningAssetId: typeof (item as Record<string, unknown>).winning_asset_id === "string"
+            ? (item as Record<string, unknown>).winning_asset_id as string
+            : undefined,
           timestamp: String((item as Record<string, unknown>).timestamp ?? ""),
         };
         messageHandlers.forEach((fn) => fn(msg));
@@ -278,8 +298,21 @@ export function createClobWebSocket() {
     }
   }
 
+  function sendDynamicUnsubscribe(assetIds: string[]) {
+    if (ws?.readyState === WebSocket.OPEN && assetIds.length > 0) {
+      ws.send(
+        JSON.stringify({
+          operation: "unsubscribe",
+          assets_ids: assetIds,
+          custom_feature_enabled: true,
+        })
+      );
+    }
+  }
+
   function connect() {
     if (destroyed) return;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
     emitStatus("connecting");
     ws = new WebSocket(CLOB_WS_URL);
@@ -314,6 +347,7 @@ export function createClobWebSocket() {
     };
 
     ws.onclose = () => {
+      ws = null;
       stopHeartbeat();
       if (destroyed) return;
       emitStatus("disconnected");
@@ -339,10 +373,25 @@ export function createClobWebSocket() {
       if (newIds.length > 0) sendDynamicSubscribe(newIds);
     },
 
+    unsubscribe(assetIds: string[]) {
+      const removals = Array.from(new Set(assetIds.filter((id) => currentAssetIds.includes(id))));
+      if (removals.length === 0) return;
+      currentAssetIds = currentAssetIds.filter((id) => !removals.includes(id));
+      sendDynamicUnsubscribe(removals);
+    },
+
     /** Replace the full subscription set (use when switching market context). */
     setSubscription(assetIds: string[]) {
-      currentAssetIds = Array.from(new Set(assetIds.filter(Boolean)));
-      if (ws?.readyState === WebSocket.OPEN && currentAssetIds.length > 0) {
+      const nextAssetIds = Array.from(new Set(assetIds.filter(Boolean)));
+      const removed = currentAssetIds.filter((id) => !nextAssetIds.includes(id));
+      const added = nextAssetIds.filter((id) => !currentAssetIds.includes(id));
+      currentAssetIds = nextAssetIds;
+      if (removed.length > 0) {
+        sendDynamicUnsubscribe(removed);
+      }
+      if (added.length > 0) {
+        sendDynamicSubscribe(added);
+      } else if (ws?.readyState === WebSocket.OPEN && currentAssetIds.length > 0) {
         sendInitialSubscribe(currentAssetIds);
       }
     },
@@ -424,19 +473,32 @@ export function createUserWebSocket(creds: UserWsCredentials, conditionIds: stri
     }, HEARTBEAT_INTERVAL_MS);
   }
 
-  function sendSubscribe() {
+  function sendInitialSubscribe() {
     if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(
-        JSON.stringify({
-          auth: {
-            apiKey: creds.apiKey,
-            secret: creds.secret,
-            passphrase: creds.passphrase,
-          },
-          markets: currentConditionIds,
-          type: "user",
-        })
-      );
+      const payload: {
+        auth: UserWsCredentials;
+        type: "user";
+        markets?: string[];
+      } = {
+        auth: {
+          apiKey: creds.apiKey,
+          secret: creds.secret,
+          passphrase: creds.passphrase,
+        },
+        type: "user",
+      };
+
+      if (currentConditionIds.length > 0) {
+        payload.markets = currentConditionIds;
+      }
+
+      ws.send(JSON.stringify(payload));
+    }
+  }
+
+  function sendSubscriptionUpdate(operation: "subscribe" | "unsubscribe", markets: string[]) {
+    if (ws?.readyState === WebSocket.OPEN && markets.length > 0) {
+      ws.send(JSON.stringify({ operation, markets }));
     }
   }
 
@@ -481,6 +543,7 @@ export function createUserWebSocket(creds: UserWsCredentials, conditionIds: stri
 
   function connect() {
     if (destroyed) return;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
     emitStatus("connecting");
     ws = new WebSocket(USER_WS_URL);
 
@@ -488,7 +551,7 @@ export function createUserWebSocket(creds: UserWsCredentials, conditionIds: stri
       reconnectCount = 0;
       emitStatus("connected");
       startHeartbeat();
-      sendSubscribe();
+      sendInitialSubscribe();
     };
 
     ws.onmessage = (event) => {
@@ -506,6 +569,7 @@ export function createUserWebSocket(creds: UserWsCredentials, conditionIds: stri
     ws.onerror = () => { };
 
     ws.onclose = () => {
+      ws = null;
       stopHeartbeat();
       if (destroyed) return;
       emitStatus("disconnected");
@@ -518,8 +582,15 @@ export function createUserWebSocket(creds: UserWsCredentials, conditionIds: stri
   return {
     connect() { connect(); },
     updateConditionIds(ids: string[]) {
-      currentConditionIds = Array.from(new Set(ids.filter(Boolean)));
-      sendSubscribe();
+      const nextIds = Array.from(new Set(ids.filter(Boolean)));
+      const removed = currentConditionIds.filter((id) => !nextIds.includes(id));
+      const added = nextIds.filter((id) => !currentConditionIds.includes(id));
+      currentConditionIds = nextIds;
+
+      if (ws?.readyState === WebSocket.OPEN) {
+        if (removed.length > 0) sendSubscriptionUpdate("unsubscribe", removed);
+        if (added.length > 0) sendSubscriptionUpdate("subscribe", added);
+      }
     },
     onMessage(handler: UserMessageHandler): () => void {
       messageHandlers.add(handler);

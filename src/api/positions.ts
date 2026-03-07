@@ -10,4 +10,5 @@ export {
   getPositionByAsset,
   getActivePositions,
   getRedeemablePositions,
+  invalidatePositionsCache,
 } from "./data/positions";

@@ -3,6 +3,8 @@
  * Base: https://data-api.polymarket.com
  */
 
+import { buildQueryString, buildDataApiPositionsQuery, buildDataApiValueQuery } from "../queries";
+
 const DATA_API_BASE = "https://data-api.polymarket.com";
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_PAGE_LIMIT = 500;
@@ -96,13 +98,13 @@ export async function fetchClosedPositions(
 
     for (let page = 0; page < Math.max(1, maxPages) && rows.length < requestedTotal; page += 1) {
       const requestLimit = Math.min(pageLimit, requestedTotal - rows.length);
-      const params = new URLSearchParams({
+      const query = buildDataApiPositionsQuery({
         user: address,
-        limit: String(requestLimit),
-        offset: String(pageOffset),
+        limit: requestLimit,
+        offset: pageOffset,
       });
 
-      const payload = await fetchJson<unknown>(`/positions/closed?${params.toString()}`);
+      const payload = await fetchJson<unknown>(`/positions/closed?${query}`);
       const pageRows = extractArrayRows<ClosedPosition>(payload);
       if (pageRows.length === 0) break;
 
@@ -153,8 +155,8 @@ export interface PositionValuesResponse {
 
 export async function fetchPositionValues(address: string): Promise<PositionValuesResponse | null> {
   try {
-    const params = new URLSearchParams({ user: address });
-    const response = await fetch(`${DATA_API_BASE}/positions/value?${params.toString()}`);
+    const query = buildDataApiValueQuery({ user: address });
+    const response = await fetch(`${DATA_API_BASE}/positions/value?${query}`);
 
     if (!response.ok) {
       return null;
