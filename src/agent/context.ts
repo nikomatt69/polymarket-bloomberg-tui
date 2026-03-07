@@ -5,6 +5,7 @@
 import {
   appState,
   walletState,
+  getTradingBalance,
   highlightedIndex,
   portfolioOpen,
   orderFormOpen,
@@ -16,10 +17,15 @@ import {
   comparisonPanelOpen,
   accountStatsOpen,
   getSelectedMarket,
+  orderFormTokenId,
+  assistantMode,
+  assistantGuardReason,
+  userWsConnected,
 } from "../state";
 import { positionsState } from "../hooks/usePositions";
 import { watchlistState } from "../hooks/useWatchlist";
 import { alertsState } from "../hooks/useAlerts";
+import { ordersState } from "../hooks/useOrders";
 import type { TUIContext, AgentContext } from "./tool";
 
 /**
@@ -27,7 +33,23 @@ import type { TUIContext, AgentContext } from "./tool";
  */
 export function getTUIContext(): TUIContext {
   const selectedMarket = getSelectedMarket() ?? null;
-  const selectedOutcome = selectedMarket?.outcomes[0] ?? null;
+  const selectedTokenId = orderFormTokenId() || selectedMarket?.outcomes[0]?.id || null;
+  const selectedOutcome = selectedMarket?.outcomes.find((outcome) => outcome.id === selectedTokenId) ?? selectedMarket?.outcomes[0] ?? null;
+  const openOrdersCount = ordersState.openOrders.length;
+  const openLiveOrdersCount = ordersState.openOrders.filter((order) => (
+    order.status === "LIVE" || order.status === "UNMATCHED" || order.status === "DELAYED"
+  )).length;
+
+  let selectedMarketStatus: TUIContext["selectedMarketStatus"] = "pending";
+  if (selectedMarket) {
+    if (selectedMarket.resolved) {
+      selectedMarketStatus = "resolved";
+    } else if (selectedMarket.closed) {
+      selectedMarketStatus = "closed";
+    } else if (selectedMarket.outcomes.length > 0) {
+      selectedMarketStatus = "open";
+    }
+  }
 
   // Determine current panel
   let currentPanel: string | null = null;
@@ -56,6 +78,8 @@ export function getTUIContext(): TUIContext {
     selectedMarket,
     selectedMarketId: appState.selectedMarketId,
     selectedOutcome,
+    selectedTokenId,
+    selectedMarketStatus,
 
     // UI State
     currentView: portfolioOpen() ? "portfolio" : "market",
@@ -65,19 +89,27 @@ export function getTUIContext(): TUIContext {
     // Wallet
     walletConnected: walletState.connected,
     walletAddress: walletState.address,
-    balance: walletState.balance,
+    funderAddress: walletState.funderAddress ?? null,
+    balance: getTradingBalance(),
+    funderBalance: walletState.funderBalance,
 
     // Data counts
     marketsCount: appState.markets.length,
     positionsCount: positionsState.positions.length,
-    openOrdersCount: 0, // Will be populated if needed
+    openOrdersCount,
+    openLiveOrdersCount,
     watchlistCount: watchlistState.marketIds.length,
     alertsCount: alertsState.alerts.length,
+    lastOrderSyncAt: ordersState.lastFetch ? ordersState.lastFetch.getTime() : null,
+    lastPositionsSyncAt: positionsState.lastFetch ? positionsState.lastFetch.getTime() : null,
+    userWsConnected: userWsConnected(),
 
     // Filters & Settings
     sortBy: appState.sortBy,
     timeframe: appState.timeframe,
     watchlistFilterActive: watchlistState.filterActive,
+    assistantMode: assistantMode(),
+    assistantGuardReason: assistantGuardReason(),
 
     // Panels
     panels,
@@ -96,6 +128,14 @@ export function formatTUIContextForPrompt(ctx: TUIContext): string {
   lines.push(`- Wallet: ${ctx.walletConnected ? `Connected (${ctx.walletAddress?.slice(0, 6)}...${ctx.walletAddress?.slice(-4)})` : "Not connected"}`);
   if (ctx.walletConnected) {
     lines.push(`- Balance: $${ctx.balance.toFixed(2)}`);
+    if (ctx.funderAddress) {
+      lines.push(`- Funder: ${ctx.funderAddress.slice(0, 6)}...${ctx.funderAddress.slice(-4)} ($${ctx.funderBalance.toFixed(2)})`);
+    }
+  }
+
+  lines.push(`- Assistant Mode: ${ctx.assistantMode}`);
+  if (ctx.assistantGuardReason) {
+    lines.push(`- Assistant Guard: ${ctx.assistantGuardReason}`);
   }
 
   // Market context
@@ -104,6 +144,7 @@ export function formatTUIContextForPrompt(ctx: TUIContext): string {
     if (ctx.selectedOutcome) {
       lines.push(`  - Outcome: ${ctx.selectedOutcome.title} @ ${ctx.selectedOutcome.price.toFixed(2)}`);
     }
+    lines.push(`  - Market Status: ${ctx.selectedMarketStatus}`);
     lines.push(`  - Volume 24h: $${ctx.selectedMarket.volume24h.toLocaleString()}`);
     lines.push(`  - Liquidity: $${ctx.selectedMarket.liquidity.toLocaleString()}`);
   } else {
@@ -113,8 +154,16 @@ export function formatTUIContextForPrompt(ctx: TUIContext): string {
   // Data counts
   lines.push(`- Markets: ${ctx.marketsCount}`);
   lines.push(`- Positions: ${ctx.positionsCount}`);
+  lines.push(`- Open Orders: ${ctx.openOrdersCount} (${ctx.openLiveOrdersCount} live)`);
   lines.push(`- Watchlist: ${ctx.watchlistCount}`);
   lines.push(`- Alerts: ${ctx.alertsCount}`);
+  lines.push(`- User WS: ${ctx.userWsConnected ? "connected" : "disconnected"}`);
+  if (ctx.lastOrderSyncAt) {
+    lines.push(`- Orders Synced: ${new Date(ctx.lastOrderSyncAt).toISOString()}`);
+  }
+  if (ctx.lastPositionsSyncAt) {
+    lines.push(`- Positions Synced: ${new Date(ctx.lastPositionsSyncAt).toISOString()}`);
+  }
 
   // View settings
   lines.push(`- Sort: ${ctx.sortBy}`);

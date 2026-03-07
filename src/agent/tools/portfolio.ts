@@ -1,174 +1,103 @@
 /**
- * Portfolio Tool - User positions, balance, and portfolio management
+ * Portfolio tools - balances, positions, open orders, and trade history.
  */
 
 import { z } from "zod";
-import { walletState } from "../../state";
-import { positionsState, fetchUserPositions } from "../../hooks/usePositions";
+import { getTradingBalance, walletState } from "../../state";
+import { ordersState } from "../../hooks/useOrders";
+import { fetchUserPositions, positionsState } from "../../hooks/usePositions";
 import { fetchOpenOrders, fetchTradeHistory } from "../../api/orders";
 import type { ToolDefinition, ToolResult } from "../tool";
 import type { AgentContext } from "../tool";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Schemas
-// ─────────────────────────────────────────────────────────────────────────────
-
 export const GetPortfolioSchema = z.object({});
 export const GetBalanceSchema = z.object({});
 export const GetPositionsDetailsSchema = z.object({});
-export const GetTradeHistorySchema = z.object({});
+export const GetTradeHistorySchema = z.object({
+  limit: z.number().int().min(1).max(100).optional().default(25).describe("Maximum trades to return"),
+});
 export const GetOpenOrdersSchema = z.object({});
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Prompts
-// ─────────────────────────────────────────────────────────────────────────────
+function getReservedBuyCollateral(): number {
+  return ordersState.openOrders.reduce((total, order) => {
+    if (order.side !== "BUY") return total;
+    if (!(order.status === "LIVE" || order.status === "UNMATCHED" || order.status === "DELAYED")) return total;
+    return total + order.price * Math.max(order.sizeRemaining, 0);
+  }, 0);
+}
 
-export const PROMPTS = {
-  get_portfolio: {
-    description: "Get the user's current positions and portfolio summary",
-    instructions: `Use this when:
-- User asks to see their portfolio
-- User wants to check their current positions
-- Opening the portfolio panel
-
-Requires wallet connection.`,
-    example: `get_portfolio({})`,
-  },
-
-  get_balance: {
-    description: "Get the user's USDC wallet balance",
-    instructions: `Use this when:
-- User asks for their balance
-- Before placing an order to check available funds
-- User wants to know their trading power
-
-Requires wallet connection.`,
-    example: `get_balance({})`,
-  },
-
-  get_positions_details: {
-    description: "Get detailed positions with PnL calculations",
-    instructions: `Use this when:
-- User wants detailed position info
-- Checking profit/loss on current positions
-- Analyzing trading performance
-
-Shows: size, avg price, current price, PnL, PnL %.`,
-    example: `get_positions_details({})`,
-  },
-
-  get_trade_history: {
-    description: "Get the user's trade history (filled/executed trades)",
-    instructions: `Use this when:
-- User asks for their trade history
-- Reviewing past trades
-- Analyzing trading patterns
-
-Requires wallet connection.`,
-    example: `get_trade_history({})`,
-  },
-
-  get_open_orders: {
-    description: "Get all currently open orders (not yet filled or cancelled)",
-    instructions: `Use this when:
-- User asks to see open orders
-- Before placing new orders to avoid overtrading
-- Checking pending orders
-
-Requires wallet connection.`,
-    example: `get_open_orders({})`,
-  },
-} as const;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper Functions
-// ─────────────────────────────────────────────────────────────────────────────
-
-function getPositionsDetails(): {
-  positions: Array<{
-    tokenId: string;
-    outcomeTitle: string;
-    marketTitle: string;
-    size: number;
-    avgPrice: number;
-    currentPrice: number;
-    pnl: number;
-    pnlPercent: number;
-  }>;
-  totalPnL: number;
-} {
+function getPositionsDetails() {
   const positions = positionsState.positions || [];
-  let totalPnL = 0;
+  let totalPnl = 0;
 
-  const detailed = positions.map((pos) => {
-    const size = pos.size || 0;
-    const avgPrice = pos.avgPrice || 0;
-    const currentPrice = pos.curPrice || avgPrice;
-    const pnl = pos.cashPnl || 0;
-    const pnlPercent = pos.percentPnl || 0;
+  const detailed = positions.map((position) => {
+    const size = position.size || 0;
+    const avgPrice = position.avgPrice || 0;
+    const currentPrice = position.curPrice || avgPrice;
+    const pnl = position.cashPnl || 0;
+    const pnlPercent = position.percentPnl || 0;
 
-    totalPnL += pnl;
+    totalPnl += pnl;
 
     return {
-      tokenId: pos.asset,
-      outcomeTitle: pos.outcome || "Unknown",
-      marketTitle: pos.title || "Unknown",
+      tokenId: position.asset,
+      outcomeTitle: position.outcome || "Unknown",
+      marketTitle: position.title || "Unknown",
       size,
       avgPrice,
       currentPrice,
+      currentValue: position.currentValue || size * currentPrice,
       pnl,
       pnlPercent,
     };
   });
 
-  return { positions: detailed, totalPnL };
+  return { positions: detailed, totalPnl };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tool Implementations
-// ─────────────────────────────────────────────────────────────────────────────
-
-export async function getPortfolioTool(_args: z.infer<typeof GetPortfolioSchema>, ctx: AgentContext): Promise<ToolResult> {
+export async function getPortfolioTool(_args: z.infer<typeof GetPortfolioSchema>, _ctx: AgentContext): Promise<ToolResult> {
   if (!walletState.connected) {
-    return { success: false, error: "Wallet not connected. Use open_wallet_modal first." };
+    return { success: false, error: "Wallet not connected. Open the wallet modal first." };
   }
 
   await fetchUserPositions();
   const details = getPositionsDetails();
+  const reservedCollateral = getReservedBuyCollateral();
 
   return {
     success: true,
     data: {
       positionsCount: details.positions.length,
-      totalPnL: details.totalPnL,
+      totalPnl: details.totalPnl,
+      reservedBuyCollateral: reservedCollateral,
+      availableToDeploy: Math.max(0, getTradingBalance() - reservedCollateral),
       positions: details.positions,
-      summary: {
-        totalValue: details.positions.reduce((sum, p) => sum + p.size * p.currentPrice, 0),
-        totalCost: details.positions.reduce((sum, p) => sum + p.size * p.avgPrice, 0),
-        winningPositions: details.positions.filter((p) => p.pnl > 0).length,
-        losingPositions: details.positions.filter((p) => p.pnl < 0).length,
-      },
     },
   };
 }
 
-export async function getBalanceTool(_args: z.infer<typeof GetBalanceSchema>, ctx: AgentContext): Promise<ToolResult> {
+export async function getBalanceTool(_args: z.infer<typeof GetBalanceSchema>, _ctx: AgentContext): Promise<ToolResult> {
   if (!walletState.connected) {
-    return { success: false, error: "Wallet not connected. Use open_wallet_modal first." };
+    return { success: false, error: "Wallet not connected. Open the wallet modal first." };
   }
+
+  const reservedCollateral = getReservedBuyCollateral();
 
   return {
     success: true,
     data: {
-      balance: walletState.balance,
       address: walletState.address,
+      funderAddress: walletState.funderAddress ?? null,
+      balance: getTradingBalance(),
+      reservedBuyCollateral: reservedCollateral,
+      availableToDeploy: Math.max(0, getTradingBalance() - reservedCollateral),
     },
   };
 }
 
-export async function getPositionsDetailsTool(_args: z.infer<typeof GetPositionsDetailsSchema>, ctx: AgentContext): Promise<ToolResult> {
+export async function getPositionsDetailsTool(_args: z.infer<typeof GetPositionsDetailsSchema>, _ctx: AgentContext): Promise<ToolResult> {
   if (!walletState.connected) {
-    return { success: false, error: "Wallet not connected. Use open_wallet_modal first." };
+    return { success: false, error: "Wallet not connected. Open the wallet modal first." };
   }
 
   await fetchUserPositions();
@@ -178,15 +107,15 @@ export async function getPositionsDetailsTool(_args: z.infer<typeof GetPositions
     success: true,
     data: {
       count: details.positions.length,
-      totalPnL: details.totalPnL,
+      totalPnl: details.totalPnl,
       positions: details.positions,
     },
   };
 }
 
-export async function getTradeHistoryTool(_args: z.infer<typeof GetTradeHistorySchema>, ctx: AgentContext): Promise<ToolResult> {
+export async function getTradeHistoryTool(args: z.infer<typeof GetTradeHistorySchema>, _ctx: AgentContext): Promise<ToolResult> {
   if (!walletState.connected) {
-    return { success: false, error: "Wallet not connected. Use open_wallet_modal first." };
+    return { success: false, error: "Wallet not connected. Open the wallet modal first." };
   }
 
   const trades = await fetchTradeHistory();
@@ -195,24 +124,24 @@ export async function getTradeHistoryTool(_args: z.infer<typeof GetTradeHistoryS
     success: true,
     data: {
       count: trades.length,
-      trades: trades.map((t) => ({
-        orderId: t.orderId,
-        tokenId: t.tokenId,
-        side: t.side,
-        price: t.price,
-        size: t.originalSize,
-        status: t.status,
-        timestamp: new Date(t.createdAt).toISOString(),
-        marketTitle: t.marketTitle,
-        outcomeTitle: t.outcomeTitle,
+      trades: trades.slice(0, args.limit ?? 25).map((trade) => ({
+        orderId: trade.orderId,
+        tokenId: trade.tokenId,
+        side: trade.side,
+        price: trade.price,
+        size: trade.originalSize,
+        status: trade.status,
+        createdAt: new Date(trade.createdAt).toISOString(),
+        marketTitle: trade.marketTitle,
+        outcomeTitle: trade.outcomeTitle,
       })),
     },
   };
 }
 
-export async function getOpenOrdersTool(_args: z.infer<typeof GetOpenOrdersSchema>, ctx: AgentContext): Promise<ToolResult> {
+export async function getOpenOrdersTool(_args: z.infer<typeof GetOpenOrdersSchema>, _ctx: AgentContext): Promise<ToolResult> {
   if (!walletState.connected) {
-    return { success: false, error: "Wallet not connected. Use open_wallet_modal first." };
+    return { success: false, error: "Wallet not connected. Open the wallet modal first." };
   }
 
   const orders = await fetchOpenOrders();
@@ -221,88 +150,111 @@ export async function getOpenOrdersTool(_args: z.infer<typeof GetOpenOrdersSchem
     success: true,
     data: {
       count: orders.length,
-      orders: orders.map((o) => ({
-        orderId: o.orderId,
-        tokenId: o.tokenId,
-        side: o.side,
-        price: o.price,
-        size: o.originalSize,
-        filled: o.sizeMatched,
-        remaining: o.sizeRemaining,
-        status: o.status,
-        createdAt: new Date(o.createdAt).toISOString(),
-        marketTitle: o.marketTitle,
-        outcomeTitle: o.outcomeTitle,
+      reservedBuyCollateral: getReservedBuyCollateral(),
+      orders: orders.map((order) => ({
+        orderId: order.orderId,
+        tokenId: order.tokenId,
+        side: order.side,
+        price: order.price,
+        size: order.originalSize,
+        sizeMatched: order.sizeMatched,
+        sizeRemaining: order.sizeRemaining,
+        status: order.status,
+        createdAt: new Date(order.createdAt).toISOString(),
+        marketTitle: order.marketTitle,
+        outcomeTitle: order.outcomeTitle,
       })),
     },
   };
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tool Definitions
-// ─────────────────────────────────────────────────────────────────────────────
 
 export const tools: ToolDefinition<z.ZodType>[] = [
   {
     id: "portfolio.get_portfolio",
     name: "get_portfolio",
     category: "portfolio",
-    description: PROMPTS.get_portfolio.description,
-    parameters: {} as unknown as z.ZodType,
-    examples: [PROMPTS.get_portfolio.example],
+    description: "Load current positions and summarize deployable capital and realized exposure.",
+    parameters: GetPortfolioSchema,
+    examples: ["get_portfolio({})"],
+    riskLevel: "low",
+    readOnly: true,
     requiresWallet: true,
+    requiresSelectedMarket: false,
+    requiresConfirmation: false,
     executesTrade: false,
+    mutatesUi: false,
+    enabledModes: ["analyst", "trader", "operator", "safe"],
   },
   {
     id: "portfolio.get_balance",
     name: "get_balance",
     category: "portfolio",
-    description: PROMPTS.get_balance.description,
-    parameters: {} as unknown as z.ZodType,
-    examples: [PROMPTS.get_balance.example],
+    description: "Show trading balance, reserved collateral, and currently deployable USDC.",
+    parameters: GetBalanceSchema,
+    examples: ["get_balance({})"],
+    riskLevel: "low",
+    readOnly: true,
     requiresWallet: true,
+    requiresSelectedMarket: false,
+    requiresConfirmation: false,
     executesTrade: false,
+    mutatesUi: false,
+    enabledModes: ["analyst", "trader", "operator", "safe"],
   },
   {
     id: "portfolio.get_positions_details",
     name: "get_positions_details",
     category: "portfolio",
-    description: PROMPTS.get_positions_details.description,
-    parameters: {} as unknown as z.ZodType,
-    examples: [PROMPTS.get_positions_details.example],
+    description: "Inspect positions with size, basis, current value, and PnL.",
+    parameters: GetPositionsDetailsSchema,
+    examples: ["get_positions_details({})"],
+    riskLevel: "low",
+    readOnly: true,
     requiresWallet: true,
+    requiresSelectedMarket: false,
+    requiresConfirmation: false,
     executesTrade: false,
+    mutatesUi: false,
+    enabledModes: ["analyst", "trader", "operator", "safe"],
   },
   {
     id: "portfolio.get_trade_history",
     name: "get_trade_history",
     category: "portfolio",
-    description: PROMPTS.get_trade_history.description,
-    parameters: {} as unknown as z.ZodType,
-    examples: [PROMPTS.get_trade_history.example],
+    description: "Inspect recent confirmed trade history from Polymarket.",
+    parameters: GetTradeHistorySchema,
+    examples: ["get_trade_history({ limit: 10 })"],
+    riskLevel: "low",
+    readOnly: true,
     requiresWallet: true,
+    requiresSelectedMarket: false,
+    requiresConfirmation: false,
     executesTrade: false,
+    mutatesUi: false,
+    enabledModes: ["trader", "operator", "safe"],
   },
   {
     id: "portfolio.get_open_orders",
     name: "get_open_orders",
     category: "portfolio",
-    description: PROMPTS.get_open_orders.description,
-    parameters: {} as unknown as z.ZodType,
-    examples: [PROMPTS.get_open_orders.example],
+    description: "Inspect open orders and collateral currently locked by resting bids.",
+    parameters: GetOpenOrdersSchema,
+    examples: ["get_open_orders({})"],
+    riskLevel: "low",
+    readOnly: true,
     requiresWallet: true,
+    requiresSelectedMarket: false,
+    requiresConfirmation: false,
     executesTrade: false,
+    mutatesUi: false,
+    enabledModes: ["trader", "operator", "safe"],
   },
 ];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Execute Map
-// ─────────────────────────────────────────────────────────────────────────────
-
 export const executors: Record<string, (args: Record<string, unknown>, ctx: AgentContext) => Promise<ToolResult>> = {
-  get_portfolio: async (args, ctx) => getPortfolioTool(args as z.infer<typeof GetPortfolioSchema>, ctx),
-  get_balance: async (args, ctx) => getBalanceTool(args as z.infer<typeof GetBalanceSchema>, ctx),
-  get_positions_details: async (args, ctx) => getPositionsDetailsTool(args as z.infer<typeof GetPositionsDetailsSchema>, ctx),
-  get_trade_history: async (args, ctx) => getTradeHistoryTool(args as z.infer<typeof GetTradeHistorySchema>, ctx),
-  get_open_orders: async (args, ctx) => getOpenOrdersTool(args as z.infer<typeof GetOpenOrdersSchema>, ctx),
+  get_portfolio: async (args, ctx) => getPortfolioTool(GetPortfolioSchema.parse(args), ctx),
+  get_balance: async (args, ctx) => getBalanceTool(GetBalanceSchema.parse(args), ctx),
+  get_positions_details: async (args, ctx) => getPositionsDetailsTool(GetPositionsDetailsSchema.parse(args), ctx),
+  get_trade_history: async (args, ctx) => getTradeHistoryTool(GetTradeHistorySchema.parse(args), ctx),
+  get_open_orders: async (args, ctx) => getOpenOrdersTool(GetOpenOrdersSchema.parse(args), ctx),
 };

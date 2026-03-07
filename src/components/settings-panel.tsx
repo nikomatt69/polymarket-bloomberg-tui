@@ -10,6 +10,7 @@ import { useTheme } from "../context/theme";
 import { PanelHeader, SectionTitle, DataRow, Separator, TabBar } from "./ui/panel-components";
 import {
   walletState,
+  getTradingBalance,
   appState,
   aiProviderState,
   settingsSelectedProviderId,
@@ -505,7 +506,7 @@ export function SettingsPanel() {
             <box flexDirection="row" gap={1}>
               <text content="Balance:" fg={theme.textMuted} />
               <text
-                content={`$${walletState.balance.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`}
+                content={`$${getTradingBalance().toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`}
                 fg={theme.success}
               />
             </box>

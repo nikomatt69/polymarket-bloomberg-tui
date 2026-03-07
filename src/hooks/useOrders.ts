@@ -18,6 +18,9 @@ import {
 import { startHeartbeat, stopHeartbeat } from "../api/clob/trading";
 import { Order } from "../types/orders";
 import { OrderStatus } from "../types/orders";
+import { appState, getSelectedMarket, getTradingBalance, walletState } from "../state";
+import { positionsState, fetchUserPositions } from "./usePositions";
+import { getOrderBookSummary, type OrderBookSummary } from "../api/polymarket";
 import { homedir } from "os";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -388,7 +391,169 @@ export function exportOrderHistoryCsv(selectedMarketTokenIds: string[] = []): st
   return outputPath;
 }
 
+export interface OrderDraftPreview {
+  valid: boolean;
+  side: Order["side"];
+  tokenId: string;
+  price: number;
+  shares: number;
+  notional: number;
+  marketTitle?: string;
+  outcomeTitle?: string;
+  availableBalance: number;
+  availableShares: number;
+  errors: string[];
+  warnings: string[];
+  quote: Pick<OrderBookSummary, "tokenId" | "bestBid" | "bestAsk" | "midpoint" | "spread" | "spreadBps" | "minOrderSize" | "tickSize" | "updatedAt" | "negRisk" | "lastTradePrice">;
+}
+
+function isTickAligned(price: number, tickSize: number): boolean {
+  if (!Number.isFinite(price) || !Number.isFinite(tickSize) || tickSize <= 0) return true;
+  const ratio = price / tickSize;
+  return Math.abs(ratio - Math.round(ratio)) < 1e-6;
+}
+
+function countDecimals(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  const normalized = value.toString().toLowerCase();
+  if (!normalized.includes(".")) return 0;
+  const [, decimals = ""] = normalized.split(".");
+  return decimals.length;
+}
+
+function resolveOrderMetadata(order: Order): { marketTitle?: string; outcomeTitle?: string } {
+  const selectedMarket = getSelectedMarket();
+  if (selectedMarket) {
+    const selectedOutcome = selectedMarket.outcomes.find((outcome) => outcome.id === order.tokenId);
+    if (selectedOutcome) {
+      return {
+        marketTitle: order.marketTitle ?? selectedMarket.title,
+        outcomeTitle: order.outcomeTitle ?? selectedOutcome.title,
+      };
+    }
+  }
+
+  for (const market of appState.markets) {
+    const outcome = market.outcomes.find((candidate) => candidate.id === order.tokenId);
+    if (outcome) {
+      return {
+        marketTitle: order.marketTitle ?? market.title,
+        outcomeTitle: order.outcomeTitle ?? outcome.title,
+      };
+    }
+  }
+
+  return {
+    marketTitle: order.marketTitle,
+    outcomeTitle: order.outcomeTitle,
+  };
+}
+
+export async function previewOrderDraft(order: Order): Promise<OrderDraftPreview> {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const price = Number(order.price);
+  const shares = Number(order.shares);
+  const notional = Number.isFinite(price) && Number.isFinite(shares) ? price * shares : 0;
+  const quote = await getOrderBookSummary(order.tokenId);
+  const metadata = resolveOrderMetadata(order);
+  const availableBalance = getTradingBalance();
+  const availableShares = positionsState.positions
+    .filter((position) => position.asset === order.tokenId)
+    .reduce((sum, position) => sum + position.size, 0);
+  const reservedBuyCollateral = ordersState.openOrders
+    .filter((existing) => existing.side === "BUY" && existing.status !== "CANCELLED" && existing.status !== "FILLED")
+    .reduce((sum, existing) => sum + (existing.price * Math.max(0, existing.sizeRemaining)), 0);
+  const reservedSellShares = ordersState.openOrders
+    .filter((existing) => existing.side === "SELL" && existing.tokenId === order.tokenId && existing.status !== "CANCELLED" && existing.status !== "FILLED")
+    .reduce((sum, existing) => sum + Math.max(0, existing.sizeRemaining), 0);
+
+  if (!order.tokenId.trim()) errors.push("Missing tokenId.");
+  if (order.side !== "BUY" && order.side !== "SELL") errors.push("Order side must be BUY or SELL.");
+  if (!Number.isFinite(price) || price < 0.01 || price > 0.99) errors.push("Price must be between 0.01 and 0.99.");
+  if (!Number.isFinite(shares) || shares <= 0) errors.push("Shares must be greater than zero.");
+  if (countDecimals(shares) > 2) errors.push("Shares support at most 2 decimal places.");
+
+  if (quote?.tickSize && !isTickAligned(price, quote.tickSize)) {
+    errors.push(`Price must align to tick size ${quote.tickSize.toFixed(4)}.`);
+  }
+
+  if (quote?.minOrderSize && notional < quote.minOrderSize) {
+    errors.push(`Order notional must be at least ${quote.minOrderSize.toFixed(2)} USDC.`);
+  }
+
+  if (order.side === "BUY") {
+    const deployableBalance = Math.max(0, availableBalance - reservedBuyCollateral);
+    if (notional > deployableBalance + 1e-6) {
+      errors.push(`Insufficient buying power. Available ${deployableBalance.toFixed(2)} USDC.`);
+    }
+
+    if (quote?.bestAsk !== null && quote?.bestAsk !== undefined && price >= quote.bestAsk) {
+      warnings.push("Buy price is at or through best ask; the order may execute immediately.");
+      if (order.postOnly) {
+        errors.push("Post-only buy order crosses the current best ask.");
+      }
+    }
+  }
+
+  if (order.side === "SELL") {
+    const deployableShares = Math.max(0, availableShares - reservedSellShares);
+    if (shares > deployableShares + 1e-6) {
+      errors.push(`Insufficient inventory. Available ${deployableShares.toFixed(2)} shares.`);
+    }
+
+    if (quote?.bestBid !== null && quote?.bestBid !== undefined && price <= quote.bestBid) {
+      warnings.push("Sell price is at or through best bid; the order may execute immediately.");
+      if (order.postOnly) {
+        errors.push("Post-only sell order crosses the current best bid.");
+      }
+    }
+  }
+
+  if (quote?.spreadBps !== null && quote?.spreadBps !== undefined && quote.spreadBps >= 150) {
+    warnings.push(`Wide spread detected (${quote.spreadBps.toFixed(0)}bp). Prefer passive pricing.`);
+  }
+
+  if (quote?.updatedAt && Date.now() - quote.updatedAt > 60_000) {
+    warnings.push("Order book snapshot is stale.");
+  }
+
+  return {
+    valid: errors.length === 0,
+    side: order.side,
+    tokenId: order.tokenId,
+    price,
+    shares,
+    notional,
+    marketTitle: metadata.marketTitle,
+    outcomeTitle: metadata.outcomeTitle,
+    availableBalance,
+    availableShares: Math.max(0, availableShares - reservedSellShares),
+    errors,
+    warnings,
+    quote: {
+      tokenId: quote?.tokenId ?? order.tokenId,
+      bestBid: quote?.bestBid ?? null,
+      bestAsk: quote?.bestAsk ?? null,
+      midpoint: quote?.midpoint ?? null,
+      spread: quote?.spread ?? null,
+      spreadBps: quote?.spreadBps ?? null,
+      minOrderSize: quote?.minOrderSize ?? null,
+      tickSize: quote?.tickSize ?? null,
+      updatedAt: quote?.updatedAt ?? null,
+      negRisk: order.negRisk ?? quote?.negRisk ?? false,
+      lastTradePrice: quote?.lastTradePrice ?? null,
+    },
+  };
+}
+
 export async function submitOrder(order: Order): Promise<PlacedOrder | null> {
+  const preview = await previewOrderDraft(order);
+  if (!preview.valid) {
+    setOrdersState("error", preview.errors.join(" "));
+    return null;
+  }
+
   setOrdersState("placing", true);
   setOrdersState("error", null);
 

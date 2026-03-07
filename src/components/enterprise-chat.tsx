@@ -17,6 +17,8 @@ import {
   ChatMessageItem,
 } from "./ui/panel-components";
 import {
+  assistantGuardReason,
+  assistantMode,
   chatMessages,
   chatLoading,
   chatInputValue,
@@ -28,17 +30,20 @@ import {
   sessionTokens,
   appState,
   walletState,
+  getTradingBalance,
   enterpriseRunPhase,
   enterpriseToolSelectedId,
   setEnterpriseToolSelectedId,
   enterpriseToolExpandedIds,
   toggleEnterpriseToolExpanded,
+  pendingApproval,
   ToolCall,
 } from "../state";
 import { getSelectedMarket, getActiveAIProvider } from "../state";
 import { Market } from "../types/market";
 import { positionsState } from "../hooks/usePositions";
 import { calculatePortfolioSummary } from "../api/positions";
+import { getTool as getAgentTool } from "../agent/tools";
 
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -93,13 +98,7 @@ function makeRule(title: string, width: number): string {
 }
 
 function toolCategoryFromName(name: string): string {
-  if (["get_market_details", "get_market_price", "get_order_book", "analyze_market", "compare_outcomes", "search_markets"].includes(name)) return "market";
-  if (["get_portfolio", "get_balance", "get_positions_details", "get_trade_history", "get_open_orders"].includes(name)) return "portfolio";
-  if (["place_order", "cancel_order"].includes(name)) return "order";
-  if (["get_categories", "search_by_category", "get_trending_markets", "get_sports_markets", "get_live_events", "get_events", "get_series_markets", "get_all_series", "get_all_tags", "get_markets_by_tag"].includes(name)) return "discovery";
-  if (["navigate_to_market", "set_timeframe", "set_sort_by", "refresh_markets"].includes(name)) return "navigation";
-  if (["open_wallet_modal", "open_portfolio", "open_order_form", "get_watchlist", "add_watchlist", "remove_watchlist", "get_alerts"].includes(name)) return "ui";
-  return "unknown";
+  return getAgentTool(name)?.category ?? "unknown";
 }
 
 function statusFromToolResult(result: unknown): "done" | "error" {
@@ -159,10 +158,13 @@ export function EnterpriseChat() {
   const providerKindLabel = createMemo(() => provider()?.kind.toUpperCase() ?? "none");
 
   const phaseLabel = createMemo(() => enterpriseRunPhase().toUpperCase());
+  const assistantModeLabel = createMemo(() => assistantMode().toUpperCase());
+  const liveApproval = createMemo(() => pendingApproval());
 
   const phaseColor = createMemo(() => {
     const phase = enterpriseRunPhase();
     if (phase === "tool_error") return theme.error;
+    if (phase === "awaiting_approval") return theme.accent;
     if (phase === "tool_calling" || phase === "finalizing") return theme.warning;
     if (phase === "streaming_text") return theme.primary;
     return theme.textMuted;
@@ -208,12 +210,12 @@ export function EnterpriseChat() {
 
   const headerSubtitle = createMemo(() => {
     if (promptProfile() === "wide") {
-      return `${resolvedModel()} | ${sessionLabel()} | ${tokenLabel()} | ${phaseLabel()}`;
+      return `${assistantModeLabel()} | ${resolvedModel()} | ${sessionLabel()} | ${tokenLabel()} | ${phaseLabel()}`;
     }
     if (promptProfile() === "medium") {
-      return `${modelLabel()} | ${tokenLabel()} | ${phaseLabel()}`;
+      return `${assistantModeLabel()} | ${modelLabel()} | ${tokenLabel()} | ${phaseLabel()}`;
     }
-    return `${phaseLabel()} | ${tokenLabel()}`;
+    return `${assistantModeLabel()} | ${phaseLabel()} | ${tokenLabel()}`;
   });
 
   const selectedMarket = createMemo(() => getSelectedMarket());
@@ -243,7 +245,7 @@ export function EnterpriseChat() {
       args: toolCall.arguments,
       result: toolCall.result,
       status: statusFromToolResult(toolCall.result),
-      category: toolCategoryFromName(toolCall.name),
+      category: toolCall.category ?? toolCategoryFromName(toolCall.name),
     })),
   );
 
@@ -254,6 +256,11 @@ export function EnterpriseChat() {
   });
 
   const inputHints = createMemo(() => {
+    if (liveApproval()) {
+      if (promptProfile() === "narrow") return "[Y] approve [N] reject";
+      return "[Y] approve [N] reject [I/Enter] focus [Esc] close";
+    }
+
     if (chatInputFocused()) {
       if (promptProfile() === "narrow") return "[Enter] send [Esc] blur";
       if (!chatInputValue()) return "[Enter] send [Up/Down] history(empty) [Ctrl+U] line [Ctrl+L] chat [Esc] blur";
@@ -275,6 +282,9 @@ export function EnterpriseChat() {
 
   const promptSupportLine = createMemo(() => {
     const value = chatInputValue();
+    if (liveApproval()) {
+      return "Pending approval - review the action card and press Y to execute or N to reject";
+    }
     if (isNarrow()) {
       if (value.startsWith("/")) return "Command mode";
       if (chatLoading()) return "Assistant running";
@@ -356,6 +366,7 @@ export function EnterpriseChat() {
     if (phase === "tool_calling") return "TOOL";
     if (phase === "tool_done") return "DONE";
     if (phase === "tool_error") return "ERR";
+    if (phase === "awaiting_approval") return "WAIT";
     if (phase === "finalizing") return "FIN";
     return "IDLE";
   });
@@ -374,13 +385,13 @@ export function EnterpriseChat() {
       return `p=${phaseShortLabel()} t=${tools}`;
     }
     if (promptProfile() === "medium") {
-      return `phase=${phaseLabel()} | tools=${tools}${chatLoading() ? " | running" : ""}`;
+      return `phase=${phaseLabel()} | tools=${tools}${liveApproval() ? " | approval" : chatLoading() ? " | running" : ""}`;
     }
-    return `phase=${phaseLabel()} | tools=${tools}${chatLoading() ? " | status=running" : ""}`;
+    return `phase=${phaseLabel()} | tools=${tools}${liveApproval() ? " | awaiting_approval" : chatLoading() ? " | status=running" : ""}`;
   });
 
   const metaPrimaryLabel = createMemo(() => {
-    const parts = [`MODE:${promptMode()}`, `MODEL:${modelLabel()}`];
+    const parts = [`PROMPT:${promptMode()}`, `AST:${assistantModeLabel()}`, `MODEL:${modelLabel()}`];
 
     if (promptProfile() === "wide") {
       parts.push(`PROVIDER:${providerLabel()}`);
@@ -409,6 +420,43 @@ export function EnterpriseChat() {
     }
     return "";
   });
+
+  const renderApprovalBlock = () => (
+    <Show when={liveApproval()}>
+      {(() => {
+        const approval = liveApproval();
+        if (!approval) return null;
+        return (
+        <box width="100%" flexDirection="column" paddingTop={1} paddingBottom={1}>
+          <box flexDirection="row" width="100%" paddingLeft={1} paddingRight={1}>
+            <text content="APPROVAL" fg={theme.accent} />
+            <text content=" | " fg={theme.textMuted} />
+            <text content={approval.title.toUpperCase()} fg={theme.warning} />
+            <box flexGrow={1} />
+            <text content={approval.riskLevel.toUpperCase()} fg={approval.riskLevel === "critical" ? theme.error : theme.warning} />
+          </box>
+          <box height={1} width="100%" backgroundColor={theme.borderSubtle} />
+          <box flexDirection="column" paddingLeft={2} paddingRight={1}>
+            <For each={wrapText(approval.summary, streamWrapWidth())}>
+              {(line) => <text content={line} fg={theme.text} />}
+            </For>
+            <Show when={assistantGuardReason()}>
+              <text content={`Guard: ${assistantGuardReason()}`} fg={theme.warning} />
+            </Show>
+            <Show when={approval.warnings.length > 0}>
+              <box flexDirection="column" paddingTop={1}>
+                <For each={approval.warnings.slice(0, 4)}>
+                  {(warning) => <text content={`- ${truncate(warning, streamWrapWidth())}`} fg={theme.warning} />}
+                </For>
+              </box>
+            </Show>
+            <text content={`Press Y to approve or N to reject before ${new Date(approval.expiresAt).toLocaleTimeString()}.`} fg={theme.textMuted} />
+          </box>
+        </box>
+        );
+      })()}
+    </Show>
+  );
 
   const renderLiveStreamBlock = () => (
     <box width="100%" flexDirection="column" paddingTop={1} paddingBottom={1}>
@@ -503,6 +551,8 @@ export function EnterpriseChat() {
                 </box>
               </Show>
 
+              {renderApprovalBlock()}
+
               <For each={chatMessages()}>
                 {(message) => (
                   <>
@@ -516,7 +566,7 @@ export function EnterpriseChat() {
                         args: toolCall.arguments,
                         result: toolCall.result,
                         status: statusFromToolResult(toolCall.result),
-                        category: toolCategoryFromName(toolCall.name),
+                        category: toolCall.category ?? toolCategoryFromName(toolCall.name),
                       }))}
                     />
 
@@ -624,9 +674,16 @@ export function EnterpriseChat() {
                 <Show when={walletState.connected}>
                   <DataRow
                     label="Balance"
-                    value={`$${walletState.balance?.toFixed(2) ?? "0.00"}`}
+                    value={`$${getTradingBalance().toFixed(2)}`}
                     valueColor="success"
                   />
+                </Show>
+
+                <box height={1} />
+
+                <DataRow label="Assistant" value={assistantModeLabel()} valueColor="text" />
+                <Show when={assistantGuardReason()}>
+                  <text content={truncate(`Guard: ${assistantGuardReason()}`, 40)} fg={theme.warning} />
                 </Show>
 
                 <box height={1} />

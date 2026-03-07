@@ -1,22 +1,35 @@
 /**
- * Reasoning Loop - Think → Act → Observe → Refine → Answer
+ * Assistant runtime - prompt layering, tool wrapping, approvals, and streaming.
  */
 
 import { streamText, tool as createAiTool, zodSchema } from "ai";
-import { z } from "zod";
-import { getActiveAIProvider } from "../state";
-import { AgentSession, createToolCall, completeToolCall, type ToolCall } from "./session";
-import { getTUIContext, formatTUIContextForPrompt } from "./context";
-import type { AgentContext, TUIContext } from "./tool";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
+import type { z } from "zod";
+import {
+  assistantMode,
+  type AssistantApprovalRequest,
+  type AssistantMode,
+  type ChatMessage,
+  clearPendingApproval,
+  pendingApproval,
+  setAssistantGuardReason,
+  setPendingApproval,
+  type ToolCall,
+  walletState,
+  getActiveAIProvider,
+} from "../state";
+import { getEnabledSkillsSystemPrompt } from "../api/skills";
+import { skills } from "../state";
+import { createAgentContext, formatTUIContextForPrompt, getTUIContext } from "./context";
+import { executeTool, getTool, getToolsForMode, prepareToolApproval } from "./tools";
+import type { AgentContext, ToolDefinition } from "./tool";
 
-/**
- * Reasoning step types
- */
+const DEFAULT_MODEL = "claude-sonnet-4-20250514";
+const APPROVAL_TTL_MS = 60_000;
+
 export type ReasoningStep = "thinking" | "acting" | "observing" | "refining" | "answering";
 
-/**
- * Reasoning state for tracking progress
- */
 export interface ReasoningState {
   currentStep: ReasoningStep;
   thought: string;
@@ -25,279 +38,473 @@ export interface ReasoningState {
   isComplete: boolean;
 }
 
-/**
- * Chunk callback for streaming
- */
-export type ReasoningChunkCallback = (chunk: {
-  type: "reasoning" | "content" | "tool_call" | "tool_result" | "step";
-  text?: string;
-  toolCall?: ToolCall;
-  toolResult?: unknown;
-  step?: ReasoningStep;
+export type RuntimeToolCallCallback = (tool: {
+  id: string;
+  name: string;
+  args: unknown;
+  category?: string;
+  riskLevel?: "low" | "medium" | "high" | "critical";
+  requiresConfirmation?: boolean;
+  startedAt: number;
 }) => void;
 
-/**
- * Default system prompt with reasoning instructions
- */
-export function buildSystemPrompt(tuiContext: TUIContext, extraInstructions?: string): string {
-  const ctx = formatTUIContextForPrompt(tuiContext);
+export type RuntimeToolResultCallback = (tool: {
+  id: string;
+  name: string;
+  result: unknown;
+  completedAt: number;
+}) => void;
 
-  return `You are a **Polymarket Trading Agent** - an AI-powered trading assistant for Polymarket prediction markets.
-
-## Your Role
-You are NOT just a chatbot. You are a trading agent that can ANALYZE markets, CALCULATE positions, and EXECUTE real trades on behalf of the user.
-
-## Reasoning Loop (IMPORTANT)
-You work in a LOOP of thinking → tool calling → observing results → thinking more → more tools → final answer:
-
-1. **THINK**: Analyze the user's request and plan your approach
-2. **ACT**: Call appropriate tools to gather data
-3. **OBSERVE**: Look at the tool results carefully
-4. **REFINE**: If needed, call more tools to get additional info
-5. **ANSWER**: Provide a complete, actionable response
-
-Show your reasoning! Use phrases like:
-- "Let me think about this..."
-- "First, I need to check..."
-- "Looking at the results..."
-- "Now I should..."
-- "Based on that..."
-
-## Current TUI State
-${ctx}
-
-## Trading Capabilities
-You have access to powerful trading tools:
-- **place_order**: Execute real trades (BUY/SELL) with real money
-- **get_order_book**: Analyze liquidity, bid/ask spread
-- **get_market_price**: Get current prices
-- **get_open_orders**: Monitor pending orders
-- **get_trade_history**: Review past trades
-- **cancel_order**: Manage/cancel open orders
-- **get_positions_details**: View positions with PnL calculations
-
-## Market Discovery Capabilities
-- **search_markets**: Find markets by keyword
-- **get_categories**: List all categories
-- **search_by_category**: Filter by category
-- **get_trending_markets**: Most popular markets
-- **get_sports_markets**: Live sports markets
-- **get_live_events**: Currently live events
-- **get_series_markets**: Markets for specific series
-- **get_all_series**: Available series
-
-## Trading Best Practices
-1. **Before placing any trade**:
-   - Always check the order book for liquidity
-   - Analyze the spread - tight spreads = better execution
-   - Never trade illiquid markets
-
-2. **Position Sizing**:
-   - NEVER risk more than 5-10% of total balance
-   - Calculate: max_shares = (balance * 0.05) / price
-
-3. **Risk Management**:
-   - Prediction markets are binary options
-   - Check volume (> $100k = good liquidity)
-   - Look for tight bid/ask spreads (<0.02)
-
-## Guidelines
-- Be proactive - suggest trades when you see opportunities
-- Always warn about risks
-- Show your reasoning explicitly
-- If balance is low, inform the user
-
-## Tool Display
-IMPORTANT: When you call tools, show them in your response as:
--> tool_name: {"param": "value"} = result
-
-This helps the user understand what you're doing.
-
-${extraInstructions ?? ""}
-
-Respond in the same language as the user. Be concise but thorough on trading matters.`;
+export interface AssistantRuntimeCallbacks {
+  onChunk?: (chunk: string) => void;
+  onToolCall?: RuntimeToolCallCallback;
+  onToolResult?: RuntimeToolResultCallback;
+  onToolError?: (tool: { id: string; name: string; error: string; completedAt: number }) => void;
 }
 
-/**
- * Execute a tool and track it
- */
-export async function executeToolWithTracking(
-  toolName: string,
-  args: Record<string, unknown>,
-  executeFn: (name: string, args: Record<string, unknown>) => Promise<unknown>,
-  onChunk?: ReasoningChunkCallback
-): Promise<{ toolCall: ToolCall; result: unknown; success: boolean; error?: string }> {
-  const toolCall = createToolCall(toolName, args);
+function simpleHash(value: string): string {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash) + value.charCodeAt(index);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
 
-  // Notify tool call start
-  onChunk?.({
-    type: "tool_call",
-    toolCall,
-  });
+function buildApprovalContextHash(ctx: AgentContext, toolName: string, args: Record<string, unknown>): string {
+  return simpleHash(JSON.stringify({
+    toolName,
+    args,
+    selectedMarketId: ctx.tuiContext.selectedMarketId,
+    selectedTokenId: ctx.tuiContext.selectedTokenId,
+    walletAddress: ctx.tuiContext.walletAddress,
+    funderAddress: ctx.tuiContext.funderAddress,
+    assistantMode: ctx.tuiContext.assistantMode,
+  }));
+}
 
-  try {
-    const result = await executeFn(toolName, args);
-    const completed = completeToolCall(toolCall, result, true);
+function resolveEffectiveAssistantMode(requestedMode: AssistantMode): { mode: AssistantMode; guardReason: string | null } {
+  if (requestedMode === "trader") {
+    if (!walletState.connected) {
+      return {
+        mode: "safe",
+        guardReason: "Trader mode downgraded to safe because no wallet is connected.",
+      };
+    }
 
-    // Notify tool result
-    onChunk?.({
-      type: "tool_result",
-      toolCall: completed,
-      toolResult: result,
-    });
+    if (!walletState.apiKey || !walletState.apiSecret || !walletState.apiPassphrase) {
+      return {
+        mode: "safe",
+        guardReason: "Trader mode downgraded to safe because Polymarket API credentials are not ready.",
+      };
+    }
+  }
 
-    return { toolCall: completed, result, success: true };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    const completed = completeToolCall(toolCall, null, false, errorMessage);
+  if (requestedMode === "operator" && !walletState.connected) {
+    return {
+      mode: "safe",
+      guardReason: "Operator mode downgraded to safe because no wallet is connected.",
+    };
+  }
 
-    // Notify tool error
-    onChunk?.({
-      type: "tool_result",
-      toolCall: completed,
-      toolResult: errorMessage,
-    });
+  return {
+    mode: requestedMode,
+    guardReason: requestedMode === "safe" ? "Safe mode is active: no market-moving actions are available." : null,
+  };
+}
 
-    return { toolCall: completed, result: null, success: false, error: errorMessage };
+function buildToolPolicyBlock(mode: AssistantMode, toolDefs: ToolDefinition<z.ZodType>[]): string {
+  const grouped = new Map<string, string[]>();
+  for (const toolDef of toolDefs) {
+    const bucket = grouped.get(toolDef.category) ?? [];
+    const suffixParts: string[] = [];
+    if (toolDef.requiresConfirmation) suffixParts.push("approval");
+    if (toolDef.requiresWallet) suffixParts.push("wallet");
+    if (toolDef.executesTrade) suffixParts.push("trade");
+    bucket.push(`${toolDef.name}${suffixParts.length > 0 ? ` [${suffixParts.join(",")}]` : ""}`);
+    grouped.set(toolDef.category, bucket);
+  }
+
+  const lines = ["## Available Tools"];
+  for (const [category, names] of grouped.entries()) {
+    lines.push(`- ${category}: ${names.join(", ")}`);
+  }
+
+  lines.push("## Execution Rules");
+  lines.push("- Never guess a token ID, order ID, or market when data is ambiguous.");
+  lines.push("- Before any trade, fetch a fresh live book or order preview.");
+  lines.push("- Use preview_order or prepare_order before proposing execution.");
+  lines.push("- Any mutating execution tool requires explicit in-app approval and will not execute immediately.");
+  lines.push("- Treat last-trade price 0.5 as a no-trade sentinel when liquidity data is absent.");
+  lines.push("- MATCHED is not final settlement; user order and trade updates can still change status.");
+  if (mode === "safe") {
+    lines.push("- You are in safe mode: do not ask to execute trades or cancels. Stay read-only.");
+  }
+
+  return lines.join("\n");
+}
+
+function buildModePolicy(mode: AssistantMode): string {
+  switch (mode) {
+    case "scout":
+      return [
+        "## Mode Policy: Scout",
+        "- Focus on discovery: categories, series, events, trending markets, and live opportunities.",
+        "- Stay read-only and prioritize breadth over execution.",
+      ].join("\n");
+    case "analyst":
+      return [
+        "## Mode Policy: Analyst",
+        "- Focus on analysis, price structure, liquidity, and thesis quality.",
+        "- Build clear trade ideas, but do not rush execution.",
+      ].join("\n");
+    case "trader":
+      return [
+        "## Mode Policy: Trader",
+        "- You may prepare trades and request approval for execution when the user clearly wants to trade.",
+        "- Always evaluate sizing, spread, depth, freshness, and inventory before proposing a live action.",
+      ].join("\n");
+    case "operator":
+      return [
+        "## Mode Policy: Operator",
+        "- Focus on managing balances, positions, open orders, and cleanup actions.",
+        "- Prefer account hygiene and state reconciliation over new risk taking.",
+      ].join("\n");
+    case "safe":
+    default:
+      return [
+        "## Mode Policy: Safe",
+        "- Read-only fallback mode.",
+        "- Do not attempt any tool that moves markets or changes account state.",
+      ].join("\n");
   }
 }
 
-/**
- * Run the reasoning loop with AI
- */
-export async function runReasoningLoop(
-  userInput: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _tools: Record<string, {
-    description: string;
-    parameters: z.ZodType;
-    execute: (args: Record<string, unknown>) => Promise<unknown>;
-  }>,
-  onChunk?: ReasoningChunkCallback
-): Promise<{ response: string; toolCalls: ToolCall[] }> {
-  const provider = getActiveAIProvider();
+export function buildSystemPrompt(mode: AssistantMode, toolDefs: ToolDefinition<z.ZodType>[]): string {
+  const tuiContext = getTUIContext();
+  const skillsPrompt = getEnabledSkillsSystemPrompt(skills());
+  const contextBlock = formatTUIContextForPrompt(tuiContext);
 
+  return [
+    "You are the in-app Polymarket trading assistant inside a Bloomberg-style terminal UI.",
+    "You help the user discover markets, analyze pricing and liquidity, inspect portfolio risk, and prepare execution on real Polymarket APIs.",
+    "",
+    "## Core Trading Rules",
+    "- Always operate on real Polymarket semantics: Gamma for market metadata, CLOB for books, prices, orders, cancels, and user state.",
+    "- Use fresh book data for trade decisions. If quotes are stale or missing, stop and explain why.",
+    "- Respect tick size, minimum order size, post-only crossing rules, wallet balance, reserved collateral, and sell inventory.",
+    "- Never pretend a trade executed. Only report exchange-confirmed results returned by tools.",
+    "- Keep responses concise, concrete, and operational.",
+    "",
+    buildModePolicy(mode),
+    "",
+    buildToolPolicyBlock(mode, toolDefs),
+    "",
+    "## Current Workspace Context",
+    contextBlock,
+    skillsPrompt,
+    "",
+    "Respond in the same language as the user.",
+  ].filter(Boolean).join("\n");
+}
+
+function resolveAssistantModel():
+  | { model: unknown; providerName: string; providerModelId: string }
+  | { error: string } {
+  const provider = getActiveAIProvider();
   if (!provider) {
-    return {
-      response: "No AI provider configured. Open Settings > PROVIDERS to configure one.",
-      toolCalls: [],
-    };
+    return { error: "No AI provider configured. Open Settings > Providers and configure one." };
   }
 
   const apiKey = (provider.apiKey ?? "").trim();
   if (!apiKey) {
-    return {
-      response: `Provider "${provider.name}" has no API key. Open Settings > PROVIDERS and add the key.`,
-      toolCalls: [],
-    };
+    return { error: `Provider \"${provider.name}\" has no API key configured.` };
   }
 
-  // Get TUI context
-  const tuiContext = getTUIContext();
-
-  // Build system prompt
-  const systemPrompt = buildSystemPrompt(tuiContext);
-
-  // Add user message to session
-  AgentSession.addUserMessage(userInput);
-
-  // Save TUI context
-  AgentSession.saveTUIContext(tuiContext);
-
-  // Get conversation history
-  const messages = AgentSession.getMessagesForAI();
-
-  let fullText = "";
-  const allToolCalls: ToolCall[] = [];
-
-  try {
-    // Notify thinking start
-    onChunk?.({ type: "step", step: "thinking" });
-
-    // Resolve model
-    const { model, providerName } = resolveModel(provider);
-
-    // Use the tools from the assistant module directly
-    // Note: This is a simplified version - in production you'd use the tools parameter
-    const result = streamText({
-      model,
-      system: systemPrompt,
-      messages,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      maxSteps: 15,
-      temperature: 0.7,
-      onError: (error) => {
-        console.error("Stream error:", error);
-      },
-    });
-
-    // Process stream
-    for await (const chunk of result.textStream) {
-      fullText += chunk;
-      onChunk?.({ type: "content", text: chunk });
-    }
-
-    // Add assistant message to session
-    AgentSession.addAssistantMessage(fullText, {
-      toolCalls: allToolCalls.length > 0 ? allToolCalls : undefined,
-    });
-
-    return { response: fullText, toolCalls: allToolCalls };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    return {
-      response: `Error: ${errorMessage}`,
-      toolCalls: allToolCalls,
-    };
-  }
-}
-
-/**
- * Resolve AI model based on provider
- */
-function resolveModel(provider: ReturnType<typeof getActiveAIProvider>): {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  model: any;
-  providerName: string;
-} {
-  if (!provider) {
-    throw new Error("No provider configured");
-  }
+  const modelId = provider.model.trim() || DEFAULT_MODEL;
+  const baseUrl = provider.baseUrl.trim();
 
   if (provider.kind === "anthropic") {
-    const { createAnthropic } = require("@ai-sdk/anthropic");
-    const anthropic = createAnthropic({
-      apiKey: provider.apiKey,
-      baseURL: provider.baseUrl,
-    });
+    const anthropic = createAnthropic({ apiKey, baseURL: baseUrl });
     return {
-      model: anthropic(provider.model),
+      model: anthropic(modelId),
       providerName: provider.name,
+      providerModelId: modelId,
     };
   }
 
-  const { createOpenAI } = require("@ai-sdk/openai");
   const openai = createOpenAI({
-    apiKey: provider.apiKey,
-    baseURL: provider.baseUrl,
-    headers:
-      provider.kind === "openrouter"
-        ? {
-            "HTTP-Referer": "https://polymarket-tui.local",
-            "X-Title": "Polymarket Bloomberg TUI",
-          }
-        : undefined,
+    apiKey,
+    baseURL: baseUrl,
+    headers: provider.kind === "openrouter"
+      ? {
+          "HTTP-Referer": "https://polymarket-tui.local",
+          "X-Title": "Polymarket Bloomberg TUI",
+        }
+      : undefined,
   });
 
   return {
-    model: openai(provider.model),
+    model: openai(modelId),
     providerName: provider.name,
+    providerModelId: modelId,
   };
 }
 
-/**
- * Create reasoning state
- */
+function mapHistory(messages: ChatMessage[]) {
+  return messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+  }));
+}
+
+function createApprovalRequest(
+  toolName: string,
+  args: Record<string, unknown>,
+  ctx: AgentContext,
+  prepared: Awaited<ReturnType<typeof prepareToolApproval>>,
+  toolDef: ToolDefinition<z.ZodType>,
+): AssistantApprovalRequest {
+  const createdAt = Date.now();
+  return {
+    id: `approval-${createdAt.toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    toolName,
+    title: prepared.title,
+    summary: prepared.summary,
+    args,
+    createdAt,
+    expiresAt: createdAt + APPROVAL_TTL_MS,
+    status: "pending",
+    riskLevel: prepared.riskLevel,
+    requiresWallet: Boolean(toolDef.requiresWallet),
+    executesTrade: Boolean(toolDef.executesTrade),
+    warnings: prepared.warnings,
+    contextHash: buildApprovalContextHash(ctx, toolName, args),
+    preview: prepared.preview,
+  };
+}
+
+function buildToolCallRecord(
+  id: string,
+  toolDef: ToolDefinition<z.ZodType>,
+  args: Record<string, unknown>,
+  result: unknown,
+): ToolCall {
+  return {
+    id,
+    name: toolDef.name,
+    arguments: args,
+    result,
+    category: toolDef.category,
+    riskLevel: toolDef.riskLevel,
+    requiresConfirmation: toolDef.requiresConfirmation,
+  };
+}
+
+export async function runAssistantStream(
+  messages: ChatMessage[],
+  sessionID: string,
+  callbacks: AssistantRuntimeCallbacks = {},
+): Promise<{ response: string; toolCalls: ToolCall[]; tokensUsed: number; effectiveMode: AssistantMode }> {
+  const resolvedModel = resolveAssistantModel();
+  if ("error" in resolvedModel) {
+    return {
+      response: resolvedModel.error,
+      toolCalls: [],
+      tokensUsed: 0,
+      effectiveMode: "safe",
+    };
+  }
+
+  const requestedMode = assistantMode();
+  const { mode, guardReason } = resolveEffectiveAssistantMode(requestedMode);
+  setAssistantGuardReason(guardReason);
+
+  const toolDefs = getToolsForMode(mode);
+  const systemPrompt = buildSystemPrompt(mode, toolDefs);
+  const trackedToolCalls: ToolCall[] = [];
+
+  const wrappedTools: Record<string, unknown> = {};
+  const buildAiTool = createAiTool as (...args: any[]) => unknown;
+  for (const toolDef of toolDefs) {
+    wrappedTools[toolDef.name] = buildAiTool({
+      description: toolDef.description,
+      parameters: zodSchema(toolDef.parameters),
+      execute: async (rawArgs: unknown) => {
+        const args = rawArgs as Record<string, unknown>;
+        const callId = `tc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        const startedAt = Date.now();
+        const ctx = createAgentContext(sessionID, callId);
+
+        callbacks.onToolCall?.({
+          id: callId,
+          name: toolDef.name,
+          args,
+          category: toolDef.category,
+          riskLevel: toolDef.riskLevel,
+          requiresConfirmation: toolDef.requiresConfirmation,
+          startedAt,
+        });
+
+        try {
+          let result: unknown;
+
+          if (toolDef.requiresConfirmation && ctx.approvalMode !== "approved") {
+            const prepared = await prepareToolApproval(toolDef.name, args, ctx);
+            const approval = createApprovalRequest(toolDef.name, args, ctx, prepared, toolDef);
+            setPendingApproval(approval);
+            result = {
+              success: false,
+              message: "Approval required before executing this action.",
+              requiresConfirmation: true,
+              approval,
+              data: prepared.preview,
+            };
+          } else {
+            result = await executeTool(toolDef.name, args, ctx);
+          }
+
+          const completedAt = Date.now();
+          callbacks.onToolResult?.({ id: callId, name: toolDef.name, result, completedAt });
+          trackedToolCalls.push(buildToolCallRecord(callId, toolDef, args, result));
+          return result;
+        } catch (error) {
+          const completedAt = Date.now();
+          const errorMessage = error instanceof Error ? error.message : "Tool execution failed";
+          callbacks.onToolError?.({ id: callId, name: toolDef.name, error: errorMessage, completedAt });
+          const result = { success: false, error: errorMessage };
+          trackedToolCalls.push(buildToolCallRecord(callId, toolDef, args, result));
+          throw error;
+        }
+      },
+    }) as unknown;
+  }
+
+  const result = streamText({
+    model: resolvedModel.model as never,
+    system: systemPrompt,
+    messages: mapHistory(messages),
+    tools: wrappedTools as never,
+    maxSteps: 12,
+    temperature: 0.35,
+    onError: (error) => {
+      console.error("Assistant stream error:", error);
+    },
+  });
+
+  let response = "";
+  for await (const chunk of result.textStream) {
+    response += chunk;
+    callbacks.onChunk?.(chunk);
+  }
+
+  let tokensUsed = 0;
+  try {
+    const usage = await result.usage;
+    tokensUsed = usage.totalTokens ?? 0;
+  } catch {
+    // usage is optional across providers
+  }
+
+  return {
+    response,
+    toolCalls: trackedToolCalls,
+    tokensUsed,
+    effectiveMode: mode,
+  };
+}
+
+function summarizeToolResult(toolName: string, result: unknown): string {
+  const record = typeof result === "object" && result !== null ? result as Record<string, unknown> : null;
+  if (record?.success === false && typeof record.error === "string") {
+    return `Execution failed for ${toolName}: ${record.error}`;
+  }
+
+  if (record?.requiresConfirmation === true) {
+    const approval = record.approval as AssistantApprovalRequest | undefined;
+    return approval
+      ? `${approval.title}: ${approval.summary}`
+      : `Approval required for ${toolName}.`;
+  }
+
+  if (toolName === "place_order") {
+    const data = record?.data as Record<string, unknown> | undefined;
+    if (data?.orderId) {
+      return `Trade executed. Order ${String(data.orderId)} is now ${String(data.status ?? "submitted")}.`;
+    }
+  }
+
+  if (toolName.startsWith("cancel_")) {
+    const data = record?.data as Record<string, unknown> | undefined;
+    if (typeof record?.message === "string") return record.message;
+    if (typeof data?.cancelled === "number") {
+      return `Cancel action completed. ${data.cancelled} order(s) affected.`;
+    }
+  }
+
+  if (typeof record?.message === "string") {
+    return record.message;
+  }
+
+  return `Executed ${toolName}.`;
+}
+
+export async function executeApprovedAssistantAction(
+  approval: AssistantApprovalRequest,
+  sessionID: string,
+  callbacks: AssistantRuntimeCallbacks = {},
+): Promise<{ response: string; toolCall: ToolCall | null; result: unknown }> {
+  const toolDef = getTool(approval.toolName);
+  if (!toolDef) {
+    return {
+      response: `Unknown approved tool: ${approval.toolName}`,
+      toolCall: null,
+      result: { success: false, error: `Unknown tool: ${approval.toolName}` },
+    };
+  }
+
+  const ctx = createAgentContext(sessionID, approval.id);
+  const currentHash = buildApprovalContextHash(ctx, approval.toolName, approval.args);
+  if (currentHash !== approval.contextHash) {
+    const result = {
+      success: false,
+      error: "Approval expired because the trading context changed. Refresh the preview and approve again.",
+    };
+    return {
+      response: "Approval expired because market or account context drifted. Please request a fresh preview.",
+      toolCall: buildToolCallRecord(approval.id, toolDef, approval.args, result),
+      result,
+    };
+  }
+
+  clearPendingApproval();
+
+  callbacks.onToolCall?.({
+    id: approval.id,
+    name: toolDef.name,
+    args: approval.args,
+    category: toolDef.category,
+    riskLevel: toolDef.riskLevel,
+    requiresConfirmation: toolDef.requiresConfirmation,
+    startedAt: Date.now(),
+  });
+
+  const approvedContext = { ...ctx, approvalMode: "approved" as const };
+  const result = await executeTool(toolDef.name, approval.args, approvedContext);
+  callbacks.onToolResult?.({
+    id: approval.id,
+    name: toolDef.name,
+    result,
+    completedAt: Date.now(),
+  });
+
+  return {
+    response: summarizeToolResult(toolDef.name, result),
+    toolCall: buildToolCallRecord(approval.id, toolDef, approval.args, result),
+    result,
+  };
+}
+
 export function createReasoningState(): ReasoningState {
   return {
     currentStep: "thinking",
@@ -308,12 +515,16 @@ export function createReasoningState(): ReasoningState {
   };
 }
 
-/**
- * Update reasoning state
- */
-export function updateReasoningState(
-  state: ReasoningState,
-  update: Partial<ReasoningState>
-): ReasoningState {
+export function updateReasoningState(state: ReasoningState, update: Partial<ReasoningState>): ReasoningState {
   return { ...state, ...update };
+}
+
+export function getPendingApprovalIfLive(): AssistantApprovalRequest | null {
+  const approval = pendingApproval();
+  if (!approval) return null;
+  if (approval.expiresAt <= Date.now()) {
+    clearPendingApproval();
+    return null;
+  }
+  return approval;
 }

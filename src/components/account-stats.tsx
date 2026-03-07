@@ -1,6 +1,6 @@
 import { Show, For } from "solid-js";
 import { useTheme } from "../context/theme";
-import { walletState, setAccountStatsOpen, authState, currentUserProfile } from "../state";
+import { walletState, setAccountStatsOpen, authState, currentUserProfile, getTradingBalance } from "../state";
 import { PanelHeader, Separator, DataRow } from "./ui/panel-components";
 import { positionsState } from "../hooks/usePositions";
 import { ordersState } from "../hooks/useOrders";
@@ -49,12 +49,12 @@ export function AccountStatsPanel() {
   const monthlyStats = () => calculateMonthlyStats(ordersState.tradeHistory).slice(0, 4);
   const concentration = () => calculateMarketConcentration(positionsState.positions);
 
-  const totalBalance = () => walletState.balance + portfolioSummary().totalValue;
+  const totalBalance = () => getTradingBalance() + portfolioSummary().totalValue;
 
   const healthScore = () => {
     const bal = totalBalance();
     if (bal === 0) return 0;
-    const liquidity = (walletState.balance / bal) * 100;
+    const liquidity = (getTradingBalance() / bal) * 100;
     const pnlScore = portfolioSummary().totalCashPnl > 0 
       ? Math.min(100, 50 + portfolioSummary().totalCashPnl / 10)
       : Math.max(0, 50 + portfolioSummary().totalCashPnl / 10);
@@ -162,7 +162,7 @@ export function AccountStatsPanel() {
             </box>
             <box flexDirection="row" width="100%" gap={2}>
               <box flexDirection="column" width="24%">
-                <DataRow label="Cash" value={`$${walletState.balance.toFixed(2)}`} valueColor="text" compact />
+                <DataRow label="Cash" value={`$${getTradingBalance().toFixed(2)}`} valueColor="text" compact />
                 <DataRow label="Positions" value={`$${portfolioSummary().totalValue.toFixed(2)}`} valueColor="text" compact />
                 <DataRow label="Total" value={`$${totalBalance().toFixed(2)}`} valueColor="accent" compact />
               </box>

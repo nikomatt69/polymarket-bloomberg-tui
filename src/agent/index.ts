@@ -23,5 +23,5 @@ export type { ReasoningState, ReasoningStep } from "./reasoning";
 // Main functions
 export { getTUIContext, formatTUIContextForPrompt, createAgentContext } from "./context";
 export { AgentSession } from "./session";
-export { runReasoningLoop, buildSystemPrompt, executeToolWithTracking } from "./reasoning";
-export { getTool, getExecutor, executeTool, getToolNames, allTools, executors } from "./tools";
+export { buildSystemPrompt, runAssistantStream, executeApprovedAssistantAction, getPendingApprovalIfLive } from "./reasoning";
+export { getTool, getExecutor, executeTool, getToolNames, getToolsForMode, prepareToolApproval, allTools, executors } from "./tools";

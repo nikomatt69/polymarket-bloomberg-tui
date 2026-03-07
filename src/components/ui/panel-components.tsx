@@ -5,6 +5,7 @@
 
 import { For, Show } from "solid-js";
 import { useTheme } from "../../context/theme";
+import { getTool as getAgentTool } from "../../agent/tools";
 
 interface PanelHeaderProps {
   title: string;
@@ -840,14 +841,7 @@ export function ToolCallList(props: ToolCallListProps) {
 
   const getToolCategory = (tool: ToolCall): string => {
     if (tool.category) return tool.category;
-    const name = tool.name;
-    if (["get_market_details", "get_market_price", "get_order_book", "analyze_market", "compare_outcomes", "search_markets"].includes(name)) return "market";
-    if (["get_portfolio", "get_balance", "get_positions_details", "get_trade_history", "get_open_orders"].includes(name)) return "portfolio";
-    if (["place_order", "cancel_order"].includes(name)) return "order";
-    if (["get_categories", "search_by_category", "get_trending_markets", "get_sports_markets", "get_live_events", "get_events", "get_series_markets", "get_all_series", "get_all_tags", "get_markets_by_tag"].includes(name)) return "discovery";
-    if (["navigate_to_market", "set_timeframe", "set_sort_by", "refresh_markets"].includes(name)) return "navigation";
-    if (["open_wallet_modal", "open_portfolio", "open_order_form", "get_watchlist", "add_watchlist", "remove_watchlist", "get_alerts"].includes(name)) return "ui";
-    return "unknown";
+    return getAgentTool(tool.name)?.category ?? "unknown";
   };
 
   const getStatusColor = (status: ToolCall["status"]) => {

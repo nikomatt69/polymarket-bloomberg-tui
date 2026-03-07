@@ -365,6 +365,10 @@ const initialWalletState: WalletState = {
 };
 export const [walletState, setWalletState] = createStore<WalletState>(initialWalletState);
 
+export function getTradingBalance(): number {
+  return walletState.funderAddress ? walletState.funderBalance : walletState.balance;
+}
+
 // Create signals for reactive values
 export const [highlightedIndex, setHighlightedIndex] = createSignal(0);
 export const [isRefreshing, setIsRefreshing] = createSignal(false);
@@ -746,11 +750,35 @@ export interface ChatMessage {
   toolCalls?: ToolCall[];
 }
 
+export type ToolRiskLevel = "low" | "medium" | "high" | "critical";
+
 export interface ToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
   result?: unknown;
+   category?: string;
+   riskLevel?: ToolRiskLevel;
+   requiresConfirmation?: boolean;
+}
+
+export type AssistantMode = "scout" | "analyst" | "trader" | "operator" | "safe";
+
+export interface AssistantApprovalRequest {
+  id: string;
+  toolName: string;
+  title: string;
+  summary: string;
+  args: Record<string, unknown>;
+  createdAt: number;
+  expiresAt: number;
+  status: "pending" | "approved" | "rejected" | "expired" | "executed";
+  riskLevel: ToolRiskLevel;
+  requiresWallet: boolean;
+  executesTrade: boolean;
+  warnings: string[];
+  contextHash: string;
+  preview?: Record<string, unknown>;
 }
 
 /**
@@ -1334,6 +1362,8 @@ export interface StreamingTool {
   args: unknown;
   result?: unknown;
   category?: string;
+  riskLevel?: ToolRiskLevel;
+  requiresConfirmation?: boolean;
   startedAt?: number;
   completedAt?: number;
   error?: string;
@@ -1346,6 +1376,7 @@ export type EnterpriseRunPhase =
   | "tool_calling"
   | "tool_done"
   | "tool_error"
+  | "awaiting_approval"
   | "finalizing";
 
 export const [enterpriseChatOpen, setEnterpriseChatOpen] = createSignal(false);
@@ -1353,6 +1384,52 @@ export const [streamingMessage, setStreamingMessage] = createSignal("");
 export const [enterpriseRunPhase, setEnterpriseRunPhase] = createSignal<EnterpriseRunPhase>("idle");
 export const [enterpriseToolSelectedId, setEnterpriseToolSelectedId] = createSignal("");
 export const [enterpriseToolExpandedIds, setEnterpriseToolExpandedIds] = createSignal<string[]>([]);
+export const [assistantMode, setAssistantModeSignal] = createSignal<AssistantMode>("analyst");
+export const [assistantGuardReason, setAssistantGuardReason] = createSignal<string | null>(null);
+export const [pendingApproval, setPendingApproval] = createSignal<AssistantApprovalRequest | null>(null);
+
+const ASSISTANT_MODE_ORDER: AssistantMode[] = ["scout", "analyst", "trader", "operator", "safe"];
+
+export function setAssistantMode(mode: AssistantMode): void {
+  setAssistantModeSignal(mode);
+}
+
+export function cycleAssistantMode(): AssistantMode {
+  const current = assistantMode();
+  const currentIndex = ASSISTANT_MODE_ORDER.indexOf(current);
+  const nextMode = ASSISTANT_MODE_ORDER[(currentIndex + 1) % ASSISTANT_MODE_ORDER.length] ?? "analyst";
+  setAssistantModeSignal(nextMode);
+  return nextMode;
+}
+
+export function clearPendingApproval(): void {
+  setPendingApproval(null);
+}
+
+export function updatePendingApprovalStatus(
+  status: AssistantApprovalRequest["status"],
+  overrides: Partial<AssistantApprovalRequest> = {},
+): void {
+  setPendingApproval((current) => {
+    if (!current) return current;
+    return {
+      ...current,
+      ...overrides,
+      status,
+    };
+  });
+}
+
+export function expirePendingApproval(reason?: string): void {
+  setPendingApproval((current) => {
+    if (!current) return current;
+    return {
+      ...current,
+      status: "expired",
+      summary: reason && reason.trim().length > 0 ? reason : current.summary,
+    };
+  });
+}
 
 export function toggleEnterpriseToolExpanded(id: string): void {
   if (!id) return;
@@ -1418,3 +1495,38 @@ export const [inputHistory, setInputHistory] = createSignal<string[]>([]);
 export const [inputHistoryIdx, setInputHistoryIdx] = createSignal(-1);
 export const [currentSessionId, setCurrentSessionId] = createSignal<string>("");
 export const [sessionTokens, setSessionTokens] = createSignal(0);
+
+// ─── XMTP P2P Chat ───────────────────────────────────────────────────────────────
+export interface XmtpConversation {
+  id: string;
+  peerAddress: string;
+  peerInboxId?: string;
+  name?: string;
+  createdAt: Date;
+  lastMessage?: { content: string; timestamp: Date; isFromMe: boolean };
+  unreadCount: number;
+}
+
+export interface XmtpMessage {
+  id: string;
+  conversationId: string;
+  senderAddress: string;
+  content: string;
+  timestamp: Date;
+  status: "sending" | "sent" | "delivered" | "failed";
+}
+
+export const [xmtpChatOpen, setXmtpChatOpen] = createSignal(false);
+export const [xmtpConnected, setXmtpConnected] = createSignal(false);
+export const [xmtpConnecting, setXmtpConnecting] = createSignal(false);
+export const [xmtpStatus, setXmtpStatus] = createSignal<string | null>(null);
+export const [xmtpConversations, setXmtpConversations] = createSignal<XmtpConversation[]>([]);
+export const [xmtpCurrentConversationId, setXmtpCurrentConversationId] = createSignal<string | null>(null);
+export const [xmtpMessages, setXmtpMessages] = createSignal<XmtpMessage[]>([]);
+export const [xmtpInputValue, setXmtpInputValue] = createSignal("");
+export const [xmtpInputFocused, setXmtpInputFocused] = createSignal(false);
+export const [xmtpError, setXmtpError] = createSignal<string | null>(null);
+export const [xmtpInputHistory, setXmtpInputHistory] = createSignal<string[]>([]);
+export const [xmtpInputHistoryIdx, setXmtpInputHistoryIdx] = createSignal(-1);
+export const [xmtpNewConversationInput, setXmtpNewConversationInput] = createSignal("");
+export const [xmtpShowNewConversation, setXmtpShowNewConversation] = createSignal(false);

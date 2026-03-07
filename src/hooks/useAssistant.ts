@@ -5,6 +5,8 @@
  */
 
 import {
+  assistantMode,
+  type AssistantMode,
   chatMessages,
   setChatMessages,
   chatLoading,
@@ -13,6 +15,7 @@ import {
   setChatInputValue,
   chatInputFocused,
   setChatInputFocused,
+  getTradingBalance,
   ChatMessage,
   streamingMessage,
   setStreamingMessage,
@@ -27,6 +30,10 @@ import {
   sessionTokens,
   setSessionTokens,
   getActiveAIProvider,
+  pendingApproval,
+  clearPendingApproval,
+  setPendingApproval,
+  setAssistantMode,
   setEnterpriseRunPhase,
   setEnterpriseToolSelectedId,
   clearEnterpriseToolUiState,
@@ -39,6 +46,7 @@ import {
   loadSession,
   SessionRecord,
 } from "../api/sessions";
+import { executeApprovedAssistantAction, getPendingApprovalIfLive } from "../agent/reasoning";
 
 function generateId(): string {
   return Math.random().toString(36).substring(2, 15);
@@ -65,6 +73,14 @@ function ensureSession(): void {
       );
       setCurrentSessionId(latest.id);
       setSessionTokens(latest.metadata.tokensUsed);
+      if (latest.metadata.assistantMode) {
+        setAssistantMode(latest.metadata.assistantMode);
+      }
+      if (latest.metadata.pendingApproval && latest.metadata.pendingApproval.expiresAt > Date.now()) {
+        setPendingApproval(latest.metadata.pendingApproval);
+      } else {
+        clearPendingApproval();
+      }
     } else {
       const newSession = initSession();
       setCurrentSessionId(newSession.id);
@@ -90,6 +106,8 @@ function doSaveSession(): void {
       provider: provider?.name ?? "",
       model: provider?.model ?? "",
       tokensUsed: sessionTokens(),
+      assistantMode: assistantMode(),
+      pendingApproval: pendingApproval(),
     },
   };
   saveSession(record);
@@ -106,6 +124,7 @@ function handleSlashCommand(cmd: string, args: string): boolean {
       setSessionTokens(0);
       setStreamingMessage("");
       setStreamingTools([]);
+      clearPendingApproval();
       setEnterpriseRunPhase("idle");
       clearEnterpriseToolUiState();
       setChatMessages([
@@ -125,6 +144,9 @@ function handleSlashCommand(cmd: string, args: string): boolean {
         "  /clear         — Clear chat and start a new session",
         "  /help          — Show this help",
         "  /model         — Show current AI model/provider",
+        "  /mode          — Show or change assistant mode",
+        "  /approve       — Approve pending assistant action",
+        "  /reject        — Reject pending assistant action",
         "  /sessions      — List recent sessions",
         "  /session <id>  — Load a previous session by ID",
         "  /save          — Force-save current session",
@@ -145,6 +167,47 @@ function handleSlashCommand(cmd: string, args: string): boolean {
           id: generateId(),
           role: "assistant",
           content: `Current model: ${provider?.model ?? "unknown"}\nProvider: ${provider?.name ?? "none configured"}`,
+          timestamp: new Date(),
+        },
+      ]);
+      return true;
+    }
+
+    case "/mode": {
+      const nextMode = args.trim().toLowerCase();
+      if (!nextMode) {
+        setChatMessages([
+          ...chatMessages(),
+          {
+            id: generateId(),
+            role: "assistant",
+            content: `Current assistant mode: ${assistantMode()}`,
+            timestamp: new Date(),
+          },
+        ]);
+        return true;
+      }
+
+      if (!["scout", "analyst", "trader", "operator", "safe"].includes(nextMode)) {
+        setChatMessages([
+          ...chatMessages(),
+          {
+            id: generateId(),
+            role: "assistant",
+            content: "Usage: /mode <scout|analyst|trader|operator|safe>",
+            timestamp: new Date(),
+          },
+        ]);
+        return true;
+      }
+
+      setAssistantMode(nextMode as AssistantMode);
+      setChatMessages([
+        ...chatMessages(),
+        {
+          id: generateId(),
+          role: "assistant",
+          content: `Assistant mode set to ${nextMode}.`,
           timestamp: new Date(),
         },
       ]);
@@ -204,6 +267,14 @@ function handleSlashCommand(cmd: string, args: string): boolean {
       );
       setCurrentSessionId(record.id);
       setSessionTokens(record.metadata.tokensUsed);
+      if (record.metadata.assistantMode) {
+        setAssistantMode(record.metadata.assistantMode);
+      }
+      if (record.metadata.pendingApproval && record.metadata.pendingApproval.expiresAt > Date.now()) {
+        setPendingApproval(record.metadata.pendingApproval);
+      } else {
+        clearPendingApproval();
+      }
       setChatMessages((prev) => [
         ...prev,
         {
@@ -240,7 +311,7 @@ function handleSlashCommand(cmd: string, args: string): boolean {
         `  Price: ${market?.outcomes[0]?.price.toFixed(2) ?? "N/A"}`,
         `  Change 24h: ${market?.change24h?.toFixed(2) ?? "N/A"}%`,
         `  Wallet: ${walletState.connected ? (walletState.address ?? "connected") : "not connected"}`,
-        `  Balance: $${walletState.balance?.toFixed(2) ?? "0.00"}`,
+        `  Balance: $${getTradingBalance().toFixed(2)}`,
         `  Markets loaded: ${appState.markets.length}`,
       ].join("\n");
       setChatMessages([
@@ -271,6 +342,155 @@ export function useAssistant() {
   // Ensure session is initialized on first call
   ensureSession();
 
+  const handleStreamChunk = (chunk: string) => {
+    setStreamingMessage((prev) => prev + chunk);
+    setEnterpriseRunPhase("streaming_text");
+  };
+
+  const handleToolCall = (tool: {
+    id: string;
+    name: string;
+    args: unknown;
+    category?: string;
+    riskLevel?: "low" | "medium" | "high" | "critical";
+    requiresConfirmation?: boolean;
+    startedAt: number;
+  }) => {
+    setStreamingTools((prev) => [
+      ...prev,
+      {
+        id: tool.id,
+        name: tool.name,
+        args: tool.args,
+        category: tool.category,
+        riskLevel: tool.riskLevel,
+        requiresConfirmation: tool.requiresConfirmation,
+        startedAt: tool.startedAt,
+        status: "calling",
+      },
+    ]);
+    setEnterpriseRunPhase("tool_calling");
+    if (!tool.id) return;
+    setEnterpriseToolSelectedId((prev) => prev || tool.id);
+  };
+
+  const handleToolResult = (tool: {
+    id: string;
+    name: string;
+    result: unknown;
+    completedAt: number;
+  }) => {
+    const record = typeof tool.result === "object" && tool.result !== null
+      ? tool.result as Record<string, unknown>
+      : null;
+
+    setStreamingTools((prev) =>
+      prev.map((entry) =>
+        entry.id === tool.id
+          ? { ...entry, status: "done", result: tool.result, completedAt: tool.completedAt }
+          : entry,
+      ),
+    );
+
+    setEnterpriseRunPhase(record?.requiresConfirmation === true ? "awaiting_approval" : "tool_done");
+  };
+
+  const handleToolError = (tool: {
+    id: string;
+    name: string;
+    error: string;
+    completedAt: number;
+  }) => {
+    setStreamingTools((prev) =>
+      prev.map((entry) =>
+        entry.id === tool.id
+          ? {
+              ...entry,
+              status: "error",
+              error: tool.error,
+              result: { success: false, error: tool.error },
+              completedAt: tool.completedAt,
+            }
+          : entry,
+      ),
+    );
+    setEnterpriseRunPhase("tool_error");
+  };
+
+  const approvePendingAction = async (): Promise<boolean> => {
+    const approval = getPendingApprovalIfLive();
+    if (!approval || chatLoading()) {
+      return false;
+    }
+
+    setChatLoading(true);
+    setStreamingMessage("");
+    setStreamingTools([]);
+    setEnterpriseRunPhase("tool_calling");
+    clearEnterpriseToolUiState();
+
+    try {
+      const { response, toolCall } = await executeApprovedAssistantAction(approval, currentSessionId(), {
+        onToolCall: handleToolCall,
+        onToolResult: handleToolResult,
+        onToolError: handleToolError,
+      });
+
+      setEnterpriseRunPhase("finalizing");
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: generateId(),
+          role: "assistant",
+          content: response,
+          timestamp: new Date(),
+          ...(toolCall ? { toolCalls: [toolCall] } : {}),
+        },
+      ]);
+      doSaveSession();
+      return true;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Approval execution failed";
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: generateId(),
+          role: "assistant",
+          content: `Error: ${errorMsg}`,
+          timestamp: new Date(),
+        },
+      ]);
+      return false;
+    } finally {
+      setChatLoading(false);
+      setStreamingMessage("");
+      setStreamingTools([]);
+      setEnterpriseRunPhase(getPendingApprovalIfLive() ? "awaiting_approval" : "idle");
+      clearEnterpriseToolUiState();
+    }
+  };
+
+  const rejectPendingAction = (): boolean => {
+    const approval = getPendingApprovalIfLive();
+    if (!approval) {
+      return false;
+    }
+
+    clearPendingApproval();
+    setEnterpriseRunPhase("idle");
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: generateId(),
+        role: "assistant",
+        content: `Action rejected: ${approval.summary}`,
+        timestamp: new Date(),
+      },
+    ]);
+    doSaveSession();
+    return true;
+  };
+
   const submitPrompt = async () => {
     const input = chatInputValue().trim();
     if (!input || chatLoading()) return;
@@ -287,8 +507,20 @@ export function useAssistant() {
       const cmd = spaceIdx === -1 ? input : input.slice(0, spaceIdx);
       const args = spaceIdx === -1 ? "" : input.slice(spaceIdx + 1).trim();
       setChatInputValue("");
+      if (cmd === "/approve") {
+        await approvePendingAction();
+        return;
+      }
+      if (cmd === "/reject") {
+        rejectPendingAction();
+        return;
+      }
       handleSlashCommand(cmd, args);
       return;
+    }
+
+    if (pendingApproval()) {
+      clearPendingApproval();
     }
 
     // Add user message
@@ -308,55 +540,10 @@ export function useAssistant() {
 
     try {
       const { response, toolCalls, tokensUsed } = await sendMessageToAssistantStream(
-        // onChunk — append to streaming preview
-        (chunk) => {
-          setStreamingMessage((prev) => prev + chunk);
-          setEnterpriseRunPhase("streaming_text");
-        },
-        // onToolCall — add to live tool inspector
-        (tool) => {
-          setStreamingTools((prev) => [
-            ...prev,
-            {
-              id: tool.id,
-              name: tool.name,
-              args: tool.args,
-              category: tool.category,
-              startedAt: tool.startedAt,
-              status: "calling",
-            },
-          ]);
-          setEnterpriseRunPhase("tool_calling");
-          if (!tool.id) return;
-          setEnterpriseToolSelectedId((prev) => prev || tool.id);
-        },
-        // onToolResult — update matching tool to done
-        (tool) => {
-          setStreamingTools((prev) =>
-            prev.map((t) =>
-              t.id === tool.id
-                ? { ...t, status: "done", result: tool.result, completedAt: tool.completedAt }
-                : t,
-            ),
-          );
-          setEnterpriseRunPhase("tool_done");
-        },
-        (tool) => {
-          setStreamingTools((prev) =>
-            prev.map((t) =>
-              t.id === tool.id
-                ? {
-                    ...t,
-                    status: "error",
-                    error: tool.error,
-                    result: { success: false, error: tool.error },
-                    completedAt: tool.completedAt,
-                  }
-                : t,
-            ),
-          );
-          setEnterpriseRunPhase("tool_error");
-        },
+        handleStreamChunk,
+        handleToolCall,
+        handleToolResult,
+        handleToolError,
       );
 
       setEnterpriseRunPhase("finalizing");
@@ -390,7 +577,7 @@ export function useAssistant() {
       setChatLoading(false);
       setStreamingMessage("");
       setStreamingTools([]);
-      setEnterpriseRunPhase("idle");
+      setEnterpriseRunPhase(getPendingApprovalIfLive() ? "awaiting_approval" : "idle");
       clearEnterpriseToolUiState();
     }
   };
@@ -421,6 +608,7 @@ export function useAssistant() {
     setSessionTokens(0);
     setStreamingMessage("");
     setStreamingTools([]);
+    clearPendingApproval();
     setEnterpriseRunPhase("idle");
     clearEnterpriseToolUiState();
   };
@@ -446,10 +634,15 @@ export function useAssistant() {
     focusInput,
     blurInput,
     submitPrompt,
+    approvePendingAction,
+    rejectPendingAction,
     clearChat,
     navigateHistoryUp,
     navigateHistoryDown,
     saveSession: doSaveSession,
+    mode: assistantMode,
+    setMode: setAssistantMode,
+    pendingApproval,
     streamingMessage,
     streamingTools,
     sessionId: currentSessionId,

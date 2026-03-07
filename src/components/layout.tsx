@@ -13,6 +13,7 @@ import { SocialPanel } from "./social-panel";
 import { AutomationPanel } from "./automation-panel";
 import { SkillsPanel } from "./skills-panel";
 import { EnterpriseChat } from "./enterprise-chat";
+import { XmtpChat } from "./xmtp-chat";
 import { SearchPanel } from "./search-panel";
 import { useTheme } from "../context/theme";
 import { Separator } from "./ui/panel-components";
@@ -42,6 +43,7 @@ import {
   automationPanelOpen,
   skillsPanelOpen,
   enterpriseChatOpen,
+  xmtpChatOpen,
   searchPanelOpen,
   toastQueue,
   dismissToast,
@@ -133,7 +135,7 @@ export function Layout() {
         comparisonPanelOpen() || watchlistPanelOpen() || settingsPanelOpen() || shortcutsPanelOpen() ||
         orderBookPanelOpen() || filterPanelOpen() || analyticsPanelOpen() || messagesPanelOpen() || authModalOpen() ||
         profilePanelOpen() || userSearchOpen() || newsPanelOpen() || socialPanelOpen() || automationPanelOpen() || skillsPanelOpen() ||
-        enterpriseChatOpen() || searchPanelOpen()
+        enterpriseChatOpen() || xmtpChatOpen() || searchPanelOpen()
       }>
         <box
           position="absolute"
@@ -264,6 +266,11 @@ export function Layout() {
       {/* Enterprise Chat Overlay — full screen, highest zIndex */}
       <Show when={enterpriseChatOpen()}>
         <EnterpriseChat />
+      </Show>
+
+      {/* XMTP P2P Chat Overlay */}
+      <Show when={xmtpChatOpen()}>
+        <XmtpChat />
       </Show>
 
       {/* Search Panel Overlay */}

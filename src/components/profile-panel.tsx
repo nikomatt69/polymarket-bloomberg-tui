@@ -23,6 +23,7 @@ import {
   setContactsList,
   currentUserProfile,
   setCurrentUserProfile,
+  getTradingBalance,
   editingField,
   setEditingField,
   editValue,
@@ -154,7 +155,7 @@ export function ProfilePanel() {
     return {
       walletAddress: walletState.address,
       walletConnected: walletState.connected,
-      cashBalance: walletState.balance,
+      cashBalance: getTradingBalance(),
       positionsCount: summary.positionCount,
       positionsValue: summary.totalValue,
       totalPnl: summary.totalCashPnl,

@@ -14,6 +14,8 @@ export interface TUIContext {
   selectedMarket: Market | null;
   selectedMarketId: string | null;
   selectedOutcome: Outcome | null;
+  selectedTokenId: string | null;
+  selectedMarketStatus: "open" | "closed" | "resolved" | "pending";
 
   // UI State
   currentView: "market" | "portfolio";
@@ -23,19 +25,27 @@ export interface TUIContext {
   // Wallet
   walletConnected: boolean;
   walletAddress: string | null;
+  funderAddress: string | null;
   balance: number;
+  funderBalance: number;
 
   // Data counts
   marketsCount: number;
   positionsCount: number;
   openOrdersCount: number;
+  openLiveOrdersCount: number;
   watchlistCount: number;
   alertsCount: number;
+  lastOrderSyncAt: number | null;
+  lastPositionsSyncAt: number | null;
+  userWsConnected: boolean;
 
   // Filters & Settings
   sortBy: "volume" | "change" | "name" | "liquidity" | "volatility";
   timeframe: "1h" | "4h" | "1d" | "5d" | "1w" | "1M" | "all";
   watchlistFilterActive: boolean;
+  assistantMode: "scout" | "analyst" | "trader" | "operator" | "safe";
+  assistantGuardReason: string | null;
 
   // Panels
   panels: {
@@ -58,13 +68,26 @@ export interface AgentContext {
   abort: AbortSignal;
   tuiContext: TUIContext;
   timestamp: number;
+  approvalMode?: "standard" | "approved";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tool Categories
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type ToolCategory = "market" | "portfolio" | "order" | "alert" | "discovery" | "analysis" | "navigation" | "ui";
+export type ToolCategory =
+  | "market"
+  | "portfolio"
+  | "order"
+  | "alert"
+  | "discovery"
+  | "analysis"
+  | "navigation"
+  | "ui"
+  | "execution"
+  | "execution_prep";
+
+export type ToolRiskLevel = "low" | "medium" | "high" | "critical";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tool Result Type
@@ -72,9 +95,12 @@ export type ToolCategory = "market" | "portfolio" | "order" | "alert" | "discove
 
 export interface ToolResult {
   success: boolean;
+  message?: string;
   data?: unknown;
   error?: string;
   metadata?: Record<string, unknown>;
+  requiresConfirmation?: boolean;
+  approval?: Record<string, unknown>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -88,8 +114,14 @@ export interface ToolDefinition<Params extends z.ZodType> {
   description: string;
   parameters: Params;
   examples?: string[];
+  riskLevel?: ToolRiskLevel;
+  readOnly?: boolean;
   requiresWallet?: boolean;
+  requiresSelectedMarket?: boolean;
+  requiresConfirmation?: boolean;
   executesTrade?: boolean;
+  mutatesUi?: boolean;
+  enabledModes?: Array<"scout" | "analyst" | "trader" | "operator" | "safe">;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,8 +139,14 @@ export namespace AgentTool {
     description: string;
     parameters: AnyParams;
     examples?: string[];
+    riskLevel: ToolRiskLevel;
+    readOnly: boolean;
     requiresWallet: boolean;
+    requiresSelectedMarket: boolean;
+    requiresConfirmation: boolean;
     executesTrade: boolean;
+    mutatesUi: boolean;
+    enabledModes: Array<"scout" | "analyst" | "trader" | "operator" | "safe">;
     execute: Executor;
   }
 
@@ -132,7 +170,7 @@ export namespace AgentTool {
   }
 
   export function getCategories(): ToolCategory[] {
-    return ["market", "portfolio", "order", "alert", "discovery", "analysis", "navigation", "ui"];
+    return ["market", "portfolio", "order", "alert", "discovery", "analysis", "navigation", "ui", "execution_prep", "execution"];
   }
 
   export function getWalletTools(): Definition[] {

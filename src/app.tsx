@@ -9,6 +9,7 @@ import type { KeyEvent } from "@opentui/core";
 import { Layout } from "./components/layout";
 import { SEARCH_PANEL_CATEGORY_IDS, getSearchPanelResults, selectSearchPanelMarket } from "./components/search-panel";
 import {
+  type AssistantMode,
   initializeState,
   savePersistedState,
   navigateNext,
@@ -243,6 +244,8 @@ import {
   setSkillsAddInput,
   skillsAddField,
   setSkillsAddField,
+  xmtpChatOpen,
+  setXmtpChatOpen,
   enterpriseChatOpen,
   setEnterpriseChatOpen,
   enterpriseToolSelectedId,
@@ -252,6 +255,7 @@ import {
 } from "./state";
 import { refreshWalletBalance } from "./hooks/useWallet";
 import { useAssistant } from "./hooks/useAssistant";
+import { useXmtp } from "./hooks/useXmtp";
 import { initializeWebSocket } from "./api/websocket";
 import { searchUsers } from "./api/users";
 import { loadRules, saveRules } from "./automation/rules";
@@ -363,7 +367,21 @@ function AppContent() {
   useKeyboard((e: KeyEvent) => {
     // Enterprise chat — highest priority intercept
     if (enterpriseChatOpen()) {
-      const { focused, input, setInput, submitPrompt, blurInput, clearChat, navigateHistoryUp, navigateHistoryDown, streamingTools } = useAssistant();
+      const {
+        focused,
+        input,
+        setInput,
+        submitPrompt,
+        blurInput,
+        clearChat,
+        navigateHistoryUp,
+        navigateHistoryDown,
+        streamingTools,
+        approvePendingAction,
+        rejectPendingAction,
+        mode,
+        setMode,
+      } = useAssistant();
       if (focused()) {
         if (e.name === "escape") { blurInput(); return; }
         if (e.name === "return") { void submitPrompt(); return; }
@@ -396,6 +414,24 @@ function AppContent() {
           return;
         }
 
+        if (e.name === "y") {
+          void approvePendingAction();
+          return;
+        }
+
+        if (e.name === "n") {
+          rejectPendingAction();
+          return;
+        }
+
+        if (e.name === "m") {
+          const modes: AssistantMode[] = ["scout", "analyst", "trader", "operator", "safe"];
+          const currentIdx = modes.indexOf(mode());
+          const nextMode = modes[(currentIdx + 1) % modes.length] ?? "analyst";
+          setMode(nextMode);
+          return;
+        }
+
         if (e.name === "escape") {
           setEnterpriseChatOpen(false);
           clearEnterpriseToolUiState();
@@ -404,6 +440,42 @@ function AppContent() {
         if (e.name === "return" || e.name === "i") { const { focusInput } = useAssistant(); focusInput(); return; }
       }
       return; // block all global keys while enterprise chat is open
+    }
+
+    // XMTP P2P Chat intercept
+    if (xmtpChatOpen()) {
+      const { inputValue, setInputValue, inputFocused, setInputFocused, sendMessage, navigateHistoryUp, navigateHistoryDown, showNewConversation, setShowNewConversation, newConversationInput, setNewConversationInput, startNewConversation } = useXmtp();
+      if (inputFocused()) {
+        if (e.name === "escape") {
+          if (showNewConversation()) {
+            setShowNewConversation(false);
+            setNewConversationInput("");
+          } else {
+            setInputFocused(false);
+          }
+          return;
+        }
+        if (e.name === "return") {
+          if (showNewConversation() && newConversationInput().trim()) {
+            startNewConversation(newConversationInput().trim());
+          } else if (!showNewConversation()) {
+            sendMessage(inputValue());
+          }
+          return;
+        }
+        if (e.name === "up") { navigateHistoryUp(); return; }
+        if (e.name === "down") { navigateHistoryDown(); return; }
+      } else {
+        if (e.name === "escape") {
+          setXmtpChatOpen(false);
+          return;
+        }
+        if (e.name === "return" || e.name === "i") {
+          setInputFocused(true);
+          return;
+        }
+      }
+      return; // block all global keys while XMTP chat is open
     }
 
     // Order form modal intercept
@@ -1446,6 +1518,16 @@ function AppContent() {
       return;
     }
 
+    if (!e.ctrl && (e.name === "f" || e.sequence === "f")) {
+      setXmtpChatOpen(true);
+      return;
+    }
+
+    if (e.ctrl && (e.name === "f" || e.sequence === "f")) {
+      toggleWatchlistFilter();
+      return;
+    }
+
     // Portfolio sub-tab navigation: Tab / Shift+Tab when portfolio is open
     if (portfolioOpen() && e.name === "tab") {
       const tabs = ["overview", "positions", "analytics", "history"] as const;
@@ -1599,10 +1681,6 @@ function AppContent() {
       case "l":
         // l — toggle filter panel
         setFilterPanelOpen(!filterPanelOpen());
-        break;
-      case "f":
-        // f — toggle watchlist filter
-        toggleWatchlistFilter();
         break;
       case "x": {
         if (e.ctrl) {

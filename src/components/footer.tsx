@@ -1,107 +1,84 @@
 /**
- * Footer — Bloomberg-style keyboard shortcuts reference bar
- * Shows context-aware hints based on current mode
+ * Footer — Bloomberg-style keyboard shortcuts reference bar.
+ * The visible shortcut chips are clickable and trigger the same actions.
  */
 
-import { createMemo, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { useTheme } from "../context/theme";
 import {
-  enterpriseChatOpen,
-  chatInputFocused,
-  orderFormOpen,
-  orderHistoryOpen,
-  accountStatsOpen,
-  profilePanelOpen,
-  userSearchOpen,
-  settingsPanelOpen,
-  searchPanelOpen,
   appState,
+  accountStatsOpen,
+  chatInputFocused,
+  clearEnterpriseToolUiState,
+  closeSearchPanel,
+  enterpriseChatOpen,
+  enterpriseToolSelectedId,
+  getSelectedMarket,
+  openSearchPanel,
+  orderFormFocusField,
+  orderFormOpen,
+  orderFormOutcomeIdx,
+  orderHistoryOpen,
+  portfolioOpen,
+  searchPanelCategory,
+  searchPanelOpen,
+  searchPanelResultIdx,
+  setSearchPanelCategory,
+  setSearchPanelResultIdx,
+  setEnterpriseChatOpen,
+  setOrderFormCurrentPrice,
+  setOrderFormFocusField,
+  setOrderFormMarketTitle,
+  setOrderFormOpen,
+  setOrderFormOutcomeTitle,
+  setOrderFormPostOnly,
+  setOrderFormPriceInput,
+  setOrderFormSharesInput,
+  setOrderFormSide,
+  setOrderFormTokenId,
+  setOrderHistoryOpen,
+  setOrderHistorySection,
+  setOrderHistorySelectedIdx,
+  setOrderHistoryTradeSelectedIdx,
+  setPortfolioOpen,
+  setProfilePanelOpen,
+  setSettingsPanelOpen,
+  setSettingsThemeSearchEditing,
+  setUserSearchLoading,
+  setUserSearchOpen,
+  setUserSearchQuery,
+  setUserSearchResults,
+  setWalletModalOpen,
+  setXmtpChatOpen,
+  settingsPanelOpen,
+  userSearchOpen,
+  xmtpChatOpen,
+  xmtpInputFocused,
+  toggleEnterpriseToolExpanded,
 } from "../state";
-import { alertsState } from "../hooks/useAlerts";
-import { positionsState } from "../hooks/usePositions";
+import { alertsState, setAlertsState } from "../hooks/useAlerts";
+import { positionsState, fetchUserPositions } from "../hooks/usePositions";
 import { watchlistState } from "../hooks/useWatchlist";
+import { refreshOrders } from "../hooks/useOrders";
+import { refreshWalletBalance } from "../hooks/useWallet";
+import { useAssistant } from "../hooks/useAssistant";
+import { useXmtp } from "../hooks/useXmtp";
+import {
+  SEARCH_PANEL_CATEGORY_IDS,
+  getSearchPanelResults,
+  selectSearchPanelMarket,
+} from "./search-panel";
 
 interface KeyHint {
   key: string;
   fullLabel: string;
-}
-
-function getContextHints(): KeyHint[] {
-  const hints: KeyHint[] = [];
-  
-  // Always available (outside enterprise chat overlay)
-  if (!enterpriseChatOpen()) {
-    hints.push({ key: "↑↓/jk", fullLabel: "Navigate" });
-    hints.push({ key: "Enter", fullLabel: "AI Chat" });
-    hints.push({ key: "/", fullLabel: "Search" });
-  }
-  
-  // Context-specific
-  if (enterpriseChatOpen()) {
-    if (chatInputFocused()) {
-      hints.push({ key: "Enter", fullLabel: "Send" });
-      hints.push({ key: "↑↓", fullLabel: "History" });
-      hints.push({ key: "Ctrl+U", fullLabel: "Clear Line" });
-      hints.push({ key: "Esc", fullLabel: "Blur" });
-      hints.push({ key: "Ctrl+L", fullLabel: "Clear Chat" });
-    } else {
-      hints.push({ key: "I/Enter", fullLabel: "Focus Input" });
-      hints.push({ key: "↑↓", fullLabel: "Tool Select" });
-      hints.push({ key: "Space", fullLabel: "Expand Tool" });
-      hints.push({ key: "Esc", fullLabel: "Close Chat" });
-    }
-  } else if (profilePanelOpen()) {
-    hints.push({ key: "Esc/X", fullLabel: "Close Profile" });
-    hints.push({ key: "S", fullLabel: "Search Users" });
-    hints.push({ key: "E", fullLabel: "Edit Profile" });
-    hints.push({ key: "M", fullLabel: "My Profile" });
-    hints.push({ key: "L", fullLabel: "Logout" });
-  } else if (userSearchOpen()) {
-    hints.push({ key: "Enter", fullLabel: "Search" });
-    hints.push({ key: "Esc", fullLabel: "Close Search" });
-  } else if (accountStatsOpen()) {
-    hints.push({ key: "Esc", fullLabel: "Close Account" });
-    hints.push({ key: "W", fullLabel: "Wallet" });
-    hints.push({ key: "U", fullLabel: "Refresh Stats" });
-  } else if (orderFormOpen()) {
-    hints.push({ key: "Tab", fullLabel: "Field" });
-    hints.push({ key: "T", fullLabel: "Type" });
-    hints.push({ key: "P", fullLabel: "PostOnly" });
-    hints.push({ key: "Enter", fullLabel: "Submit" });
-  } else if (orderHistoryOpen()) {
-    hints.push({ key: "Tab", fullLabel: "Open/Trade" });
-    hints.push({ key: "C", fullLabel: "Cancel" });
-    hints.push({ key: "A", fullLabel: "Cancel All" });
-  } else if (alertsState.panelOpen) {
-    hints.push({ key: "A", fullLabel: "Add Alert" });
-    hints.push({ key: "D", fullLabel: "Delete" });
-    hints.push({ key: "S", fullLabel: "Sound" });
-  } else if (settingsPanelOpen()) {
-    hints.push({ key: "Tab", fullLabel: "Next Tab" });
-    hints.push({ key: "←→", fullLabel: "Tab" });
-    hints.push({ key: "T", fullLabel: "Theme" });
-    hints.push({ key: "Enter", fullLabel: "Select" });
-  } else if (searchPanelOpen()) {
-    hints.push({ key: "↑↓", fullLabel: "Navigate" });
-    hints.push({ key: "Enter", fullLabel: "Open market" });
-    hints.push({ key: "Tab", fullLabel: "Category" });
-    hints.push({ key: "Esc", fullLabel: "Close" });
-  } else {
-    // Default panel shortcuts
-    hints.push({ key: "O/S", fullLabel: "Buy/Sell" });
-    hints.push({ key: "H", fullLabel: "Orders" });
-    hints.push({ key: "P", fullLabel: "Portfolio" });
-    hints.push({ key: "Z", fullLabel: "Alerts" });
-    hints.push({ key: "Ctrl+X", fullLabel: "User Profile" });
-    hints.push({ key: "Ctrl+Y", fullLabel: "User Search" });
-    hints.push({ key: "E", fullLabel: "Settings" });
-  }
-  
-  return hints;
+  onActivate?: () => void | Promise<void>;
 }
 
 export function Footer() {
   const { theme } = useTheme();
+  const assistant = useAssistant();
+  const xmtp = useXmtp();
   const [columns, setColumns] = createSignal(
     Number.isFinite(process.stdout.columns) ? process.stdout.columns : 120,
   );
@@ -119,7 +96,199 @@ export function Footer() {
     });
   });
 
-  const hints = createMemo(() => getContextHints());
+  const openOrderForm = (side: "BUY" | "SELL") => {
+    const market = getSelectedMarket();
+    if (!market || market.outcomes.length === 0) return;
+
+    const outcomeIdx = Math.min(orderFormOutcomeIdx(), market.outcomes.length - 1);
+    const outcome = market.outcomes[outcomeIdx];
+    if (!outcome) return;
+
+    setOrderFormSide(side);
+    setOrderFormTokenId(outcome.id);
+    setOrderFormMarketTitle(market.title);
+    setOrderFormOutcomeTitle(outcome.title);
+    setOrderFormCurrentPrice(outcome.price);
+    setOrderFormPriceInput(outcome.price.toFixed(4));
+    setOrderFormSharesInput("");
+    setOrderFormPostOnly(false);
+    setOrderFormFocusField("shares");
+    setOrderFormOpen(true);
+  };
+
+  const togglePortfolio = () => {
+    const nextOpen = !portfolioOpen();
+    setPortfolioOpen(nextOpen);
+    if (nextOpen) {
+      void fetchUserPositions();
+      void refreshOrders();
+    }
+  };
+
+  const openOrderHistory = () => {
+    void refreshOrders();
+    setOrderHistorySelectedIdx(0);
+    setOrderHistoryTradeSelectedIdx(0);
+    setOrderHistorySection("open");
+    setOrderHistoryOpen(true);
+  };
+
+  const toggleUserSearch = () => {
+    if (userSearchOpen()) {
+      setUserSearchOpen(false);
+    } else {
+      setUserSearchOpen(true);
+    }
+    setUserSearchQuery("");
+    setUserSearchResults([]);
+    setUserSearchLoading(false);
+  };
+
+  const toggleSettings = () => {
+    setSettingsPanelOpen(!settingsPanelOpen());
+    setSettingsThemeSearchEditing(false);
+  };
+
+  const closeEnterpriseChat = () => {
+    setEnterpriseChatOpen(false);
+    clearEnterpriseToolUiState();
+  };
+
+  const closeXmtpChat = () => {
+    setXmtpChatOpen(false);
+    xmtp.setInputFocused(false);
+  };
+
+  const openCurrentSearchSelection = async () => {
+    const market = getSearchPanelResults()[searchPanelResultIdx()];
+    if (market) {
+      await selectSearchPanelMarket(market);
+    }
+  };
+
+  const cycleSearchCategory = () => {
+    const current = SEARCH_PANEL_CATEGORY_IDS.indexOf(
+      searchPanelCategory() as (typeof SEARCH_PANEL_CATEGORY_IDS)[number],
+    );
+    const nextCategory =
+      SEARCH_PANEL_CATEGORY_IDS[(current + 1) % SEARCH_PANEL_CATEGORY_IDS.length] ?? "all";
+    setSearchPanelCategory(nextCategory);
+    setSearchPanelResultIdx(0);
+  };
+
+  const hints = createMemo<KeyHint[]>(() => {
+    const nextHints: KeyHint[] = [];
+
+    if (!enterpriseChatOpen() && !xmtpChatOpen()) {
+      nextHints.push({ key: "↑↓/jk", fullLabel: "Navigate" });
+      nextHints.push({ key: "Enter", fullLabel: "AI Chat", onActivate: () => { setEnterpriseChatOpen(true); } });
+      nextHints.push({ key: "F", fullLabel: "P2P Chat", onActivate: () => { setXmtpChatOpen(true); } });
+      nextHints.push({ key: "/", fullLabel: "Search", onActivate: openSearchPanel });
+    }
+
+    if (enterpriseChatOpen()) {
+      if (chatInputFocused()) {
+        nextHints.push({
+          key: "Enter",
+          fullLabel: "Send",
+          onActivate: async () => {
+            await assistant.submitPrompt();
+            assistant.blurInput();
+          },
+        });
+        nextHints.push({ key: "↑↓", fullLabel: "History", onActivate: assistant.navigateHistoryUp });
+        nextHints.push({ key: "Ctrl+U", fullLabel: "Clear Line", onActivate: () => assistant.setInput("") });
+        nextHints.push({ key: "Esc", fullLabel: "Blur", onActivate: assistant.blurInput });
+        nextHints.push({ key: "Ctrl+L", fullLabel: "Clear Chat", onActivate: assistant.clearChat });
+      } else {
+        nextHints.push({ key: "I/Enter", fullLabel: "Focus Input", onActivate: assistant.focusInput });
+        nextHints.push({ key: "↑↓", fullLabel: "Tool Select" });
+        nextHints.push({
+          key: "Space",
+          fullLabel: "Expand Tool",
+          onActivate: () => {
+            const id = enterpriseToolSelectedId();
+            if (id) toggleEnterpriseToolExpanded(id);
+          },
+        });
+        nextHints.push({ key: "Esc", fullLabel: "Close Chat", onActivate: closeEnterpriseChat });
+      }
+    } else if (xmtpChatOpen()) {
+      if (xmtpInputFocused()) {
+        nextHints.push({
+          key: "Enter",
+          fullLabel: "Send",
+          onActivate: () => void xmtp.sendMessage(xmtp.inputValue()),
+        });
+        nextHints.push({ key: "↑↓", fullLabel: "History", onActivate: xmtp.navigateHistoryUp });
+        nextHints.push({ key: "Esc", fullLabel: "Blur", onActivate: () => { xmtp.setInputFocused(false); } });
+      } else {
+        nextHints.push({ key: "I/Enter", fullLabel: "Focus Input", onActivate: () => { xmtp.setInputFocused(true); } });
+        nextHints.push({ key: "Esc", fullLabel: "Close Chat", onActivate: closeXmtpChat });
+      }
+    } else if (userSearchOpen()) {
+      nextHints.push({ key: "Enter", fullLabel: "Search" });
+      nextHints.push({ key: "Esc", fullLabel: "Close Search", onActivate: () => { toggleUserSearch(); } });
+    } else if (accountStatsOpen()) {
+      nextHints.push({ key: "Esc", fullLabel: "Close Account" });
+      nextHints.push({ key: "W", fullLabel: "Wallet", onActivate: () => { setWalletModalOpen(true); } });
+      nextHints.push({ key: "U", fullLabel: "Refresh Stats", onActivate: () => void refreshWalletBalance() });
+    } else if (orderFormOpen()) {
+      nextHints.push({
+        key: "Tab",
+        fullLabel: "Field",
+        onActivate: () => { setOrderFormFocusField(orderFormFocusField() === "price" ? "shares" : "price"); },
+      });
+      nextHints.push({ key: "T", fullLabel: "Type" });
+      nextHints.push({ key: "P", fullLabel: "PostOnly", onActivate: () => { setOrderFormPostOnly((value) => !value); } });
+      nextHints.push({ key: "Enter", fullLabel: "Submit" });
+    } else if (orderHistoryOpen()) {
+      nextHints.push({ key: "Tab", fullLabel: "Open/Trade" });
+      nextHints.push({ key: "C", fullLabel: "Cancel" });
+      nextHints.push({ key: "A", fullLabel: "Cancel All" });
+    } else if (alertsState.panelOpen) {
+      nextHints.push({ key: "A", fullLabel: "Add Alert" });
+      nextHints.push({ key: "D", fullLabel: "Delete" });
+      nextHints.push({ key: "S", fullLabel: "Sound" });
+    } else if (settingsPanelOpen()) {
+      nextHints.push({ key: "Tab", fullLabel: "Next Tab" });
+      nextHints.push({ key: "←→", fullLabel: "Tab" });
+      nextHints.push({ key: "T", fullLabel: "Theme" });
+      nextHints.push({ key: "Enter", fullLabel: "Select" });
+    } else if (searchPanelOpen()) {
+      nextHints.push({ key: "↑↓", fullLabel: "Navigate" });
+      nextHints.push({ key: "Enter", fullLabel: "Open Market", onActivate: () => void openCurrentSearchSelection() });
+      nextHints.push({ key: "Tab", fullLabel: "Category", onActivate: cycleSearchCategory });
+      nextHints.push({ key: "Esc", fullLabel: "Close", onActivate: closeSearchPanel });
+    } else {
+      nextHints.push({ key: "O", fullLabel: "Buy", onActivate: () => openOrderForm("BUY") });
+      nextHints.push({ key: "S", fullLabel: "Sell", onActivate: () => openOrderForm("SELL") });
+      nextHints.push({ key: "H", fullLabel: "Orders", onActivate: openOrderHistory });
+      nextHints.push({ key: "P", fullLabel: "Portfolio", onActivate: togglePortfolio });
+      nextHints.push({ key: "Z", fullLabel: "Alerts", onActivate: () => { setAlertsState("panelOpen", true); } });
+      nextHints.push({ key: "Ctrl+X", fullLabel: "User Profile", onActivate: () => { setProfilePanelOpen((open) => !open); } });
+      nextHints.push({ key: "Ctrl+Y", fullLabel: "User Search", onActivate: toggleUserSearch });
+      nextHints.push({ key: "E", fullLabel: "Settings", onActivate: toggleSettings });
+    }
+
+    return nextHints;
+  });
+
+  const visibleHints = createMemo(() => {
+    const cols = Math.max(24, columns());
+    const maxLen = Math.max(20, cols - 3);
+    const selectedHints: KeyHint[] = [];
+    let usedLen = 0;
+
+    for (const hint of hints()) {
+      const chunk = `[${hint.key}] ${hint.fullLabel}`;
+      if (usedLen + chunk.length + 2 > maxLen) break;
+      selectedHints.push(hint);
+      usedLen += chunk.length + 2;
+    }
+
+    return selectedHints;
+  });
 
   const dataAge = createMemo(() => {
     if (!appState.lastRefresh) return null;
@@ -128,8 +297,8 @@ export function Footer() {
 
   const activeFilterCount = createMemo(() => {
     let count = 0;
-    if (watchlistState.filterActive) count++;
-    if (appState.sortBy !== "volume") count++;
+    if (watchlistState.filterActive) count += 1;
+    if (appState.sortBy !== "volume") count += 1;
     return count;
   });
 
@@ -142,23 +311,6 @@ export function Footer() {
     return ` │ Pos:${pos.length} │ P&L:${arrow}${sign}$${totalPnl.toFixed(0)}`;
   });
 
-  const content = createMemo(() => {
-    const cols = Math.max(24, columns());
-    const maxLen = Math.max(20, cols - 3);
-    
-    const hintParts: string[] = [];
-    let usedLen = 0;
-    
-    for (const hint of hints()) {
-      const chunk = `[${hint.key}] ${hint.fullLabel}`;
-      if (usedLen + chunk.length + 2 > maxLen) break;
-      hintParts.push(chunk);
-      usedLen += chunk.length + 2;
-    }
-    
-    return hintParts.join("  ");
-  });
-
   return (
     <box
       height={1}
@@ -168,7 +320,21 @@ export function Footer() {
       paddingLeft={1}
       paddingRight={1}
     >
-      <text content={content()} fg={theme.textMuted} />
+      <For each={visibleHints()}>
+        {(hint, index) => {
+          const chunk = `[${hint.key}] ${hint.fullLabel}`;
+          const clickable = typeof hint.onActivate === "function";
+
+          return (
+            <box
+              marginRight={index() === visibleHints().length - 1 ? 0 : 2}
+              onMouseDown={clickable ? () => void hint.onActivate?.() : undefined}
+            >
+              <text content={chunk} fg={clickable ? theme.text : theme.textMuted} />
+            </box>
+          );
+        }}
+      </For>
       <box flexGrow={1} />
       <Show when={dataAge() !== null && dataAge()! > 60_000}>
         <text content={`⚠ ${Math.floor(dataAge()! / 60_000)}m+ OLD  `} fg={theme.warning} />

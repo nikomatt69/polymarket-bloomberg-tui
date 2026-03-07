@@ -8,10 +8,10 @@ import * as order from "./order";
 import * as discovery from "./discovery";
 import * as navigation from "./navigation";
 import * as ui from "./ui";
-import * as bash from "./bash";
 import type { ToolDefinition, ToolResult } from "../tool";
 import type { AgentContext } from "../tool";
 import type { z } from "zod";
+import type { AssistantMode } from "../../state";
 
 /**
  * Combined tool definitions from all categories
@@ -23,7 +23,6 @@ export const allTools: ToolDefinition<z.ZodType>[] = [
   ...discovery.tools,
   ...navigation.tools,
   ...ui.tools,
-  ...bash.tools,
 ];
 
 /**
@@ -36,14 +35,29 @@ export const executors: Record<string, (args: Record<string, unknown>, ctx: Agen
   ...discovery.executors,
   ...navigation.executors,
   ...ui.executors,
-  ...bash.executors,
 };
+
+function toolEnabledForMode(tool: ToolDefinition<z.ZodType>, mode: AssistantMode): boolean {
+  if (tool.enabledModes && !tool.enabledModes.includes(mode)) {
+    return false;
+  }
+
+  if (mode === "safe" && tool.executesTrade) {
+    return false;
+  }
+
+  return true;
+}
 
 /**
  * Get tool by name
  */
 export function getTool(name: string): ToolDefinition<z.ZodType> | undefined {
   return allTools.find((t) => t.name === name);
+}
+
+export function getToolsForMode(mode: AssistantMode): ToolDefinition<z.ZodType>[] {
+  return allTools.filter((tool) => toolEnabledForMode(tool, mode));
 }
 
 /**
@@ -81,6 +95,36 @@ export async function executeTool(
  */
 export function getToolNames(): string[] {
   return allTools.map((t) => t.name);
+}
+
+export async function prepareToolApproval(
+  name: string,
+  args: Record<string, unknown>,
+  ctx: AgentContext,
+): Promise<{
+  title: string;
+  summary: string;
+  warnings: string[];
+  preview?: Record<string, unknown>;
+  riskLevel: "low" | "medium" | "high" | "critical";
+}> {
+  if (
+    name === "place_order"
+    || name === "cancel_order"
+    || name === "cancel_all_orders"
+    || name === "cancel_market_orders"
+  ) {
+    return order.buildOrderToolApproval(name, args, ctx);
+  }
+
+  const tool = getTool(name);
+  return {
+    title: "Approve action",
+    summary: `Approve tool ${name}`,
+    warnings: [],
+    preview: args,
+    riskLevel: tool?.riskLevel ?? "medium",
+  };
 }
 
 // Re-export types

@@ -6,7 +6,7 @@
 import { homedir } from "os";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
-import type { ChatMessage } from "../state";
+import type { AssistantApprovalRequest, AssistantMode, ChatMessage } from "../state";
 
 export interface SessionRecord {
   id: string;
@@ -18,6 +18,8 @@ export interface SessionRecord {
     model: string;
     tokensUsed: number;
     marketContext?: string;
+    assistantMode?: AssistantMode;
+    pendingApproval?: AssistantApprovalRequest | null;
   };
 }
 

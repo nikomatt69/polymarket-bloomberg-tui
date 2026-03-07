@@ -33,6 +33,7 @@ import { setAutomationRules, setScannerAlerts } from "../state";
 import { initializeWebSocket, subscribe } from "../api/websocket";
 import { walletState } from "../state";
 import { fetchUserPositions, invalidateAndRefreshPositions } from "./usePositions";
+import { refreshOrders } from "./useOrders";
 
 const marketScanner = new MarketScanner();
 const priceMap = new Map<string, number>();
@@ -222,6 +223,7 @@ export function useRefreshInterval(intervalMs: number = 30000): void {
         // Also refresh positions if wallet is connected
         if (walletState.connected && walletState.address) {
           void fetchUserPositions();
+          void refreshOrders();
         }
       } catch (error) {
         console.error("Error refreshing markets:", error);
@@ -251,6 +253,7 @@ export async function manualRefresh(): Promise<void> {
     // Also invalidate positions cache and refresh positions
     if (walletState.connected && walletState.address) {
       invalidateAndRefreshPositions();
+      void refreshOrders();
     }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "Refresh failed";
