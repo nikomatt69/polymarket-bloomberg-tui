@@ -8,6 +8,9 @@ import {
   getMarketDetails,
   getPriceHistory,
   getMarketsByCategory,
+  getMarketsByTag,
+  getTrendingMarkets,
+  getLiveSportsMarkets,
   clearMarketCache,
 } from "../api/polymarket";
 import { Timeframe } from "../types/market";
@@ -18,7 +21,9 @@ import {
   appState,
   getSelectedMarket,
   selectedCategory,
+  selectedSubCategory,
   showToast,
+  updateDetachedMarketDetails,
 } from "../state";
 import { Market, PriceHistory } from "../types/market";
 import { evaluateAlerts } from "./useAlerts";
@@ -88,6 +93,26 @@ function subscribeToMarketTokens(market: Market | undefined): void {
   if (tokenIds.length > 0) subscribe(tokenIds);
 }
 
+async function fetchActiveMarketPage(limit: number = 50): Promise<Market[]> {
+  const subCategory = selectedSubCategory();
+  if (subCategory) {
+    return getMarketsByTag(subCategory, limit);
+  }
+
+  const category = selectedCategory();
+  if (category === "trending") {
+    return getTrendingMarkets(limit);
+  }
+  if (category === "sports_live") {
+    return getLiveSportsMarkets();
+  }
+  if (category && category !== "All" && category !== "all") {
+    return getMarketsByCategory(category, limit);
+  }
+
+  return getMarkets(limit);
+}
+
 /**
  * Hook to fetch all markets on startup (initial load only — category switching
  * is owned by MarketList component to avoid double-fetches).
@@ -139,11 +164,15 @@ export function useSelectedMarketDetails(): Market | undefined {
     try {
       const details = await getMarketDetails(appState.selectedMarketId);
       if (details) {
-        setMarkets([
-          ...appState.markets.map((m) =>
-            m.id === details.id ? details : m
-          ),
-        ]);
+        if (appState.markets.some((market) => market.id === details.id)) {
+          setMarkets([
+            ...appState.markets.map((market) =>
+              market.id === details.id ? details : market
+            ),
+          ]);
+        } else {
+          updateDetachedMarketDetails(details);
+        }
         // Subscribe to this market's tokens for real-time updates
         const tokenIds = details.outcomes
           .map((o) => o.id)
@@ -183,13 +212,7 @@ export function useRefreshInterval(intervalMs: number = 30000): void {
   createEffect(() => {
     const interval = setInterval(async () => {
       try {
-        // Refresh the currently visible markets.
-        // selectedCategory() is read here intentionally to refresh the right set,
-        // but only on a timer — not reactive — so no double-fetch with MarketList.
-        const category = selectedCategory();
-        const markets = category && category !== "All" && category !== "trending" && category !== "all"
-          ? await getMarketsByCategory(category, 50)
-          : await getMarkets(50);
+        const markets = await fetchActiveMarketPage(50);
 
         setMarkets(markets);
         evaluateAlerts(markets);
@@ -217,10 +240,7 @@ export async function manualRefresh(): Promise<void> {
   clearMarketCache();
   setLoading(true);
   try {
-    const category = selectedCategory();
-    const markets = category && category !== "All" && category !== "trending" && category !== "all"
-      ? await getMarketsByCategory(category, 50)
-      : await getMarkets(50);
+    const markets = await fetchActiveMarketPage(50);
 
     setMarkets(markets);
     evaluateAlerts(markets);

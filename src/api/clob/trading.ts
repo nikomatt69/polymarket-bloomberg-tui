@@ -242,23 +242,26 @@ async function ensureTradingAllowed(): Promise<void> {
 }
 
 async function sendHeartbeat(privateKey: `0x${string}`, creds: ApiCredentials, heartbeatId?: string): Promise<string | undefined> {
-  const requestPath = "/heartbeats";
-  const headers = await createL2Headers(privateKey, creds, "POST", requestPath);
+  const requestPath = "/v1/heartbeats";
+  const body = JSON.stringify({ heartbeat_id: heartbeatId ?? null });
+  const headers = await createL2Headers(privateKey, creds, "POST", requestPath, body);
   const response = await fetch(`${CLOB_BASE}${requestPath}`, {
     method: "POST",
     headers,
+    body,
   });
 
-  if (!response.ok) {
-    throw new Error(`Heartbeat rejected with HTTP ${response.status}`);
+  const data = await parseJsonSafe<{ heartbeat_id?: string; error?: string }>(response);
+
+  if (response.status === 400 && heartbeatId) {
+    return sendHeartbeat(privateKey, creds, undefined);
   }
 
-  try {
-    const data = await response.json() as { heartbeat_id?: string };
-    return data.heartbeat_id;
-  } catch {
-    return undefined;
+  if (!response.ok) {
+    throw new Error(data?.error ?? `Heartbeat rejected with HTTP ${response.status}`);
   }
+
+  return data?.heartbeat_id;
 }
 
 function extractPagedRows<T>(payload: unknown): T[] {
@@ -937,17 +940,29 @@ export async function fetchTradeHistory(): Promise<PlacedOrder[]> {
 
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let currentHeartbeatId: string | undefined = undefined;
+let heartbeatInFlight = false;
+
+async function tickHeartbeat(): Promise<void> {
+  if (heartbeatInFlight) return;
+
+  heartbeatInFlight = true;
+  try {
+    const { privateKey, creds } = await getAuthContext();
+    currentHeartbeatId = await sendHeartbeat(privateKey, creds, currentHeartbeatId);
+  } catch {
+    // Silently ignore heartbeat errors - will retry on next interval
+  } finally {
+    heartbeatInFlight = false;
+  }
+}
 
 export function startHeartbeat(): void {
   if (heartbeatInterval !== null) return;
 
-  heartbeatInterval = setInterval(async () => {
-    try {
-      const { privateKey, creds } = await getAuthContext();
-      currentHeartbeatId = await sendHeartbeat(privateKey, creds, currentHeartbeatId);
-    } catch {
-      // Silently ignore heartbeat errors - will retry on next interval
-    }
+  void tickHeartbeat();
+
+  heartbeatInterval = setInterval(() => {
+    void tickHeartbeat();
   }, 5000);
 }
 
@@ -956,5 +971,6 @@ export function stopHeartbeat(): void {
     clearInterval(heartbeatInterval);
     heartbeatInterval = null;
     currentHeartbeatId = undefined;
+    heartbeatInFlight = false;
   }
 }

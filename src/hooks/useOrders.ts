@@ -631,16 +631,18 @@ export async function refreshOrderScoring(orderIds?: string[]): Promise<void> {
   }
 }
 
-createEffect(() => {
-  const hasOpenOrders = ordersState.openOrders.length > 0;
-  
-  if (hasOpenOrders) {
-    startHeartbeat();
-  } else {
-    stopHeartbeat();
-  }
-});
+export function initializeOrderHeartbeat(): void {
+  createEffect(() => {
+    const hasOpenOrders = ordersState.openOrders.length > 0;
 
-onCleanup(() => {
-  stopHeartbeat();
-});
+    if (hasOpenOrders) {
+      startHeartbeat();
+    } else {
+      stopHeartbeat();
+    }
+  });
+
+  onCleanup(() => {
+    stopHeartbeat();
+  });
+}

@@ -7,22 +7,26 @@
  * When user types a query, it calls gamma-api.polymarket.com to find ALL matching markets.
  */
 
-import { createSignal, createMemo, For, Show, createEffect } from "solid-js";
+import { createSignal, createMemo, For, Show, createEffect, onCleanup } from "solid-js";
 import { useTheme } from "../context/theme";
 import {
   appState,
   updateSearchQuery,
   getFilteredMarkets,
   selectMarket,
+  selectDetachedMarket,
   navigateToIndex,
   searchPanelCategory,
   setSearchPanelCategory,
+  searchPanelOpen,
+  searchPanelSort,
+  setSearchPanelSort,
   searchPanelResultIdx,
   setSearchPanelResultIdx,
-  setSearchPanelOpen,
-  setMarkets,
+  closeSearchPanel,
   searchPanelApiResults,
   setSearchPanelApiResults,
+  type SearchPanelSort,
 } from "../state";
 import { formatVolume } from "../utils/format";
 import { isWatched } from "../hooks/useWatchlist";
@@ -32,7 +36,7 @@ import { Market } from "../types/market";
 
 // ─── Panel category definitions ───────────────────────────────────────────────
 
-const PANEL_CATEGORIES = [
+export const SEARCH_PANEL_CATEGORIES = [
   { id: "all",           label: "All",      match: ""           },
   { id: "sports",        label: "Sports",   match: "sport"      },
   { id: "politics",      label: "Politics", match: "polit"      },
@@ -44,9 +48,9 @@ const PANEL_CATEGORIES = [
   { id: "entertainment", label: "Ent",      match: "entertain"  },
 ] as const;
 
-type SortKey = "volume" | "change" | "liquidity" | "name";
+export const SEARCH_PANEL_CATEGORY_IDS = SEARCH_PANEL_CATEGORIES.map((category) => category.id);
 
-const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+const SORT_OPTIONS: { key: SearchPanelSort; label: string }[] = [
   { key: "volume",    label: "Vol" },
   { key: "change",    label: "Chg" },
   { key: "liquidity", label: "Liq" },
@@ -80,23 +84,70 @@ function formatExpiry(resolutionDate: Date | undefined): { text: string; level: 
   return { text: `${days.toString().padStart(2, " ")}d  `, level: "ok" };
 }
 
+function filterResultsByCategory(markets: Market[], categoryId: string): Market[] {
+  const category = SEARCH_PANEL_CATEGORIES.find((entry) => entry.id === categoryId);
+  const match = category?.match ?? "";
+
+  if (!match) {
+    return markets;
+  }
+
+  return markets.filter((market) => (market.category ?? "").toLowerCase().includes(match));
+}
+
+function sortResults(markets: Market[], sort: SearchPanelSort): Market[] {
+  const sorted = [...markets];
+
+  if (sort === "volume") {
+    sorted.sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0));
+  } else if (sort === "change") {
+    sorted.sort((a, b) => Math.abs(b.change24h ?? 0) - Math.abs(a.change24h ?? 0));
+  } else if (sort === "liquidity") {
+    sorted.sort((a, b) => (b.liquidity ?? 0) - (a.liquidity ?? 0));
+  } else if (sort === "name") {
+    sorted.sort((a, b) => (a.title ?? "").localeCompare(b.title ?? ""));
+  }
+
+  return sorted;
+}
+
+export function getSearchPanelResults(): Market[] {
+  const query = appState.searchQuery.trim();
+  const source = query.length > 0 ? searchPanelApiResults() : appState.markets;
+  return sortResults(filterResultsByCategory(source, searchPanelCategory()), searchPanelSort());
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function SearchPanel() {
   const { theme } = useTheme();
-  const [sort, setSort] = createSignal<SortKey>("volume");
   const [searching, setSearching] = createSignal(false);
+  let searchRequestToken = 0;
 
   // Debounced search - call Polymarket API when user types
   let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 
   createEffect(() => {
+    const panelOpen = searchPanelOpen();
     const query = appState.searchQuery;
+    const requestToken = ++searchRequestToken;
 
     // Clear previous timeout
     if (searchTimeout) {
       clearTimeout(searchTimeout);
       searchTimeout = null;
+    }
+
+    onCleanup(() => {
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+        searchTimeout = null;
+      }
+    });
+
+    if (!panelOpen) {
+      setSearching(false);
+      return;
     }
 
     // If no query, use local markets
@@ -107,67 +158,33 @@ export function SearchPanel() {
     }
 
     // Debounce API calls (300ms)
+    setSearchPanelApiResults([]);
     setSearching(true);
     searchTimeout = setTimeout(async () => {
       try {
         // Call Polymarket's live API search
         const results = await searchMarketsByQuery(query.trim(), 50, 0);
+        if (requestToken !== searchRequestToken || !searchPanelOpen()) return;
         setSearchPanelApiResults(results);
       } catch (error) {
+        if (requestToken !== searchRequestToken || !searchPanelOpen()) return;
         console.error("API search error:", error);
         setSearchPanelApiResults([]);
       } finally {
-        setSearching(false);
+        if (requestToken === searchRequestToken && searchPanelOpen()) {
+          setSearching(false);
+        }
       }
     }, 300);
   });
 
-  const results = createMemo(() => {
-    // If we have API results (user typed a query), use those
-    const api = searchPanelApiResults();
-    if (api.length > 0) {
-      const s = sort();
-      let sorted = [...api];
-      if (s === "volume") {
-        sorted = sorted.sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0));
-      } else if (s === "change") {
-        sorted = sorted.sort((a, b) => Math.abs(b.change24h ?? 0) - Math.abs(a.change24h ?? 0));
-      } else if (s === "liquidity") {
-        sorted = sorted.sort((a, b) => (b.liquidity ?? 0) - (a.liquidity ?? 0));
-      } else if (s === "name") {
-        sorted = sorted.sort((a, b) => (a.title ?? "").localeCompare(b.title ?? ""));
-      }
-      return sorted;
-    }
-
-    // Otherwise, fall back to local filtered markets
-    const all = getFilteredMarkets();
-    const catId = searchPanelCategory();
-    const catDef = PANEL_CATEGORIES.find((c) => c.id === catId);
-    const matchStr = catDef?.match ?? "";
-
-    let filtered = matchStr === ""
-      ? all
-      : all.filter((m) => (m.category ?? "").toLowerCase().includes(matchStr));
-
-    const s = sort();
-    if (s === "volume") {
-      filtered = [...filtered].sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0));
-    } else if (s === "change") {
-      filtered = [...filtered].sort((a, b) => Math.abs(b.change24h ?? 0) - Math.abs(a.change24h ?? 0));
-    } else if (s === "liquidity") {
-      filtered = [...filtered].sort((a, b) => (b.volume24h ?? 0) - (a.volume24h ?? 0));
-    } else if (s === "name") {
-      filtered = [...filtered].sort((a, b) => (a.title ?? "").localeCompare(b.title ?? ""));
-    }
-
-    return filtered;
-  });
+  const results = createMemo(() => getSearchPanelResults());
 
   const categoryCounts = createMemo(() => {
-    const all = getFilteredMarkets();
+    const query = appState.searchQuery.trim();
+    const all = query.length > 0 ? searchPanelApiResults() : appState.markets;
     const counts: Record<string, number> = { all: all.length };
-    for (const cat of PANEL_CATEGORIES) {
+    for (const cat of SEARCH_PANEL_CATEGORIES) {
       if (cat.match === "") continue;
       counts[cat.id] = all.filter((m) =>
         (m.category ?? "").toLowerCase().includes(cat.match)
@@ -179,34 +196,7 @@ export function SearchPanel() {
   async function selectResult(idx: number) {
     const market = results()[idx];
     if (!market) return;
-
-    // Check if market is already in local state
-    const allFiltered = getFilteredMarkets();
-    const listIdx = allFiltered.findIndex((m) => m.id === market.id);
-
-    if (listIdx >= 0) {
-      // Market is in local list - just navigate to it
-      selectMarket(market.id);
-      navigateToIndex(listIdx);
-    } else {
-      // Market not in local list - fetch details and add it
-      try {
-        const details = await getMarketDetails(market.id);
-        if (details) {
-          // Add to local markets
-          setMarkets([details, ...appState.markets]);
-          selectMarket(details.id);
-          navigateToIndex(0);
-        } else {
-          // Fallback: just select by ID (may lack full details)
-          selectMarket(market.id);
-        }
-      } catch (error) {
-        console.error("Failed to fetch market details:", error);
-        selectMarket(market.id);
-      }
-    }
-    setSearchPanelOpen(false);
+    await selectSearchPanelMarket(market);
   }
 
   return (
@@ -236,7 +226,7 @@ export function SearchPanel() {
         <Show when={searchPanelApiResults().length > 0}>
           <text content="(API) " fg={theme.accent} />
         </Show>
-        <box onMouseDown={() => setSearchPanelOpen(false)}>
+        <box onMouseDown={() => closeSearchPanel()}>
           <text content=" [ESC] ✕ " fg={theme.highlightText} />
         </box>
       </box>
@@ -260,7 +250,7 @@ export function SearchPanel() {
       {/* ── Category Tabs ── */}
       <box height={1} width="100%" flexDirection="row" backgroundColor={theme.backgroundPanel}>
         <text content=" " fg={theme.textMuted} />
-        <For each={PANEL_CATEGORIES}>
+        <For each={SEARCH_PANEL_CATEGORIES}>
           {(cat) => {
             const count = () => categoryCounts()[cat.id] ?? 0;
             const active = () => searchPanelCategory() === cat.id;
@@ -293,15 +283,15 @@ export function SearchPanel() {
             <box
               paddingLeft={1}
               paddingRight={1}
-              backgroundColor={sort() === opt.key ? theme.primary : undefined}
-              onMouseDown={() => setSort(opt.key)}
-            >
-              <text
-                content={opt.label}
-                fg={sort() === opt.key ? theme.highlightText : theme.textMuted}
-              />
-            </box>
-          )}
+                backgroundColor={searchPanelSort() === opt.key ? theme.primary : undefined}
+                onMouseDown={() => setSearchPanelSort(opt.key)}
+              >
+                <text
+                  content={opt.label}
+                  fg={searchPanelSort() === opt.key ? theme.highlightText : theme.textMuted}
+                />
+              </box>
+            )}
         </For>
         <text content="  │  " fg={theme.borderSubtle} />
         <text content="[Tab] category  [/] refocus search" fg={theme.textMuted} />
@@ -432,4 +422,36 @@ export function SearchPanel() {
       </box>
     </box>
   );
+}
+
+export async function selectSearchPanelMarket(market: Market): Promise<void> {
+  const visibleMarkets = getFilteredMarkets();
+  const listIdx = visibleMarkets.findIndex((entry) => entry.id === market.id);
+
+  if (listIdx >= 0) {
+    selectMarket(market.id);
+    navigateToIndex(listIdx);
+    closeSearchPanel();
+    return;
+  }
+
+  try {
+    const details = await getMarketDetails(market.id);
+    if (details) {
+      const updatedListIdx = getFilteredMarkets().findIndex((entry) => entry.id === details.id);
+      if (updatedListIdx >= 0) {
+        selectMarket(details.id);
+        navigateToIndex(updatedListIdx);
+      } else {
+        selectDetachedMarket(details);
+      }
+    } else {
+      selectDetachedMarket(market);
+    }
+  } catch (error) {
+    console.error("Failed to fetch market details:", error);
+    selectDetachedMarket(market);
+  }
+
+  closeSearchPanel();
 }

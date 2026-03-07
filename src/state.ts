@@ -351,6 +351,8 @@ const initialState: AppState = {
 
 // Create reactive store
 export const [appState, setAppState] = createStore<AppState>(initialState);
+const [detachedMarketDetails, setDetachedMarketDetails] = createSignal<Record<string, Market>>({});
+const [detachedSelectedMarketId, setDetachedSelectedMarketId] = createSignal<string | null>(null);
 
 // Wallet state store
 const initialWalletState: WalletState = {
@@ -452,8 +454,20 @@ export const [searchInputFocused, setSearchInputFocused] = createSignal(false);
 // Search panel (full overlay search with category tabs and sort filters)
 export const [searchPanelOpen, setSearchPanelOpen] = createSignal(false);
 export const [searchPanelCategory, setSearchPanelCategory] = createSignal("all");
+export type SearchPanelSort = "volume" | "change" | "liquidity" | "name";
+export const [searchPanelSort, setSearchPanelSort] = createSignal<SearchPanelSort>("volume");
 export const [searchPanelResultIdx, setSearchPanelResultIdx] = createSignal(0);
 export const [searchPanelApiResults, setSearchPanelApiResults] = createSignal<Market[]>([]);
+
+export function openSearchPanel(): void {
+  setSearchPanelOpen(true);
+  setSearchPanelResultIdx(0);
+}
+
+export function closeSearchPanel(): void {
+  setSearchPanelOpen(false);
+  setSearchPanelResultIdx(0);
+}
 
 function serializeProvider(provider: AIProviderConfig): AIProviderConfig {
   return {
@@ -1010,6 +1024,7 @@ export function initializeState(): void {
     setAppState("sortBy", persisted.sortBy);
     setAppState("timeframe", persisted.timeframe);
     setActiveMainViewSignal(persisted.activeView === "portfolio" ? "portfolio" : "market");
+    setDetachedSelectedMarketId(persisted.selectedMarketId);
   }
 }
 
@@ -1083,6 +1098,20 @@ export function getFilteredMarkets(): Market[] {
     );
   }
 
+  const activeMarketListCategory = marketListCategoryId();
+  if (activeMarketListCategory === "closing_soon") {
+    const cutoff = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    filtered = filtered.filter((market) => (
+      market.resolutionDate
+      && market.resolutionDate.getTime() < cutoff
+      && !market.closed
+    ));
+  }
+
+  if (activeMarketListCategory === "watchlist_cat") {
+    filtered = filtered.filter((market) => watchlistState.marketIds.includes(market.id));
+  }
+
   // Apply multi-sort
   const sortBy = activeFilters.sortBy || "volume";
   const sortBy2 = activeFilters.sortBy2;
@@ -1120,8 +1149,27 @@ export function getFilteredMarkets(): Market[] {
  * Select a market by ID
  */
 export function selectMarket(marketId: string | null): void {
+  setDetachedSelectedMarketId(null);
   setAppState("selectedMarketId", marketId);
   savePersistedState();
+}
+
+export function updateDetachedMarketDetails(market: Market): void {
+  setDetachedMarketDetails((prev) => ({
+    ...prev,
+    [market.id]: market,
+  }));
+}
+
+export function selectDetachedMarket(market: Market): void {
+  updateDetachedMarketDetails(market);
+  setDetachedSelectedMarketId(market.id);
+  setAppState("selectedMarketId", market.id);
+  savePersistedState();
+}
+
+export function isDetachedSelectedMarket(): boolean {
+  return appState.selectedMarketId !== null && detachedSelectedMarketId() === appState.selectedMarketId;
 }
 
 /**
@@ -1185,7 +1233,15 @@ export function appendMarkets(newMarkets: Market[]): void {
  * Get currently selected market
  */
 export function getSelectedMarket(): Market | undefined {
-  return appState.markets.find((m) => m.id === appState.selectedMarketId);
+  const selectedMarketId = appState.selectedMarketId;
+  if (!selectedMarketId) return undefined;
+
+  const visibleMarket = appState.markets.find((market) => market.id === selectedMarketId);
+  if (visibleMarket) {
+    return visibleMarket;
+  }
+
+  return detachedMarketDetails()[selectedMarketId];
 }
 
 /**

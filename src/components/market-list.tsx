@@ -16,6 +16,7 @@ import { For, Show, createMemo, createSignal, createEffect, on } from "solid-js"
 import {
   appState,
   highlightedIndex,
+  setHighlightedIndex,
   getFilteredMarkets,
   navigateToIndex,
   setMarkets,
@@ -27,6 +28,8 @@ import {
   userWsConnected,
   sportsScores,
   getLastPrice,
+  isDetachedSelectedMarket,
+  selectMarket,
   setSelectedCategory,
   selectedSubCategory,
   setSelectedSubCategory,
@@ -269,6 +272,10 @@ export function MarketList() {
 
   const activeCategory = marketListCategoryId;
   const setActiveCategory = setMarketListCategoryId;
+  const activateCategory = (categoryId: string) => {
+    setSelectedSubCategory(null);
+    setActiveCategory(categoryId);
+  };
 
   const [localLoading, setLocalLoading] = createSignal(false);
   const [loadingMore, setLoadingMore] = createSignal(false);
@@ -277,23 +284,10 @@ export function MarketList() {
   const [showAllMarkets, setShowAllMarkets] = createSignal(false); // Toggle to show closed markets
   // Category cache: stores markets per category key to avoid re-fetching
   const [categoryCache, setCategoryCache] = createSignal<Record<string, Market[]>>({});
+  const [loadedFetchKey, setLoadedFetchKey] = createSignal("");
 
   // Virtual category filters applied on top of getFilteredMarkets()
-  const displayMarkets = createMemo(() => {
-    const base = getFilteredMarkets();
-    const cat = activeCategory();
-
-    if (cat === "closing_soon") {
-      const cutoff = Date.now() + 7 * 24 * 60 * 60 * 1000;
-      return base.filter(m => m.resolutionDate && m.resolutionDate.getTime() < cutoff && !m.closed);
-    }
-
-    if (cat === "watchlist_cat") {
-      return base.filter(m => isWatched(m.id));
-    }
-
-    return base;
-  });
+  const displayMarkets = createMemo(() => getFilteredMarkets());
 
   // ── Sync selectedCategory signal (drives useMarketData category-aware fetch)
   createEffect(on(activeCategory, (cat) => {
@@ -319,8 +313,19 @@ export function MarketList() {
   // Active sub-category
   const activeSubCategory = selectedSubCategory;
 
+  const effectiveSubCategory = createMemo(() => {
+    const subCategoryId = activeSubCategory();
+    if (!subCategoryId) return null;
+
+    return currentSubCategories().some((entry) => entry.id === subCategoryId) ? subCategoryId : null;
+  });
+
+  const currentFetchKey = createMemo(() => (
+    effectiveSubCategory() ? `${activeCategory()}:${effectiveSubCategory()}` : activeCategory()
+  ));
+
   // ── Category switch with caching ─────────────────────────────────────────────
-  createEffect(on([activeCategory, activeSubCategory], ([category, subCat]) => {
+  createEffect(on([activeCategory, effectiveSubCategory], ([category, subCat]) => {
     const cat = CATEGORIES.find((c) => c.id === category);
     if (!cat) return;
 
@@ -339,7 +344,8 @@ export function MarketList() {
       // Use cached data
       setMarkets(cached);
       setOffsets((prev) => ({ ...prev, [fetchKey]: cached.length }));
-      setHasMore(!cat.live && cached.length >= PAGE_SIZE);
+      setHasMore(!cat.live && !subCat && cached.length >= PAGE_SIZE);
+      setLoadedFetchKey(fetchKey);
       setLocalLoading(false);
       return;
     }
@@ -359,7 +365,8 @@ export function MarketList() {
         setCategoryCache((prev) => ({ ...prev, [fetchKey]: markets }));
         setMarkets(markets);
         setOffsets((prev) => ({ ...prev, [fetchKey]: markets.length }));
-        setHasMore(!cat.live && markets.length >= PAGE_SIZE);
+        setHasMore(!cat.live && !subCat && markets.length >= PAGE_SIZE);
+        setLoadedFetchKey(fetchKey);
       } catch {
         // Keep existing data on error
       } finally {
@@ -385,11 +392,68 @@ export function MarketList() {
     }
   });
 
+  createEffect(on(displayMarkets, (markets) => {
+    if (markets.length === 0) {
+      if (highlightedIndex() !== 0) {
+        setHighlightedIndex(0);
+      }
+      if (!isDetachedSelectedMarket() && appState.selectedMarketId !== null) {
+        selectMarket(null);
+      }
+      return;
+    }
+
+    const selectedIndex = appState.selectedMarketId
+      ? markets.findIndex((market) => market.id === appState.selectedMarketId)
+      : -1;
+
+    if (selectedIndex >= 0) {
+      if (highlightedIndex() !== selectedIndex) {
+        setHighlightedIndex(selectedIndex);
+      }
+      if (isDetachedSelectedMarket()) {
+        selectMarket(markets[selectedIndex].id);
+      }
+      return;
+    }
+
+    if (isDetachedSelectedMarket()) {
+      return;
+    }
+
+    const nextIndex = Math.max(0, Math.min(highlightedIndex(), markets.length - 1));
+    navigateToIndex(nextIndex);
+  }));
+
+  createEffect(on([currentFetchKey, loadedFetchKey, () => appState.markets], ([fetchKey, loadedKey, markets]) => {
+    const cat = CATEGORIES.find((entry) => entry.id === activeCategory());
+    if (!cat || cat.virtual || fetchKey !== loadedKey) return;
+
+    setCategoryCache((prev) => {
+      const previousMarkets = prev[fetchKey] ?? [];
+      let nextMarkets = markets;
+
+      if (markets.length > 0 && markets.length <= PAGE_SIZE && previousMarkets.length > markets.length) {
+        const refreshedIds = new Set(markets.map((market) => market.id));
+        nextMarkets = [
+          ...markets,
+          ...previousMarkets.filter((market) => !refreshedIds.has(market.id)),
+        ];
+      }
+
+      return { ...prev, [fetchKey]: nextMarkets };
+    });
+    setOffsets((prev) => ({
+      ...prev,
+      [fetchKey]: Math.max(prev[fetchKey] ?? 0, markets.length),
+    }));
+  }));
+
   async function loadMore() {
     const category = activeCategory();
-    const subCat = activeSubCategory();
+    const subCat = effectiveSubCategory();
     const cat = CATEGORIES.find((c) => c.id === category);
-    if (!cat || cat.live || cat.virtual || loadingMore()) return;
+    if (!cat || cat.live || cat.virtual || loadingMore() || Boolean(subCat)) return;
 
     setLoadingMore(true);
     const fetchKey = subCat ? `${category}:${subCat}` : category;
@@ -437,7 +501,7 @@ export function MarketList() {
                   paddingLeft={1}
                   paddingRight={1}
                   backgroundColor={active() ? theme.accent : theme.backgroundPanel}
-                  onMouseDown={() => setActiveCategory(cat.id)}
+                  onMouseDown={() => activateCategory(cat.id)}
                 >
                   <text
                     content={cat.label}
@@ -473,7 +537,7 @@ export function MarketList() {
           <text content="  " fg={theme.textMuted} />
           <For each={currentSubCategories()}>
             {(subCat) => {
-              const active = () => activeSubCategory() === subCat.id;
+                const active = () => effectiveSubCategory() === subCat.id;
               return (
                 <box
                   height={1}
@@ -490,7 +554,7 @@ export function MarketList() {
               );
             }}
           </For>
-          <Show when={activeSubCategory()}>
+          <Show when={effectiveSubCategory()}>
             <text content=" │" fg={theme.textMuted} />
             <box
               height={1}
@@ -740,7 +804,7 @@ export function MarketList() {
                   content={
                     loadingMore()
                       ? "  ◌ Loading more markets…"
-                      : `  ─── ${offsets()[activeSubCategory() ? `${activeCategory()}:${activeSubCategory()}` : activeCategory()] ?? 0} loaded · ↓ for more ───`
+                      : `  ─── ${offsets()[effectiveSubCategory() ? `${activeCategory()}:${effectiveSubCategory()}` : activeCategory()] ?? 0} loaded · ↓ for more ───`
                   }
                   fg={theme.textMuted}
                 />

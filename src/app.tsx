@@ -7,6 +7,7 @@ import { createEffect, onCleanup } from "solid-js";
 import { useKeyboard } from "@opentui/solid";
 import type { KeyEvent } from "@opentui/core";
 import { Layout } from "./components/layout";
+import { SEARCH_PANEL_CATEGORY_IDS, getSearchPanelResults, selectSearchPanelMarket } from "./components/search-panel";
 import {
   initializeState,
   savePersistedState,
@@ -115,6 +116,7 @@ import {
   exportOrderHistoryCsv,
   cancelAllOpenOrders,
   cancelSelectedMarketOpenOrders,
+  initializeOrderHeartbeat,
 } from "./hooks/useOrders";
 import { fetchUserPositions } from "./hooks/usePositions";
 import { loadAlerts, setAlertsState, alertsState, addAlert, dismissAlert, deleteAlert, toggleSound } from "./hooks/useAlerts";
@@ -158,7 +160,8 @@ import {
   searchInputFocused,
   setSearchInputFocused,
   searchPanelOpen,
-  setSearchPanelOpen,
+  openSearchPanel,
+  closeSearchPanel,
   searchPanelCategory,
   setSearchPanelCategory,
   searchPanelResultIdx,
@@ -265,6 +268,7 @@ function AppContent() {
   useMarketsFetch();
   useRefreshInterval(30000);
   initializeWallet();
+  initializeOrderHeartbeat();
   loadAlerts();
   loadWatchlist();
   initializeWebSocket();
@@ -340,6 +344,20 @@ function AppContent() {
 
     const matches = fuzzyThemeMatches(query, themeCtx.availableThemes);
     return matches.length > 0 ? matches : themeCtx.availableThemes;
+  };
+
+  const runUserSearch = (query: string) => {
+    const trimmed = query.trim();
+    if (trimmed.length < 2) return;
+
+    setUserSearchLoading(true);
+    searchUsers(trimmed)
+      .then((results) => {
+        setUserSearchResults(results);
+      })
+      .finally(() => {
+        setUserSearchLoading(false);
+      });
   };
 
   useKeyboard((e: KeyEvent) => {
@@ -1199,17 +1217,7 @@ function AppContent() {
         setProfilePanelOpen(false);
       } else if (profileViewMode() === "search") {
         if (e.name === "return") {
-          const query = userSearchQuery();
-          if (query.length >= 2) {
-            setUserSearchLoading(true);
-            searchUsers(query)
-              .then((results) => {
-                setUserSearchResults(results);
-              })
-              .finally(() => {
-                setUserSearchLoading(false);
-              });
-          }
+          runUserSearch(userSearchQuery());
         }
       }
       return;
@@ -1222,14 +1230,7 @@ function AppContent() {
         setUserSearchQuery("");
         setUserSearchResults([]);
       } else if (e.name === "return") {
-        const query = userSearchQuery();
-        if (query.length >= 2) {
-          searchUsers(query).then((results) => {
-            setUserSearchResults(results);
-            setUserSearchLoading(false);
-          });
-          setUserSearchLoading(true);
-        }
+        runUserSearch(userSearchQuery());
       }
       return;
     }
@@ -1385,50 +1386,30 @@ function AppContent() {
 
     // Search panel intercept
     if (searchPanelOpen()) {
-      const PANEL_CAT_IDS = ["all", "sports", "politics", "crypto", "business", "ai", "tech", "science", "entertainment"];
-
-      // Use API results if available, otherwise fall back to local filtered markets
-      const apiResults = searchPanelApiResults();
-      const useApiResults = apiResults.length > 0;
-      const currentResults = useApiResults
-        ? apiResults
-        : (() => {
-            const filtered = getFilteredMarkets();
-            const cat = searchPanelCategory();
-            const catMatch = PANEL_CAT_IDS.slice(1).find(c => c === cat) ? cat : "";
-            return catMatch === "" ? filtered : filtered.filter(m => (m.category ?? "").toLowerCase().includes(catMatch));
-          })();
+      const currentResults = getSearchPanelResults();
       const maxIdx = Math.max(0, currentResults.length - 1);
 
       if (e.name === "escape") {
-        setSearchPanelOpen(false);
+        closeSearchPanel();
       } else if (e.name === "return") {
         const idx = searchPanelResultIdx();
         const market = currentResults[idx];
         if (market) {
-          // Check if market is in local state
-          const allFiltered = getFilteredMarkets();
-          const listIdx = allFiltered.findIndex(m => m.id === market.id);
-          if (listIdx >= 0) {
-            selectMarket(market.id);
-            navigateToIndex(listIdx);
-          } else {
-            // Market not in local list - just select by ID (will fetch details on view)
-            selectMarket(market.id);
-          }
+          void selectSearchPanelMarket(market);
         }
-        setSearchPanelOpen(false);
       } else if (e.name === "up") {
         setSearchPanelResultIdx((i) => Math.max(0, i - 1));
       } else if (e.name === "down") {
         setSearchPanelResultIdx((i) => Math.min(i + 1, maxIdx));
       } else if (e.name === "tab" && !e.shift) {
-        const cur = PANEL_CAT_IDS.indexOf(searchPanelCategory());
-        setSearchPanelCategory(PANEL_CAT_IDS[(cur + 1) % PANEL_CAT_IDS.length] ?? "all");
+        const cur = SEARCH_PANEL_CATEGORY_IDS.indexOf(searchPanelCategory() as typeof SEARCH_PANEL_CATEGORY_IDS[number]);
+        const nextCategory = (SEARCH_PANEL_CATEGORY_IDS[(cur + 1) % SEARCH_PANEL_CATEGORY_IDS.length] ?? "all") as typeof SEARCH_PANEL_CATEGORY_IDS[number];
+        setSearchPanelCategory(nextCategory);
         setSearchPanelResultIdx(0);
       } else if (e.name === "tab" && e.shift) {
-        const cur = PANEL_CAT_IDS.indexOf(searchPanelCategory());
-        setSearchPanelCategory(PANEL_CAT_IDS[(cur - 1 + PANEL_CAT_IDS.length) % PANEL_CAT_IDS.length] ?? "all");
+        const cur = SEARCH_PANEL_CATEGORY_IDS.indexOf(searchPanelCategory() as typeof SEARCH_PANEL_CATEGORY_IDS[number]);
+        const prevCategory = (SEARCH_PANEL_CATEGORY_IDS[(cur - 1 + SEARCH_PANEL_CATEGORY_IDS.length) % SEARCH_PANEL_CATEGORY_IDS.length] ?? "all") as typeof SEARCH_PANEL_CATEGORY_IDS[number];
+        setSearchPanelCategory(prevCategory);
         setSearchPanelResultIdx(0);
       }
       return;
@@ -1481,12 +1462,14 @@ function AppContent() {
     if (!portfolioOpen() && (e.name === "[" || e.sequence === "[")) {
       const ids = CATEGORIES.map(c => c.id);
       const cur = ids.indexOf(marketListCategoryId());
+      setSelectedSubCategory(null);
       setMarketListCategoryId(ids[(cur - 1 + ids.length) % ids.length]!);
       return;
     }
     if (!portfolioOpen() && (e.name === "]" || e.sequence === "]")) {
       const ids = CATEGORIES.map(c => c.id);
       const cur = ids.indexOf(marketListCategoryId());
+      setSelectedSubCategory(null);
       setMarketListCategoryId(ids[(cur + 1) % ids.length]!);
       return;
     }
@@ -1499,7 +1482,7 @@ function AppContent() {
         if (subs.length > 0) {
           const ids = subs.map(s => s.id);
           const cur = ids.indexOf(selectedSubCategory() || "");
-          const newIdx = (cur - 1 + ids.length) % ids.length;
+          const newIdx = cur === -1 ? ids.length - 1 : (cur - 1 + ids.length) % ids.length;
           setSelectedSubCategory(ids[newIdx]);
         }
       }
@@ -1522,8 +1505,7 @@ function AppContent() {
     switch (e.name) {
       case "slash":
         // / — open search panel
-        setSearchPanelOpen(true);
-        setSearchPanelResultIdx(0);
+        openSearchPanel();
         break;
       case "return":
         // Enter to open enterprise chat
