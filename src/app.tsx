@@ -184,6 +184,8 @@ import { refreshWalletBalance } from "./hooks/useWallet";
 import { useAssistant } from "./hooks/useAssistant";
 import { initializeWebSocket } from "./api/websocket";
 import { searchUsers } from "./api/users";
+import { logoutUser, loginUser, registerUser } from "./auth/auth";
+import { sendGlobalMessage, sendDirectMessage } from "./api/messages";
 
 function AppContent() {
   initializeState();
@@ -614,8 +616,7 @@ function AppContent() {
         else if (e.name === "r") void refreshWalletBalance();
         else if (e.name === "w") { setSettingsPanelOpen(false); setWalletModalOpen(true); }
         else if (e.name === "l" && authState.isAuthenticated) {
-          const auth = require("./auth/auth") as typeof import("./auth/auth");
-          auth.logoutUser();
+          logoutUser();
           setAuthState({ isAuthenticated: false, user: null, token: null });
         }
       } else if (settingsPanelTab() === "display") {
@@ -845,8 +846,7 @@ function AppContent() {
             setAuthError("Username and password are required");
             return;
           }
-          const auth = require("./auth/auth") as typeof import("./auth/auth");
-          const result = auth.loginUser(username, password);
+          const result = loginUser(username, password);
           if (result.ok) {
             setAuthState({
               isAuthenticated: true,
@@ -871,8 +871,7 @@ function AppContent() {
             setAuthError("All fields are required");
             return;
           }
-          const auth = require("./auth/auth") as typeof import("./auth/auth");
-          const result = auth.registerUser(username, email, password);
+          const result = registerUser(username, email, password);
           if (result.ok) {
             setAuthModalMode("login");
             setAuthError("Registration successful! Please login.");
@@ -925,7 +924,6 @@ function AppContent() {
         if (messagesTab() === "global") {
           const content = globalChatInputValue().trim();
           if (content) {
-            const { sendGlobalMessage } = require("./api/messages") as typeof import("./api/messages");
             sendGlobalMessage(content);
             setGlobalChatInputValue("");
           }
@@ -938,7 +936,6 @@ function AppContent() {
         } else if (conversationMode() === "chat" && selectedConversationId()) {
           const content = dmInputValue().trim();
           if (content) {
-            const { sendDirectMessage } = require("./api/messages") as typeof import("./api/messages");
             const recipientId = selectedConversationId()!;
             const conv = conversations().find(c => c.participantId.toLowerCase() === recipientId.toLowerCase());
             sendDirectMessage(recipientId, conv?.participantName || recipientId, content);
@@ -972,8 +969,7 @@ function AppContent() {
       } else if (e.name === "s" && profileViewMode() === "view") {
         setProfileViewMode("search");
       } else if (e.name === "l" && profileViewMode() === "view") {
-        const auth = require("./auth/auth") as typeof import("./auth/auth");
-        auth.logoutUser();
+        logoutUser();
         setAuthState({
           isAuthenticated: false,
           user: null,
@@ -1183,8 +1179,8 @@ function AppContent() {
         setComparisonPanelOpen(true);
         setComparisonSelectMode(true);
         break;
-      case "l":
-        // l — toggle watchlist panel
+      case "L":
+        // Shift+L — toggle watchlist panel
         setWatchlistPanelOpen(!watchlistPanelOpen());
         break;
       case "u": {

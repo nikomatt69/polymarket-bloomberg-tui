@@ -16,8 +16,21 @@ import {
 } from "../state";
 import { sendMessageToAssistantStream } from "../api/assistant";
 
+const MAX_CHAT_MESSAGES = 100;
+
 function generateId(): string {
   return Math.random().toString(36).substring(2, 15);
+}
+
+function addMessageWithLimit(msg: ChatMessage) {
+  setChatMessages((msgs) => {
+    const updated = [...msgs, msg];
+    // Keep only the last MAX_CHAT_MESSAGES
+    if (updated.length > MAX_CHAT_MESSAGES) {
+      return updated.slice(-MAX_CHAT_MESSAGES);
+    }
+    return updated;
+  });
 }
 
 export function useAssistant() {
@@ -33,7 +46,7 @@ export function useAssistant() {
       timestamp: new Date(),
     };
 
-    setChatMessages([...chatMessages(), userMessage]);
+    addMessageWithLimit(userMessage);
     setChatInputValue("");
     setChatLoading(true);
 
@@ -51,7 +64,7 @@ export function useAssistant() {
         toolCalls,
       };
 
-      setChatMessages((msgs) => [...msgs, assistantMessage]);
+      addMessageWithLimit(assistantMessage);
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
 
@@ -62,7 +75,7 @@ export function useAssistant() {
         content: `Error: ${errorMsg}`,
         timestamp: new Date(),
       };
-      setChatMessages((msgs) => [...msgs, errorMessage]);
+      addMessageWithLimit(errorMessage);
     } finally {
       setChatLoading(false);
     }

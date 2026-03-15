@@ -4,9 +4,16 @@
  */
 
 import { Market, Outcome, PriceHistory, PricePoint, Event, Series, Tag, Category, Timeframe } from "../types/market";
+import { getCache, createCache } from "../utils/cache";
 
 const GAMMA_API_BASE = "https://gamma-api.polymarket.com";
 const CLOB_API_BASE = "https://clob.polymarket.com";
+
+// Cache instances for different data types
+const marketsCache = createCache({ defaultTTL: 30000, maxSize: 10 }); // 30s for markets
+const marketDetailsCache = createCache({ defaultTTL: 60000, maxSize: 100 }); // 60s for details
+const orderBookCache = createCache({ defaultTTL: 5000, maxSize: 200 }); // 5s for order books
+const priceHistoryCache = createCache({ defaultTTL: 30000, maxSize: 100 }); // 30s for price history
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -206,6 +213,16 @@ function parseGammaMarket(market: GammaMarket): Market {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getMarkets(limit: number = 50, offset: number = 0): Promise<Market[]> {
+  const cacheKey = `markets-${limit}-${offset}`;
+  
+  // Check cache first (only for first page, no offset)
+  if (offset === 0) {
+    const cached = marketsCache.get<Market[]>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+  }
+  
   const response = await fetch(
     `${GAMMA_API_BASE}/markets?limit=${limit}&offset=${offset}&closed=false&order=volumeNum&ascending=false`
   );
@@ -219,12 +236,25 @@ export async function getMarkets(limit: number = 50, offset: number = 0): Promis
     throw new Error("Unexpected Gamma API response format");
   }
 
-  return data
+  const markets = data
     .map((item) => parseGammaMarket(item as GammaMarket))
     .filter((market) => market.outcomes.length > 0);
+    
+  // Cache the result (only first page)
+  if (offset === 0) {
+    marketsCache.set(cacheKey, markets);
+  }
+  
+  return markets;
 }
 
 export async function getMarketDetails(marketId: string): Promise<Market | null> {
+  // Check cache first
+  const cached = marketDetailsCache.get<Market>(marketId);
+  if (cached) {
+    return cached;
+  }
+  
   try {
     const response = await fetch(`${GAMMA_API_BASE}/markets?id=${marketId}`);
 
@@ -238,7 +268,10 @@ export async function getMarketDetails(marketId: string): Promise<Market | null>
       return null;
     }
 
-    return parseGammaMarket(data[0]);
+    const market = parseGammaMarket(data[0]);
+    marketDetailsCache.set(marketId, market);
+    
+    return market;
   } catch (error) {
     console.error("Failed to fetch market details:", error);
     return null;
@@ -355,6 +388,12 @@ export async function getPriceHistory(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getOrderBookSummary(tokenId: string): Promise<OrderBookSummary | null> {
+  // Check cache first
+  const cached = orderBookCache.get<OrderBookSummary>(tokenId);
+  if (cached) {
+    return cached;
+  }
+  
   try {
     const response = await fetch(`${CLOB_API_BASE}/book?token_id=${tokenId}`);
     if (!response.ok) return null;
@@ -382,7 +421,7 @@ export async function getOrderBookSummary(tokenId: string): Promise<OrderBookSum
     const bidDepth = bids.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
     const askDepth = asks.reduce((sum, level) => sum + parseNumeric(level.size, 0), 0);
 
-    return {
+    const result: OrderBookSummary = {
       marketId: data.market ?? "",
       tokenId: data.asset_id ?? tokenId,
       bestBid,
@@ -396,6 +435,11 @@ export async function getOrderBookSummary(tokenId: string): Promise<OrderBookSum
       tickSize: data.tick_size ? parseNumeric(data.tick_size, 0) : null,
       updatedAt: data.timestamp ? new Date(data.timestamp).getTime() : null,
     };
+    
+    // Cache the result
+    orderBookCache.set(tokenId, result);
+    
+    return result;
   } catch {
     return null;
   }

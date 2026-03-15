@@ -2,7 +2,7 @@
  * Custom hook for fetching market data from Polymarket API
  */
 
-import { createEffect, onCleanup } from "solid-js";
+import { createSignal, onCleanup } from "solid-js";
 import {
   getMarkets,
   getMarketDetails,
@@ -19,27 +19,45 @@ import {
 import { Market, PriceHistory } from "../types/market";
 import { evaluateAlerts } from "./useAlerts";
 
+// Request deduplication to prevent overlapping fetches
+let pendingFetch: Promise<Market[]> | null = null;
+
 /**
  * Hook to fetch all markets on startup
  */
 export function useMarketsFetch(): void {
-  createEffect(async () => {
+  // Use a signal to track if initial fetch is done
+  const [initialFetchDone, setInitialFetchDone] = createSignal(false);
+  
+  // Use a simple flag to track if we should fetch
+  if (!initialFetchDone()) {
     setLoading(true);
     setError(null);
 
-    try {
-      const markets = await getMarkets(50);
-      setMarkets(markets);
-      evaluateAlerts(markets);
-      setError(null);
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "Failed to fetch markets";
-      setError(errorMsg);
-      console.error("Error fetching markets:", error);
-    } finally {
-      setLoading(false);
-    }
-  });
+    const fetchMarkets = async () => {
+      try {
+        // Use deduplicated fetch
+        if (!pendingFetch) {
+          pendingFetch = getMarkets(50);
+        }
+        const markets = await pendingFetch;
+        pendingFetch = null;
+        
+        setMarkets(markets);
+        evaluateAlerts(markets);
+        setError(null);
+        setInitialFetchDone(true);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : "Failed to fetch markets";
+        setError(errorMsg);
+        console.error("Error fetching markets:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchMarkets();
+  }
 }
 
 /**
@@ -47,25 +65,33 @@ export function useMarketsFetch(): void {
  */
 export function useSelectedMarketDetails(): Market | undefined {
   const selected = getSelectedMarket();
-
-  createEffect(async () => {
-    if (!appState.selectedMarketId) return;
-
-    try {
-      const details = await getMarketDetails(appState.selectedMarketId);
-      if (details) {
-        // Update market in list with new details
-        setMarkets([
-          ...appState.markets.map((m) =>
-            m.id === details.id ? details : m
-          ),
-        ]);
-      }
-    } catch (error) {
-      console.error("Error fetching market details:", error);
-    }
-  });
-
+  let currentMarketId: string | null = null;
+  
+  // Track when selected market changes
+  const checkAndFetch = () => {
+    const newMarketId = appState.selectedMarketId;
+    if (!newMarketId || newMarketId === currentMarketId) return;
+    
+    currentMarketId = newMarketId;
+    
+    getMarketDetails(newMarketId)
+      .then((details) => {
+        if (details) {
+          setMarkets([
+            ...appState.markets.map((m) =>
+              m.id === details.id ? details : m
+            ),
+          ]);
+        }
+      })
+      .catch((error) => {
+        console.error("Error fetching market details:", error);
+      });
+  };
+  
+  // Check on first run and whenever selectedMarketId changes
+  checkAndFetch();
+  
   return selected;
 }
 
@@ -87,22 +113,45 @@ export async function usePriceHistory(
   }
 }
 
+// Track if refresh is in progress to prevent overlapping
+let refreshInProgress = false;
+
 /**
  * Hook to set up periodic market refresh
  */
 export function useRefreshInterval(intervalMs: number = 30000): void {
-  createEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const markets = await getMarkets(50);
-        setMarkets(markets);
-        evaluateAlerts(markets);
-      } catch (error) {
-        console.error("Error refreshing markets:", error);
+  let intervalId: ReturnType<typeof setInterval> | null = null;
+  
+  const doRefresh = async () => {
+    // Skip if already refreshing
+    if (refreshInProgress) return;
+    
+    refreshInProgress = true;
+    try {
+      // Use deduplicated fetch
+      if (!pendingFetch) {
+        pendingFetch = getMarkets(50);
       }
-    }, intervalMs);
-
-    onCleanup(() => clearInterval(interval));
+      const markets = await pendingFetch;
+      pendingFetch = null;
+      
+      setMarkets(markets);
+      evaluateAlerts(markets);
+    } catch (error) {
+      console.error("Error refreshing markets:", error);
+    } finally {
+      refreshInProgress = false;
+    }
+  };
+  
+  // Start the interval
+  intervalId = setInterval(doRefresh, intervalMs);
+  
+  // Cleanup on unmount
+  onCleanup(() => {
+    if (intervalId) {
+      clearInterval(intervalId);
+    }
   });
 }
 
@@ -110,9 +159,18 @@ export function useRefreshInterval(intervalMs: number = 30000): void {
  * Manual refresh trigger
  */
 export async function manualRefresh(): Promise<void> {
+  // Skip if already refreshing
+  if (refreshInProgress) return;
+  
   setLoading(true);
   try {
-    const markets = await getMarkets(50);
+    // Use deduplicated fetch
+    if (!pendingFetch) {
+      pendingFetch = getMarkets(50);
+    }
+    const markets = await pendingFetch;
+    pendingFetch = null;
+    
     setMarkets(markets);
     evaluateAlerts(markets);
     setError(null);
