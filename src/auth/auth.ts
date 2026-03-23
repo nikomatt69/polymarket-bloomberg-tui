@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createHmac, randomBytes, createCipheriv, createDecipheriv } from "crypto";
 import { homedir } from "os";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
@@ -5,8 +6,6 @@ import { join } from "path";
 
 const TOKEN_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;
 const SALT_LENGTH = 32;
-const KEY_LENGTH = 64;
-const ITERATIONS = 100000;
 
 export interface AuthUser {
   id: string;
@@ -49,17 +48,17 @@ function getAuthPath(): string {
 function getEncryptionKey(): Buffer {
   const keyPath = join(getConfigDir(), ".auth.key");
   if (existsSync(keyPath)) {
-    return readFileSync(keyPath);
+    return readFileSync(keyPath) as unknown as Buffer;
   }
   const key = randomBytes(ENCRYPTION_KEY_BYTES);
-  writeFileSync(keyPath, key, { mode: 0o600 });
-  return key;
+  writeFileSync(keyPath, key as any, { mode: 0o600 });
+  return key as unknown as Buffer;
 }
 
 function encrypt(text: string): string {
   const key = getEncryptionKey();
   const iv = randomBytes(16);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const cipher = createCipheriv("aes-256-gcm", key as any, iv as any);
   let encrypted = cipher.update(text, "utf8", "hex");
   encrypted += cipher.final("hex");
   const authTag = cipher.getAuthTag();
@@ -71,8 +70,8 @@ function decrypt(encryptedData: string): string {
   const [ivHex, authTagHex, encrypted] = encryptedData.split(":");
   const iv = Buffer.from(ivHex, "hex");
   const authTag = Buffer.from(authTagHex, "hex");
-  const decipher = createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(authTag);
+  const decipher = createDecipheriv("aes-256-gcm", key as any, iv as any);
+  decipher.setAuthTag(authTag as any);
   let decrypted = decipher.update(encrypted, "hex", "utf8");
   decrypted += decipher.final("utf8");
   return decrypted;
@@ -83,16 +82,16 @@ function generateSalt(): string {
 }
 
 function hashPassword(password: string, salt: string): string {
-  const saltBuffer = Buffer.from(salt, "hex");
-  const passwordBuffer = Buffer.from(password);
-  const combined = Buffer.concat([saltBuffer, passwordBuffer]);
+  const saltBuffer = Buffer.from(salt, "hex") as any;
+  const passwordBuffer = Buffer.from(password) as any;
+  const combined = Buffer.concat([saltBuffer, passwordBuffer]) as any;
   
-  let hash = combined;
-  for (let i = 0; i < ITERATIONS; i++) {
-    hash = createHmac("sha512", hash).update(saltBuffer).digest();
+  let hashBuffer: any = combined;
+  for (let i = 0; i < 100000; i++) {
+    hashBuffer = createHmac("sha512", hashBuffer).update(saltBuffer).digest();
   }
   
-  return hash.toString("hex");
+  return hashBuffer.toString("hex");
 }
 
 function generateToken(): string {

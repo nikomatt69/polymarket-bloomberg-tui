@@ -9,6 +9,7 @@ import { UserProfile, UserContact, ProfileState } from "./types/user";
 import { homedir } from "os";
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
+import { watchlistState } from "./hooks/useWatchlist";
 
 export type ConnectionStatus = "connected" | "disconnected" | "connecting" | "reconnecting" | "error";
 
@@ -938,10 +939,6 @@ export function initializeState(): void {
  * Get filtered and sorted markets based on current state
  */
 export function getFilteredMarkets(): Market[] {
-  // lazy import to avoid circular dependency
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { watchlistState } = require("./hooks/useWatchlist") as typeof import("./hooks/useWatchlist");
-
   let filtered = [...appState.markets];
 
   // Apply watchlist filter when active

@@ -148,7 +148,7 @@ export class RuleScheduler {
     };
 
     runTask();
-    const intervalId = setInterval(runTask, INTERVAL_MS[task.interval]);
+    const intervalId = setInterval(runTask, INTERVAL_MS[task.interval]) as unknown as number;
     this.intervals.set(task.id, intervalId);
   }
 

@@ -285,9 +285,9 @@ export function buildClobL2Signature(
 ): string {
   const normalizedSecret = secret.replace(/-/g, "+").replace(/_/g, "/").replace(/[^A-Za-z0-9+/=]/g, "");
   const message = `${timestamp}${method.toUpperCase()}${requestPath}${body ?? ""}`;
-  const hmac = createHmac("sha256", Buffer.from(normalizedSecret, "base64"));
-  hmac.update(message);
-  return toUrlSafeBase64(hmac.digest("base64"));
+  const h = createHmac("sha256", Buffer.from(normalizedSecret, "base64") as any);
+  h.update(message);
+  return toUrlSafeBase64(h.digest("base64"));
 }
 
 export async function getClobL2Headers(
