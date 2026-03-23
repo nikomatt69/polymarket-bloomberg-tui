@@ -1170,10 +1170,6 @@ function AppContent() {
         // m — toggle sentiment analysis panel
         setSentimentPanelOpen(!sentimentPanelOpen());
         break;
-      case "M":
-        // Shift+M — toggle messages panel
-        setMessagesPanelOpen(!messagesPanelOpen());
-        break;
       case "c":
         // c — open comparison panel in select mode
         setComparisonPanelOpen(true);
@@ -1202,9 +1198,8 @@ function AppContent() {
         // A — toggle analytics panel
         setAnalyticsPanelOpen(!analyticsPanelOpen());
         break;
-      case "i":
       case "I":
-        // I — toggle AI assistant panel
+        // Shift+I — toggle AI assistant panel
         setAssistantPanelOpen(!assistantPanelOpen());
         break;
       case "k":

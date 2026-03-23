@@ -260,8 +260,8 @@ export function OrderBookPanel() {
           <text content={` Vol: ${formatSize(totalBidDepth())}/${formatSize(totalAskDepth())} `} fg={theme.textMuted} />
         </Show>
         <box flexGrow={1} />
-        <Show when={lastTrade()}>
-          {(trade: LastTrade) => (
+        <Show keyed when={lastTrade()}>
+          {(trade) => (
             <text
               content={` Last: ${((trade.price ?? 0) * 100).toFixed(2)}¢  ${formatSize(trade.size)} `}
               fg={trade.side === "BUY" ? theme.success : theme.error}
@@ -303,16 +303,16 @@ export function OrderBookPanel() {
               <box height={1} width="100%" flexDirection="row">
                 {/* Bid side */}
                 <box width="50%" flexDirection="row" justifyContent="flex-end">
-                  <Show when={cumBid()}>
-                    {(cb: { price: number; size: number; cumulative: number }) => (
+                  <Show keyed when={cumBid()}>
+                    {(cb) => (
                       <text
                         content={formatSize(cb.cumulative).padStart(8)}
                         fg={theme.primary}
                       />
                     )}
                   </Show>
-                  <Show when={bid()}>
-                    {(b: { price: number; size: number; total: number }) => (
+                  <Show keyed when={bid()}>
+                    {(b) => (
                       <>
                         <text
                           content={buildBar((b.size ?? 0) / maxBidSize(), BAR_WIDTH).padEnd(BAR_WIDTH + 1)}
@@ -336,8 +336,8 @@ export function OrderBookPanel() {
 
                 {/* Ask side */}
                 <box width="50%" flexDirection="row">
-                  <Show when={ask()}>
-                    {(a: { price: number; size: number; total: number }) => (
+                  <Show keyed when={ask()}>
+                    {(a) => (
                       <>
                         <text
                           content={fmtPct(a.price).padEnd(8)}
@@ -354,8 +354,8 @@ export function OrderBookPanel() {
                       </>
                     )}
                   </Show>
-                  <Show when={cumAsk()}>
-                    {(ca: { price: number; size: number; cumulative: number }) => (
+                  <Show keyed when={cumAsk()}>
+                    {(ca) => (
                       <text
                         content={formatSize(ca.cumulative).padStart(8)}
                         fg={theme.primary}

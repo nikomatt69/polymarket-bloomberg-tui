@@ -372,12 +372,12 @@ export function calculatePositionRisk(positions: Position[], markets: { id: stri
   if (totalValue === 0) return [];
 
   return positions.map((position) => {
-    const market = markets.find((m) => m.id === position.marketId || m.id === position.asset);
-    const currentPrice = position.currentPrice || 0.5;
+    const market = markets.find((m) => m.id === position.asset);
+    const currentPrice = position.curPrice || 0.5;
     const volume = market?.volume || 0;
 
     const concentrationRisk = (position.currentValue / totalValue) * 100;
-    const volatilityRisk = Math.abs(position.currentPrice - 0.5) * 100 * 2;
+    const volatilityRisk = Math.abs(position.curPrice - 0.5) * 100 * 2;
     const liquidityRisk = volume < 10000 ? 50 : volume < 50000 ? 25 : 0;
     const pnlRisk = position.cashPnl < 0 ? Math.min(50, Math.abs(position.cashPnl) / position.initialValue * 100) : 0;
 
@@ -388,7 +388,7 @@ export function calculatePositionRisk(positions: Position[], markets: { id: stri
     else if (score >= 40) recommendation = "reduce";
 
     return {
-      positionId: position.asset || position.id,
+      positionId: position.asset,
       outcome: position.outcome,
       score: Math.round(score),
       factors: {

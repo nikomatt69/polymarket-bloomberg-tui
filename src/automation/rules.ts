@@ -90,7 +90,7 @@ export function createRule(name: string, trigger: Trigger, action: Action): Trad
 }
 
 export function evaluateTrigger(trigger: Trigger, market: MarketData, previousPrice?: number): boolean {
-  const outcome = market.outcomes.find((o) => o.outcome === trigger.trigger?.outcome || o.outcome === "Yes");
+  const outcome = market.outcomes.find((o) => o.outcome === trigger.outcome || o.outcome === "Yes");
   if (!outcome) return false;
 
   const currentPrice = outcome.price;
