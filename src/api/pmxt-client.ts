@@ -137,10 +137,17 @@ export async function fetchMarketViaPmxt(
   try {
     const client = getPolymarketPublicClient(options);
 
+    // Try with marketId first
     try {
       return await withTimeout(client.fetchMarket({ marketId }));
     } catch {
-      return await withTimeout(client.fetchMarket({ id: marketId }));
+      // Fallback: try fetching markets and filter by ID
+      try {
+        const markets = await withTimeout(client.fetchMarkets({ limit: 100 }));
+        return markets.find((m: UnifiedMarket) => m.marketId === marketId) ?? null;
+      } catch {
+        return null;
+      }
     }
   } catch (err) {
     console.warn("pmxtjs fetchMarket failed:", err);

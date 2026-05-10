@@ -18,9 +18,10 @@ import {
 import { startHeartbeat, stopHeartbeat } from "../api/clob/trading";
 import { Order } from "../types/orders";
 import { OrderStatus } from "../types/orders";
-import { appState, getSelectedMarket, getTradingBalance, walletState } from "../state";
+import { appState, getSelectedMarket, getTradingBalance, walletState, showToast } from "../state";
 import { positionsState, fetchUserPositions } from "./usePositions";
 import { getOrderBookSummary, type OrderBookSummary } from "../api/polymarket";
+import { getRiskEngine } from "../oms";
 import { homedir } from "os";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -551,6 +552,23 @@ export async function submitOrder(order: Order): Promise<PlacedOrder | null> {
   const preview = await previewOrderDraft(order);
   if (!preview.valid) {
     setOrdersState("error", preview.errors.join(" "));
+    return null;
+  }
+
+  // Pre-trade risk check
+  const riskEngine = getRiskEngine();
+  const riskCheck = riskEngine.checkOrderRisk({
+    tokenId: order.tokenId,
+    side: order.side,
+    size: order.shares,
+    price: order.price,
+  });
+  if (!riskCheck.allowed) {
+    setOrdersState("error", `Risk check failed: ${riskCheck.reason}`);
+    showToast(`Risk check failed: ${riskCheck.reason}`, "warning");
+    if (riskCheck.autoAction === "PAUSE_TRADING") {
+      showToast("Trading paused by risk engine", "error");
+    }
     return null;
   }
 

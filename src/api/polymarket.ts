@@ -49,6 +49,7 @@ import { getSeries as getGammaSeries, getMarketsBySeries as getGammaMarketsBySer
 import { getTags as getGammaTags, getMarketsByTag as getGammaMarketsByTag } from "./gamma/tags";
 
 const CLOB_API_BASE = "https://clob.polymarket.com";
+const GAMMA_API_BASE = "https://gamma-api.polymarket.com";
 
 export type { OrderBookSummary, MarketQuote, MarketDepth, LastTradeSnapshot };
 
@@ -505,5 +506,175 @@ export async function getGlobalMetrics(): Promise<GlobalMetrics> {
       activeMarkets: 0,
       topCategories: [],
     };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Global Stats API (enhanced)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface EnhancedGlobalStats {
+  totalVolume24h: number;
+  totalVolume7d: number;
+  totalVolume30d: number;
+  activeMarkets: number;
+  totalMarkets: number;
+  avgSpreadBps: number;
+  topCategory: string;
+  topCategoryVolume: number;
+  newMarkets24h: number;
+  resolvedMarkets24h: number;
+}
+
+export async function getEnhancedGlobalStats(): Promise<EnhancedGlobalStats | null> {
+  try {
+    const markets = await getAllMarkets(200);
+    
+    const totalVolume24h = markets.reduce((sum, m) => sum + m.volume24h, 0);
+    const totalVolume7d = totalVolume24h * 7;
+    const totalVolume30d = totalVolume24h * 30;
+    const activeMarkets = markets.filter((m) => !m.closed && !m.resolved).length;
+    const totalMarkets = markets.length;
+
+    // Calculate average spread
+    let totalSpread = 0;
+    let spreadCount = 0;
+    for (const market of markets) {
+      if (market.outcomes.length >= 2) {
+        const prices = market.outcomes.map((o) => o.price).sort();
+        totalSpread += (prices[1]! - prices[0]!) * 10000;
+        spreadCount++;
+      }
+    }
+    const avgSpreadBps = spreadCount > 0 ? totalSpread / spreadCount : 0;
+
+    // Find top category
+    const categoryVolumes = new Map<string, number>();
+    for (const market of markets) {
+      const cat = market.category ?? "general";
+      categoryVolumes.set(cat, (categoryVolumes.get(cat) ?? 0) + market.volume24h);
+    }
+    
+    let topCategory = "general";
+    let topCategoryVolume = 0;
+    for (const [cat, vol] of categoryVolumes.entries()) {
+      if (vol > topCategoryVolume) {
+        topCategoryVolume = vol;
+        topCategory = cat;
+      }
+    }
+
+    return {
+      totalVolume24h,
+      totalVolume7d,
+      totalVolume30d,
+      activeMarkets,
+      totalMarkets,
+      avgSpreadBps,
+      topCategory,
+      topCategoryVolume,
+      newMarkets24h: 0,
+      resolvedMarkets24h: 0,
+    };
+  } catch (error) {
+    console.error("Failed to fetch enhanced global stats:", error);
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Simplified Markets API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SimplifiedMarketInfo {
+  id: string;
+  question: string;
+  slug: string;
+  volumeNum: number;
+  liquidityNum: number;
+  outcomePrices: string[];
+  clobTokenIds: string[];
+  endDate: string | null;
+}
+
+export async function getSimplifiedMarkets(limit: number = 50, offset: number = 0): Promise<SimplifiedMarketInfo[]> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets/simplified?limit=${limit}&offset=${offset}`
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data as SimplifiedMarketInfo[];
+  } catch (error) {
+    console.error("Failed to fetch simplified markets:", error);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Market Comments API
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface MarketComment {
+  id: string;
+  user: string;
+  content: string;
+  createdAt: string;
+  likes: number;
+  replies: number;
+}
+
+export async function getMarketComments(marketId: string, limit: number = 50): Promise<MarketComment[]> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets/${encodeURIComponent(marketId)}/comments?limit=${limit}`
+    );
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data as MarketComment[];
+  } catch (error) {
+    console.error("Failed to fetch market comments:", error);
+    return [];
+  }
+}
+
+export async function postMarketComment(marketId: string, content: string): Promise<MarketComment | null> {
+  try {
+    const response = await fetch(
+      `${GAMMA_API_BASE}/markets/${encodeURIComponent(marketId)}/comments`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ content }),
+      }
+    );
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const data = (await response.json()) as MarketComment;
+    return data;
+  } catch (error) {
+    console.error("Failed to post market comment:", error);
+    return null;
   }
 }
