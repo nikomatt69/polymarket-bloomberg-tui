@@ -61,6 +61,7 @@ import { OrderBookPanel } from "./order-book-panel";
 import { OrderForm } from "./order-form";
 import { OrderHistory } from "./order-history";
 import { ProfilePanel } from "./profile-panel";
+import { RiskDashboard } from "./risk-dashboard";
 import { SentimentPanel } from "./sentiment-panel";
 import { SettingsPanel } from "./settings-panel";
 import { ShortcutsPanel } from "./shortcuts-panel";
@@ -68,6 +69,7 @@ import { UserSearch } from "./user-search";
 import { WalletConnect } from "./wallet-connect";
 import { WatchlistPanel } from "./watchlist-panel";
 import { BankingPanel } from "./banking-panel";
+import { riskDashboardOpen, setRiskDashboardOpen } from "../state";
 
 export function Layout() {
   const { theme } = useTheme();
@@ -135,7 +137,7 @@ export function Layout() {
         comparisonPanelOpen() || watchlistPanelOpen() || settingsPanelOpen() || shortcutsPanelOpen() ||
         orderBookPanelOpen() || filterPanelOpen() || analyticsPanelOpen() || messagesPanelOpen() || authModalOpen() ||
         profilePanelOpen() || userSearchOpen() || newsPanelOpen() || socialPanelOpen() || automationPanelOpen() || skillsPanelOpen() ||
-        enterpriseChatOpen() || xmtpChatOpen() || searchPanelOpen()
+        enterpriseChatOpen() || xmtpChatOpen() || searchPanelOpen() || riskDashboardOpen()
       }>
         <box
           position="absolute"
@@ -226,6 +228,11 @@ export function Layout() {
       {/* Analytics Panel Modal */}
       <Show when={analyticsPanelOpen()}>
         <AnalyticsPanel />
+      </Show>
+
+      {/* Risk Dashboard Modal */}
+      <Show when={riskDashboardOpen()}>
+        <RiskDashboard onClose={() => setRiskDashboardOpen(false)} />
       </Show>
 
       {/* Messages Panel Modal */}

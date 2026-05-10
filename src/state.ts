@@ -432,6 +432,9 @@ export const [watchlistPanelOpen, setWatchlistPanelOpen] = createSignal(false);
 export const [accountStatsOpen, setAccountStatsOpen] = createSignal(false);
 export const [analyticsPanelOpen, setAnalyticsPanelOpen] = createSignal(false);
 
+// Risk Dashboard panel visibility
+export const [riskDashboardOpen, setRiskDashboardOpen] = createSignal(false);
+
 // Settings panel visibility and active tab signals
 export const [settingsPanelOpen, setSettingsPanelOpen] = createSignal(false);
 export const [settingsPanelTab, setSettingsPanelTab] = createSignal<"theme" | "providers" | "account" | "display" | "keys">("theme");

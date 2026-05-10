@@ -91,6 +91,8 @@ import {
   setMarketListCategoryId,
   selectedSubCategory,
   setSelectedSubCategory,
+  riskDashboardOpen,
+  setRiskDashboardOpen,
 } from "./state";
 import { CATEGORIES, SUB_CATEGORIES } from "./components/market-list";
 import { useMarketsFetch, useRefreshInterval, manualRefresh } from "./hooks/useMarketData";
@@ -1512,7 +1514,8 @@ function AppContent() {
       || socialPanelOpen()
       || automationPanelOpen()
       || skillsPanelOpen()
-      || searchPanelOpen();
+      || searchPanelOpen()
+      || riskDashboardOpen();
 
     if (anyOverlayOpen) {
       return;
@@ -1802,6 +1805,10 @@ function AppContent() {
           // k — toggle shortcuts panel
           setShortcutsPanelOpen(!shortcutsPanelOpen());
         }
+        break;
+      case "K":
+        // Shift+K — toggle risk dashboard
+        setRiskDashboardOpen(!riskDashboardOpen());
         break;
       case "1":
         setTimeframe("1h");
