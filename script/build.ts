@@ -144,7 +144,7 @@ if (skipInstall) {
 
 const parserWorker = fs.realpathSync(path.resolve(rootDir, "node_modules/@opentui/core/parser.worker.js"))
 const parserWorkerPath = path.relative(rootDir, parserWorker).replace(/\\/g, "/")
-const binaryName = "polymarket-bloomberg-tui"
+const binaryName = "polytui-dashboard"
 
 const binaries: Record<string, string> = {}
 
@@ -184,7 +184,7 @@ for (const target of targets) {
     },
     entrypoints: ["./src/index.tsx", parserWorker],
     define: {
-      POLYMARKET_BLOOMBERG_TUI_VERSION: JSON.stringify(pkg.version),
+      POLYTUI_DASHBOARD_VERSION: JSON.stringify(pkg.version),
       OTUI_TREE_SITTER_WORKER_PATH: JSON.stringify(`${bunfsRoot}${parserWorkerPath}`),
     },
   })

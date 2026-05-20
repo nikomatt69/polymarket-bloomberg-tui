@@ -11,11 +11,11 @@ declare module "@opentui/solid" {
   }
 }
 
-declare const POLYMARKET_BLOOMBERG_TUI_VERSION: string | undefined;
+declare const POLYTUI_DASHBOARD_VERSION: string | undefined;
 
 const version =
-  typeof POLYMARKET_BLOOMBERG_TUI_VERSION !== "undefined"
-    ? POLYMARKET_BLOOMBERG_TUI_VERSION
+  typeof POLYTUI_DASHBOARD_VERSION !== "undefined"
+    ? POLYTUI_DASHBOARD_VERSION
     : pkg.version;
 
 if (process.argv.includes("--version") || process.argv.includes("-v")) {

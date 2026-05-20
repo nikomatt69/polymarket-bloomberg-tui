@@ -1,11 +1,11 @@
 {
-  "name": "polymarket-bloomberg-tui",
+  "name": "polytui-dashboard",
   "version": "1.0.1",
   "description": "Bloomberg-style TUI for monitoring Polymarket prediction markets",
   "type": "module",
   "main": "src/index.tsx",
   "bin": {
-    "pm-tui": "./src/bin/pm-tui.ts"
+    "polytui-dashboard": "./src/bin/pm-tui.ts"
   },
   "scripts": {
     "dev": "bun run src/index.tsx",

@@ -138,7 +138,7 @@ The Polymarket Bloomberg-Style TUI has been successfully built, tested, and docu
 
 ```bash
 # Navigate to project
-cd /Volumes/SSD/Projects/polymarket-bloomberg-tui
+cd /Volumes/SSD/Projects/polytui-dashboard
 
 # Install dependencies
 bun install
@@ -516,7 +516,7 @@ The application is ready for immediate deployment and Phase 2 development.
 
 ## Quick Links
 
-- **Repository**: /Volumes/SSD/Projects/polymarket-bloomberg-tui
+- **Repository**: /Volumes/SSD/Projects/polytui-dashboard
 - **Main Entry**: src/index.tsx
 - **Run Command**: `bun run src/index.tsx`
 - **Type Check**: `bun run type-check`

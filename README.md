@@ -27,7 +27,7 @@ A professional, data-dense terminal application for browsing and monitoring Poly
 
 ```bash
 # Clone or navigate to project
-cd polymarket-bloomberg-tui
+cd polytui-dashboard
 
 # Install dependencies
 bun install

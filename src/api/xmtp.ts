@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { privateKeyToAccount } from "viem/accounts";
 
 const XMTP_ENV = "production";
-const XMTP_APP_VERSION = "polymarket-bloomberg-tui/1.0.2";
+const XMTP_APP_VERSION = "polytui-dashboard/1.0.2";
 const XMTP_INIT_TIMEOUT_MS = 60_000;
 const XMTP_REQUEST_TIMEOUT_MS = 30_000;
 

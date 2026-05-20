@@ -466,13 +466,13 @@ Add to your shell profile (~/.bashrc, ~/.zshrc):
 
 ```bash
 # Quick start
-alias poly='bun run /path/to/polymarket-bloomberg-tui/src/index.ts'
+alias poly='bun run /path/to/polytui-dashboard/src/index.ts'
 
 # Quick dev
-alias poly-dev='cd /path/to/polymarket-bloomberg-tui && bun run src/index.ts'
+alias poly-dev='cd /path/to/polytui-dashboard && bun run src/index.ts'
 
 # Type check
-alias poly-check='cd /path/to/polymarket-bloomberg-tui && bun run type-check'
+alias poly-check='cd /path/to/polytui-dashboard && bun run type-check'
 
 # View config
 alias poly-config='cat ~/.polymarket-tui/config.json'
@@ -481,7 +481,7 @@ alias poly-config='cat ~/.polymarket-tui/config.json'
 alias poly-reset='rm ~/.polymarket-tui/config.json'
 
 # Build standalone
-alias poly-build='bun build /path/to/polymarket-bloomberg-tui/src/index.ts --compile --outfile=~/bin/polymarket-tui'
+alias poly-build='bun build /path/to/polytui-dashboard/src/index.ts --compile --outfile=~/bin/polymarket-tui'
 ```
 
 Then use:

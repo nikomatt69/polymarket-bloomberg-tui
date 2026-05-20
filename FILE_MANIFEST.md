@@ -11,7 +11,7 @@ Status: ✅ COMPLETE
 ## Directory Structure
 
 ```
-polymarket-bloomberg-tui/
+polytui-dashboard/
 ├── src/                          # Source code (18 files)
 │   ├── index.tsx                 # Entry point (30 lines)
 │   ├── app.tsx                   # Root component (70 lines)
@@ -406,7 +406,7 @@ polymarket-bloomberg-tui/
 ## Dependency Tree
 
 ```
-polymarket-bloomberg-tui (1.0.0)
+polytui-dashboard (1.0.0)
 ├── @opentui/core (^0.1.80)
 │   └── @opentui/solid (^0.1.80)
 │       └── solid-js (^1.9.3)
