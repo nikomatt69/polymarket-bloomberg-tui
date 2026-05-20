@@ -1,4 +1,4 @@
-# Polymarket Bloomberg-Style TUI
+# PolyTUI Dashboard
 
 > Canonical project docs now live in `docs/` (Astro + Starlight).
 >
@@ -12,7 +12,7 @@ A professional, data-dense terminal application for browsing and monitoring Poly
 - **Interactive Navigation**: Keyboard-driven interface for browsing markets
 - **Dual API Support**: Primary CLOB client with automatic fallback to GraphQL subgraph
 - **ASCII Charts**: Terminal-friendly price history visualization
-- **Responsive Layout**: Bloomberg-style split-view dashboard (30% markets | 70% details)
+- **Responsive Layout**: Professional split-view dashboard (30% markets | 70% details)
 - **Persistent State**: Saves search filters, sorting preferences, and selected market
 - **Auto-Refresh**: 30-second polling interval with manual refresh option
 - **Rich Formatting**: ANSI colors, bold text, and formatted numbers
