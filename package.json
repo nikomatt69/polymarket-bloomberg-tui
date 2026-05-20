@@ -44,6 +44,7 @@
     "viem": "^2.46.1"
   },
   "devDependencies": {
+    "@astrojs/solid-js": "^6.0.1",
     "@astrojs/starlight": "^0.37.6",
     "@types/bun": "latest",
     "astro": "^5.18.0",

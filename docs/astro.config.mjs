@@ -1,12 +1,24 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import solidJs from "@astrojs/solid-js";
 
 export default defineConfig({
+  output: "static",
   integrations: [
+    solidJs(),
     starlight({
-      title: "Polymarket Bloomberg TUI",
-      description: "Architecture and module documentation for the terminal-based Polymarket monitor and trading workstation.",
+      title: "polytui-dashboard",
+      description:
+        "Bloomberg-style terminal dashboard for Polymarket prediction markets. Built with Bun, SolidJS, and OpenTUI.",
       lastUpdated: true,
+      favicon: "/favicon.svg",
+      social: [
+        {
+          icon: "github",
+          label: "GitHub",
+          href: "https://github.com/nikomatt69/polytui-dashboard",
+        },
+      ],
       tableOfContents: {
         minHeadingLevel: 2,
         maxHeadingLevel: 3,
@@ -36,18 +48,20 @@ export default defineConfig({
           tag: "link",
           attrs: {
             rel: "stylesheet",
-            href: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap",
+            href: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Space+Grotesk:wght@400;500;600;700&display=swap",
           },
         },
         {
           tag: "style",
           content: `
+/* ── Design tokens ───────────────────────────────────────────── */
 :root {
   --sl-content-width: 49rem;
   --sl-sidebar-width: 20rem;
   --sl-nav-height: 3.8rem;
-  --sl-font: "Space Grotesk";
-  --sl-font-mono: "JetBrains Mono";
+  --sl-font: "Space Grotesk", system-ui, sans-serif;
+  --sl-font-mono: "JetBrains Mono", "Fira Code", monospace;
+  /* dark-mode palette */
   --sl-color-black: hsl(0, 0%, 3%);
   --sl-color-gray-6: hsl(0, 0%, 5%);
   --sl-color-gray-5: hsl(0, 0%, 9%);
@@ -75,15 +89,15 @@ export default defineConfig({
   --sl-color-orange-low: hsl(197, 100%, 12%);
   --sl-color-orange: hsl(197, 100%, 56%);
   --sl-color-orange-high: hsl(194, 100%, 86%);
-  --sl-color-green-low: hsl(197, 100%, 12%);
-  --sl-color-green: hsl(197, 100%, 56%);
-  --sl-color-green-high: hsl(194, 100%, 86%);
-  --sl-color-red-low: hsl(197, 100%, 12%);
-  --sl-color-red: hsl(197, 100%, 56%);
-  --sl-color-red-high: hsl(194, 100%, 86%);
-  --sl-color-blue-low: hsl(197, 100%, 12%);
-  --sl-color-blue: hsl(197, 100%, 56%);
-  --sl-color-blue-high: hsl(194, 100%, 86%);
+  --sl-color-green-low: hsl(155, 100%, 10%);
+  --sl-color-green: hsl(155, 90%, 48%);
+  --sl-color-green-high: hsl(152, 100%, 82%);
+  --sl-color-red-low: hsl(355, 100%, 12%);
+  --sl-color-red: hsl(355, 90%, 58%);
+  --sl-color-red-high: hsl(355, 100%, 84%);
+  --sl-color-blue-low: hsl(215, 100%, 12%);
+  --sl-color-blue: hsl(215, 100%, 56%);
+  --sl-color-blue-high: hsl(215, 100%, 86%);
 }
 
 :root[data-theme='light'] {
@@ -109,34 +123,18 @@ export default defineConfig({
   --sl-color-text-invert: hsl(0, 0%, 100%);
   --sl-color-bg-accent: hsl(206, 98%, 48%);
   --sl-color-backdrop-overlay: hsla(215, 28%, 28%, 0.42);
-  --sl-shadow-sm: 0 1px 2px hsla(207, 72%, 52%, 0.08), 0 4px 16px hsla(207, 72%, 52%, 0.1);
-  --sl-shadow-md: 0 10px 24px hsla(207, 72%, 52%, 0.12);
-  --sl-shadow-lg: 0 16px 42px hsla(207, 72%, 52%, 0.14);
-  --sl-color-orange-low: hsl(206, 100%, 94%);
-  --sl-color-orange: hsl(206, 100%, 53%);
-  --sl-color-orange-high: hsl(212, 90%, 34%);
-  --sl-color-green-low: hsl(196, 100%, 93%);
-  --sl-color-green: hsl(196, 98%, 47%);
-  --sl-color-green-high: hsl(199, 90%, 32%);
-  --sl-color-red-low: hsl(214, 100%, 94%);
-  --sl-color-red: hsl(214, 95%, 56%);
-  --sl-color-red-high: hsl(218, 88%, 34%);
-  --sl-color-blue-low: hsl(209, 100%, 94%);
-  --sl-color-blue: hsl(209, 100%, 52%);
-  --sl-color-blue-high: hsl(214, 88%, 32%);
 }
 
-html,
-body {
+/* ── Base typography ─────────────────────────────────────────── */
+html, body {
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-body {
-  letter-spacing: 0.005em;
-}
+body { letter-spacing: 0.005em; }
 
+/* ── Background gradients ────────────────────────────────────── */
 html[data-theme='dark'] body {
   background:
     radial-gradient(1150px 360px at 14% -18%, hsla(197, 100%, 56%, 0.14), transparent 66%),
@@ -151,6 +149,7 @@ html[data-theme='light'] body {
     var(--sl-color-bg);
 }
 
+/* ── Nav / header ────────────────────────────────────────────── */
 .header {
   backdrop-filter: saturate(150%) blur(12px);
   -webkit-backdrop-filter: saturate(150%) blur(12px);
@@ -163,9 +162,7 @@ html[data-theme='light'] body {
     var(--sl-color-bg-sidebar);
 }
 
-.site-title {
-  letter-spacing: 0.01em;
-}
+.site-title { letter-spacing: 0.01em; }
 
 button[data-open-modal] {
   border-radius: 0.75rem;
@@ -177,6 +174,7 @@ button[data-open-modal]:hover {
   transform: translateY(-1px);
 }
 
+/* ── Prose improvements ──────────────────────────────────────── */
 html:not([data-has-hero]) .sl-markdown-content > p:first-of-type {
   font-size: clamp(1.02rem, 0.97rem + 0.25vw, 1.16rem);
   line-height: 1.75;
@@ -184,26 +182,17 @@ html:not([data-has-hero]) .sl-markdown-content > p:first-of-type {
   max-width: 70ch;
 }
 
-html:not([data-has-hero]) .sl-markdown-content > * + * {
-  margin-top: 1.05rem;
-}
+html:not([data-has-hero]) .sl-markdown-content > * + * { margin-top: 1.05rem; }
+html:not([data-has-hero]) .sl-markdown-content h2 { margin-top: 2.1rem; }
+html:not([data-has-hero]) .sl-markdown-content h3 { margin-top: 1.35rem; }
 
-html:not([data-has-hero]) .sl-markdown-content h2 {
-  margin-top: 2.1rem;
-}
-
-html:not([data-has-hero]) .sl-markdown-content h3 {
-  margin-top: 1.35rem;
-}
-
-.sl-markdown-content li + li {
-  margin-top: 0.32rem;
-}
+.sl-markdown-content li + li { margin-top: 0.32rem; }
 
 .sl-markdown-content table tbody tr:nth-child(even) {
   background: color-mix(in hsl, var(--sl-color-accent-low) 9%, transparent);
 }
 
+/* ── Guide callout blocks ────────────────────────────────────── */
 .sl-markdown-content .guide-intro {
   border: 1px solid color-mix(in hsl, var(--sl-color-accent) 30%, var(--sl-color-hairline));
   border-radius: 0.72rem;
@@ -225,16 +214,10 @@ html:not([data-has-hero]) .sl-markdown-content h3 {
   background: color-mix(in hsl, var(--sl-color-accent-low) 13%, transparent);
 }
 
-.sl-markdown-content .guide-nav p {
-  margin: 0;
-  font-size: var(--sl-text-sm);
-  color: color-mix(in hsl, var(--sl-color-text) 90%, var(--sl-color-accent-high));
-}
+.sl-markdown-content .guide-nav p { margin: 0; font-size: var(--sl-text-sm); }
+.sl-markdown-content .guide-nav a { font-weight: 600; }
 
-.sl-markdown-content .guide-nav a {
-  font-weight: 600;
-}
-
+/* ── KPI grids ───────────────────────────────────────────────── */
 .sl-markdown-content .guide-kpi-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -264,10 +247,8 @@ html:not([data-has-hero]) .sl-markdown-content h3 {
   color: color-mix(in hsl, var(--sl-color-white) 90%, var(--sl-color-accent-high));
 }
 
-.sl-markdown-content h2 {
-  position: relative;
-  padding-bottom: 0.35rem;
-}
+/* ── Headings ────────────────────────────────────────────────── */
+.sl-markdown-content h2 { position: relative; padding-bottom: 0.35rem; }
 
 .sl-markdown-content h2::after {
   content: "";
@@ -289,6 +270,7 @@ html:not([data-has-hero]) .sl-markdown-content h3 {
   text-underline-offset: 0.18em;
 }
 
+/* ── Inline code and blocks ──────────────────────────────────── */
 .sl-markdown-content :not(pre) > code {
   border: 1px solid color-mix(in hsl, var(--sl-color-accent) 28%, var(--sl-color-hairline));
   border-radius: 0.4rem;
@@ -301,6 +283,7 @@ html:not([data-has-hero]) .sl-markdown-content h3 {
   box-shadow: 0 12px 32px color-mix(in hsl, var(--sl-color-accent-low) 26%, transparent);
 }
 
+/* ── Tables ──────────────────────────────────────────────────── */
 .sl-markdown-content table {
   display: table;
   width: 100%;
@@ -312,22 +295,9 @@ html:not([data-has-hero]) .sl-markdown-content h3 {
   border: 1px solid var(--sl-color-hairline);
 }
 
-.sl-markdown-content :is(th, td) {
-  padding: 0.6rem 0.9rem;
-}
-
-.sl-markdown-content :is(th:first-child, td:first-child) {
-  width: 9.5rem;
-  padding-inline-start: 0.9rem;
-}
-
-.sl-markdown-content :is(th:nth-child(2), td:nth-child(2)) {
-  width: 15rem;
-}
-
-.sl-markdown-content :is(th:last-child, td:last-child) {
-  padding-inline-end: 0.9rem;
-}
+.sl-markdown-content :is(th, td) { padding: 0.6rem 0.9rem; }
+.sl-markdown-content :is(th:first-child, td:first-child) { width: 9.5rem; }
+.sl-markdown-content :is(th:nth-child(2), td:nth-child(2)) { width: 15rem; }
 
 .sl-markdown-content thead {
   background: color-mix(in hsl, var(--sl-color-accent-low) 24%, transparent);
@@ -339,6 +309,7 @@ html:not([data-has-hero]) .sl-markdown-content h3 {
   border-radius: 0 0.65rem 0.65rem 0;
 }
 
+/* ── Buttons ─────────────────────────────────────────────────── */
 .sl-link-button.primary {
   border-color: color-mix(in hsl, var(--sl-color-accent) 68%, var(--sl-color-black));
   background: linear-gradient(160deg, color-mix(in hsl, var(--sl-color-accent) 92%, white), var(--sl-color-accent));
@@ -350,6 +321,7 @@ html:not([data-has-hero]) .sl-markdown-content h3 {
   background: color-mix(in hsl, var(--sl-color-accent-low) 22%, transparent);
 }
 
+/* ── Hero ────────────────────────────────────────────────────── */
 html[data-has-hero] .hero {
   position: relative;
   overflow: clip;
@@ -373,22 +345,16 @@ html[data-has-hero] .hero::before {
   opacity: 0.6;
 }
 
-html[data-has-hero] .hero .copy {
-  max-width: 46rem;
-}
+html[data-has-hero] .hero .copy { max-width: 46rem; }
 
 html[data-has-hero] .hero .tagline {
   max-width: 60ch;
   color: color-mix(in hsl, var(--sl-color-text) 88%, var(--sl-color-accent-high));
 }
 
-html[data-has-hero] .hero .actions {
-  margin-top: 0.26rem;
-}
+html[data-has-hero] .hero .actions { margin-top: 0.26rem; }
 
-html[data-has-hero] .sl-markdown-content .card-grid {
-  margin-top: 0.82rem;
-}
+html[data-has-hero] .sl-markdown-content .card-grid { margin-top: 0.82rem; }
 
 html[data-has-hero] .sl-markdown-content .card,
 html[data-has-hero] .sl-markdown-content .sl-link-card {
@@ -407,6 +373,7 @@ html[data-has-hero] .sl-markdown-content .sl-link-card:hover {
   box-shadow: 0 10px 24px color-mix(in hsl, var(--sl-color-accent-low) 34%, transparent);
 }
 
+/* ── Home status / command row ───────────────────────────────── */
 html[data-has-hero] .sl-markdown-content .home-status-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -475,12 +442,6 @@ html[data-has-hero] .sl-markdown-content .home-screenshot {
   border-radius: 0.58rem;
   border: 1px solid color-mix(in hsl, var(--sl-color-accent) 26%, var(--sl-color-hairline));
   display: block;
-  transition: transform 170ms ease, box-shadow 170ms ease;
-}
-
-html[data-has-hero] .sl-markdown-content .home-screenshot:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 22px color-mix(in hsl, var(--sl-color-accent-low) 34%, transparent);
 }
 
 html[data-has-hero] .sl-markdown-content .home-screenshot-wrap figcaption {
@@ -489,69 +450,174 @@ html[data-has-hero] .sl-markdown-content .home-screenshot-wrap figcaption {
   color: color-mix(in hsl, var(--sl-color-text) 86%, var(--sl-color-accent-high));
 }
 
+/* ── Terminal preview component ──────────────────────────────── */
+.terminal-preview {
+  font-family: var(--sl-font-mono);
+  font-size: 0.78rem;
+  line-height: 1.45;
+  background: hsl(0, 0%, 4%);
+  border: 1px solid color-mix(in hsl, var(--sl-color-accent) 34%, var(--sl-color-hairline));
+  border-radius: 0.75rem;
+  overflow: hidden;
+  margin: 1rem 0 1.4rem;
+  box-shadow: 0 16px 40px color-mix(in hsl, var(--sl-color-accent-low) 32%, transparent);
+  user-select: none;
+}
+
+.tp-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.38rem 0.9rem;
+  background: color-mix(in hsl, var(--sl-color-accent-low) 36%, hsl(0,0%,5%));
+  border-bottom: 1px solid color-mix(in hsl, var(--sl-color-accent) 22%, var(--sl-color-hairline));
+}
+
+.tp-title { color: var(--sl-color-accent); font-weight: 600; letter-spacing: 0.04em; }
+.tp-time { color: var(--sl-color-gray-3); font-size: 0.72rem; }
+
+.tp-body {
+  display: grid;
+  grid-template-columns: 52% 48%;
+  min-height: 180px;
+}
+
+.tp-list {
+  border-right: 1px solid color-mix(in hsl, var(--sl-color-accent) 18%, var(--sl-color-hairline));
+  padding: 0.55rem 0;
+}
+
+.tp-detail { padding: 0.55rem 0.8rem; }
+
+.tp-section-title {
+  padding: 0 0.8rem 0.35rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+
+.tp-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.22rem 0.8rem;
+  gap: 0.5rem;
+  cursor: default;
+  transition: background 80ms;
+}
+
+.tp-row--selected {
+  background: color-mix(in hsl, var(--sl-color-accent) 16%, transparent);
+}
+
+.tp-row-name {
+  color: var(--sl-color-gray-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.tp-row--selected .tp-row-name { color: var(--sl-color-accent-high); }
+.tp-row-yes { font-weight: 600; flex-shrink: 0; }
+
+.tp-detail-name {
+  color: var(--sl-color-accent-high);
+  font-weight: 600;
+  font-size: 0.82rem;
+  margin-bottom: 0.55rem;
+  line-height: 1.35;
+}
+
+.tp-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3rem 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.tp-kv {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.22rem 0.36rem;
+  background: color-mix(in hsl, var(--sl-color-accent-low) 12%, transparent);
+  border-radius: 0.32rem;
+  border: 1px solid color-mix(in hsl, var(--sl-color-accent) 14%, var(--sl-color-hairline));
+}
+
+.tp-kv span { color: var(--sl-color-gray-3); font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.tp-kv strong { font-weight: 600; font-size: 0.78rem; }
+
+.tp-green { color: hsl(155, 90%, 55%); }
+.tp-red   { color: hsl(355, 85%, 62%); }
+
+.tp-chart {
+  font-size: 0.92rem;
+  color: color-mix(in hsl, var(--sl-color-accent) 72%, transparent);
+  letter-spacing: 0.04em;
+  margin-bottom: 0.5rem;
+  line-height: 1;
+}
+
+.tp-chart-tip { color: var(--sl-color-accent); }
+
+.tp-actions { color: var(--sl-color-gray-3); font-size: 0.7rem; }
+
+.tp-key {
+  display: inline-block;
+  padding: 0.06rem 0.3rem;
+  border: 1px solid color-mix(in hsl, var(--sl-color-accent) 30%, var(--sl-color-hairline));
+  border-radius: 0.28rem;
+  background: color-mix(in hsl, var(--sl-color-accent-low) 20%, transparent);
+  color: var(--sl-color-accent-high);
+  font-weight: 600;
+  margin-right: 0.15rem;
+}
+
+.tp-status {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.3rem 0.9rem;
+  background: color-mix(in hsl, var(--sl-color-accent-low) 20%, hsl(0,0%,4%));
+  border-top: 1px solid color-mix(in hsl, var(--sl-color-accent) 18%, var(--sl-color-hairline));
+  font-size: 0.7rem;
+  color: var(--sl-color-gray-3);
+  gap: 1rem;
+}
+
+.tp-cursor { display: inline-block; width: 0.5ch; }
+
+/* ── Focus ring ──────────────────────────────────────────────── */
 :where(a, button, summary, input, select, textarea):focus-visible {
   outline: 2px solid color-mix(in hsl, var(--sl-color-accent) 88%, white);
   outline-offset: 2px;
   border-radius: 0.4rem;
 }
 
+/* ── Animations ──────────────────────────────────────────────── */
 @media (prefers-reduced-motion: no-preference) {
-  html[data-has-hero] .hero {
-    animation: sl-hero-enter 320ms ease-out;
-  }
-
-  html[data-has-hero] .sl-markdown-content .card-grid > * {
-    animation: sl-rise 240ms ease-out;
-  }
+  html[data-has-hero] .hero { animation: sl-hero-enter 320ms ease-out; }
+  html[data-has-hero] .sl-markdown-content .card-grid > * { animation: sl-rise 240ms ease-out; }
 }
 
 @keyframes sl-hero-enter {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes sl-rise {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ── Responsive ──────────────────────────────────────────────── */
 @media (max-width: 50rem) {
-  html[data-has-hero] .hero {
-    border-radius: 0.75rem;
-    padding: 1rem;
-  }
+  html[data-has-hero] .hero { border-radius: 0.75rem; padding: 1rem; }
 
-  .sl-markdown-content .guide-kpi-grid {
-    grid-template-columns: 1fr;
-    gap: 0.45rem;
-  }
-
+  .sl-markdown-content .guide-kpi-grid,
   html[data-has-hero] .sl-markdown-content .home-status-grid {
     grid-template-columns: 1fr;
     gap: 0.45rem;
-  }
-
-  html[data-has-hero] .sl-markdown-content .home-command-row {
-    margin-top: 0.25rem;
-  }
-
-  html[data-has-hero] .sl-markdown-content .home-screenshot-wrap {
-    margin-top: 1rem;
-    padding: 0.4rem;
   }
 
   .sl-markdown-content table {
@@ -563,18 +629,20 @@ html[data-has-hero] .sl-markdown-content .home-screenshot-wrap figcaption {
   }
 
   .sl-markdown-content :is(th:first-child, td:first-child),
-  .sl-markdown-content :is(th:nth-child(2), td:nth-child(2)) {
-    width: auto;
-  }
+  .sl-markdown-content :is(th:nth-child(2), td:nth-child(2)) { width: auto; }
+
+  .tp-body { grid-template-columns: 1fr; }
+  .tp-detail { display: none; }
 }
           `,
         },
       ],
       sidebar: [
-        { label: "Overview", link: "/" },
+        { label: "Home", link: "/" },
+        { label: "Introduction", link: "/introduction/" },
         {
-          label: "Start Here",
-          items: ["getting-started"],
+          label: "Getting Started",
+          items: ["getting-started", "installation"],
         },
         {
           label: "User Guide",
@@ -588,6 +656,18 @@ html[data-has-hero] .sl-markdown-content .home-screenshot-wrap figcaption {
           ],
         },
         {
+          label: "CLI Reference",
+          items: ["cli/overview"],
+        },
+        {
+          label: "MCP Server",
+          items: ["mcp/overview", "mcp/tools"],
+        },
+        {
+          label: "Telegram Bot",
+          items: ["telegram/setup"],
+        },
+        {
           label: "Architecture",
           items: ["architecture/overview", "architecture/state-and-keyboard"],
         },
@@ -599,6 +679,11 @@ html[data-has-hero] .sl-markdown-content .home-screenshot-wrap figcaption {
           label: "Reference",
           items: ["reference/keybindings", "reference/persistence", "reference/types-and-utils"],
         },
+        {
+          label: "Deployment",
+          items: ["deployment/cloudflare"],
+        },
+        { label: "Changelog", link: "/changelog/" },
       ],
     }),
   ],

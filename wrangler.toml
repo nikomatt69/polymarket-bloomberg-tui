@@ -1,0 +1,6 @@
+name = "polytui-dashboard-docs"
+compatibility_date = "2025-05-20"
+pages_build_output_dir = "docs/dist"
+
+[build]
+command = "bun install && bun run docs:build"
