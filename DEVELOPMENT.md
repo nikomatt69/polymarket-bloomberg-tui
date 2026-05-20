@@ -7,7 +7,7 @@
 ## Project Structure Summary
 
 ```
-polymarket-bloomberg-tui/
+polytui-dashboard/
 ├── src/
 │   ├── index.ts                      # Entry point - TUI renderer
 │   ├── app.tsx                       # Root component - orchestration

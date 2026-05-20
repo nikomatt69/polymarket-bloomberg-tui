@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP="polymarket-bloomberg-tui"
+APP="polytui-dashboard"
 REPO_OWNER="nikomatt69"
-REPO_NAME="polymarket-bloomberg-tui"
-INSTALL_DIR="${POLYMARKET_BLOOMBERG_TUI_INSTALL_DIR:-$HOME/.polymarket-bloomberg-tui/bin}"
+REPO_NAME="polytui-dashboard"
+INSTALL_DIR="${POLYTUI_DASHBOARD_INSTALL_DIR:-$HOME/.polytui-dashboard/bin}"
 
 MUTED='\033[0;2m'
 RED='\033[0;31m'

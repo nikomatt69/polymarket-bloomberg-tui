@@ -1,5 +1,5 @@
 {
-  "name": "polymarket-bloomberg-tui",
+  "name": "polytui-dashboard",
   "version": "1.0.1",
   "description": "Bloomberg-style TUI for monitoring Polymarket prediction markets",
   "type": "module",
